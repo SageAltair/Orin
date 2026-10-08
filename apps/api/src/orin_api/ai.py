@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from typing import Any, Protocol
+from uuid import UUID
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -365,8 +366,9 @@ class IntentParameters(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=240)
     description: str | None = None
     due_at: str | None = None
-    project_id: str | None = None
-    task_id: str | None = None
+    project_id: UUID | None = None
+    task_id: UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
     fields_to_update: dict[str, Any] | None = None
     name: str | None = Field(default=None, min_length=1, max_length=160)
     status: str | None = None
@@ -385,8 +387,8 @@ class AIIntent(BaseModel):
         allowed_fields = {
             IntentName.RESPOND: {"response"},
             IntentName.CREATE_TASK: {"title", "description", "due_at", "project_id"},
-            IntentName.UPDATE_TASK: {"task_id", "fields_to_update"},
-            IntentName.COMPLETE_TASK: {"task_id"},
+            IntentName.UPDATE_TASK: {"task_id", "task_reference", "fields_to_update"},
+            IntentName.COMPLETE_TASK: {"task_id", "task_reference"},
             IntentName.CREATE_PROJECT: {"name", "description"},
             IntentName.LIST_PROJECTS: {"limit", "status"},
             IntentName.LIST_TASKS: {"limit", "status", "project_id"},
@@ -398,12 +400,13 @@ class AIIntent(BaseModel):
             raise ValueError(f"Unexpected parameters for {self.intent.value}")
         required = {
             IntentName.RESPOND: ("response",),
-            IntentName.CREATE_TASK: ("title",), IntentName.UPDATE_TASK: ("task_id", "fields_to_update"),
-            IntentName.COMPLETE_TASK: ("task_id",), IntentName.CREATE_PROJECT: ("name",),
+            IntentName.CREATE_TASK: ("title",), IntentName.CREATE_PROJECT: ("name",),
         }.get(self.intent, ())
         for field in required:
             if getattr(self.parameters, field) is None:
                 raise ValueError(f"{field} is required for {self.intent.value}")
+        if self.intent in (IntentName.UPDATE_TASK, IntentName.COMPLETE_TASK) and not (self.parameters.task_id or self.parameters.task_reference):
+            raise ValueError("A task identifier or reference is required")
         if self.intent == IntentName.UPDATE_TASK:
             allowed = {"title", "description", "due_at", "project_id", "status", "priority"}
             fields = self.parameters.fields_to_update or {}
@@ -414,7 +417,7 @@ class AIIntent(BaseModel):
         return self
 
 
-SYSTEM_INSTRUCTIONS = "Interpret the user's request as one supported Orin intent. Return only JSON with intent, confidence, parameters. For greetings, thanks, or conversational messages that do not request workspace action, use RESPOND with a brief friendly response. Never invent identifiers or intents. Supported: RESPOND(response), CREATE_TASK(title,description,due_at,project_id), UPDATE_TASK(task_id,fields_to_update), COMPLETE_TASK(task_id), CREATE_PROJECT(name,description), LIST_PROJECTS, LIST_TASKS, GET_ACTIVITY. Otherwise use UNSUPPORTED."
+SYSTEM_INSTRUCTIONS = "Interpret the user's request as one supported Orin intent. Return only JSON with intent, confidence, parameters. For greetings, thanks, or conversational messages that do not request workspace action, use RESPOND with a brief friendly response. Never invent identifiers. task_id and project_id must be UUIDs explicitly provided by the user; never place a name, title, or invented value in an ID field. For update/complete requests, use task_reference with the task's exact name when no UUID was provided. Supported: RESPOND(response), CREATE_TASK(title,description,due_at,project_id), UPDATE_TASK(task_id or task_reference,fields_to_update), COMPLETE_TASK(task_id or task_reference), CREATE_PROJECT(name,description), LIST_PROJECTS, LIST_TASKS, GET_ACTIVITY. Otherwise use UNSUPPORTED."
 
 
 def _parse_intent(raw: str) -> AIIntent:
@@ -422,24 +425,27 @@ def _parse_intent(raw: str) -> AIIntent:
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, re.IGNORECASE | re.DOTALL)
     if fenced:
         text = fenced.group(1)
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        decoder = json.JSONDecoder()
-        for index, char in enumerate(text):
-            if char == "{":
-                try:
-                    payload, _ = decoder.raw_decode(text[index:])
-                    break
-                except json.JSONDecodeError:
-                    continue
-        else:
-            raise ValueError("No JSON object in model response")
+    payload = json.loads(text)
     if isinstance(payload, dict) and isinstance(payload.get("parameters"), dict):
         payload["parameters"] = {
             key: value for key, value in payload["parameters"].items() if value is not None
         }
     return AIIntent.model_validate_json(json.dumps(payload))
+
+
+def _validate_model_ids(proposal: AIIntent, command: str) -> AIIntent:
+    """Only accept model-proposed UUIDs that the user actually supplied."""
+    supplied = command.casefold()
+    params = proposal.parameters
+    identifiers = [params.task_id, params.project_id]
+    if params.fields_to_update and params.fields_to_update.get("project_id"):
+        try:
+            identifiers.append(UUID(str(params.fields_to_update["project_id"])))
+        except ValueError as exc:
+            raise ValueError("project_id must be a UUID supplied by the user") from exc
+    if any(identifier is not None and str(identifier).casefold() not in supplied for identifier in identifiers):
+        raise ValueError("Model-proposed identifiers must be present in the user's request")
+    return proposal
 
 
 class AIInterpreter:
@@ -456,7 +462,7 @@ class AIInterpreter:
         schema = AIIntent.model_json_schema()
         raw = self.provider.structured_output(system=SYSTEM_INSTRUCTIONS, user=command, model=self.model, schema=schema)
         try:
-            return _parse_intent(raw)
+            return _validate_model_ids(_parse_intent(raw), command)
         except (ValidationError, ValueError, TypeError) as first_error:
             logger.warning(
                 "AI provider returned an invalid proposal; requesting one schema repair",
@@ -470,7 +476,7 @@ class AIInterpreter:
                 system=SYSTEM_INSTRUCTIONS, user=repair_request, model=self.model, schema=schema
             )
             try:
-                return _parse_intent(repaired)
+                return _validate_model_ids(_parse_intent(repaired), command)
             except (ValidationError, ValueError, TypeError) as exc:
                 logger.warning(
                     "AI provider proposal remained invalid after schema repair",

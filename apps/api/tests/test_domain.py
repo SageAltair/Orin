@@ -182,3 +182,70 @@ def test_command_pipeline_returns_provider_availability_message(client: TestClie
     response = client.post("/api/v1/commands", json={"text": "How are you?"})
     assert response.status_code == 503
     assert response.json()["detail"] == "The AI provider is temporarily unavailable. Please retry shortly."
+
+
+def test_command_completion_resolves_only_the_users_exact_task_name(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.models import Task
+
+    task_response = client.post("/api/v1/tasks", json={"title": "Website"})
+    assert task_response.status_code == 201
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            return AIIntent.model_validate_json(
+                '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Mark the website task as complete"})
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "done"
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "done"
+    activities = client.get("/api/v1/activity").json()
+    activity = next(item for item in activities if item["summary"] == "Completed task: Website")
+    assert activity["intent"] == "COMPLETE_TASK"
+    assert activity["result_status"] == "succeeded"
+    assert activity["command_id"] == response.json()["command_id"]
+
+
+def test_task_reference_normalization_ignores_conversational_wrappers() -> None:
+    from orin_api.domain_router import _normalize_task_reference
+
+    assert _normalize_task_reference("the Website task") == _normalize_task_reference("Website")
+    assert _normalize_task_reference('Task called "Website"') == _normalize_task_reference("Website")
+
+
+def test_command_rejects_task_id_owned_by_another_user(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.database import get_session
+    from orin_api.models import Task, User
+
+    session_override = app.dependency_overrides[get_session]
+    with next(session_override()) as session:
+        other = User(email="other@example.test", password_hash="test-hash", display_name="Other")
+        session.add(other)
+        session.flush()
+        foreign_task = Task(owner_id=other.id, title="Private task")
+        session.add(foreign_task)
+        session.commit()
+        task_id = foreign_task.id
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            return AIIntent.model_validate_json(
+                '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_id":"' + str(task_id) + '"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "complete private task"})
+    assert response.status_code == 404
+    assert client.get("/api/v1/tasks").json() == []

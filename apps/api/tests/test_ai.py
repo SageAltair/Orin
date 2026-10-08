@@ -27,6 +27,7 @@ def test_structured_intent_accepts_supported_proposal() -> None:
     {"intent": "CREATE_TASK", "confidence": 1.1, "parameters": {"title": "x"}},
     {"intent": "CREATE_TASK", "confidence": 0.9, "parameters": {}},
     {"intent": "UPDATE_TASK", "confidence": 0.9, "parameters": {"task_id": "not-a-uuid", "fields_to_update": {"sql": "DROP"}}},
+    {"intent": "COMPLETE_TASK", "confidence": 0.9, "parameters": {"task_id": "Website"}},
     {"intent": "LIST_TASKS", "confidence": 0.2, "parameters": {}},
 ])
 def test_structured_intent_rejects_invalid_proposals(payload: dict[str, object]) -> None:
@@ -97,6 +98,52 @@ def test_interpreter_rejects_unrepairable_output() -> None:
     with pytest.raises(AIProviderError, match="invalid response") as raised:
         AIInterpreter(provider, "model").interpret("Help me figure this out")
     assert raised.value.category == "invalid_response"
+
+
+def test_intent_supports_name_reference_for_task_updates() -> None:
+    proposal = AIIntent.model_validate_json(
+        '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'
+    )
+    assert proposal.parameters.task_reference == "Website"
+
+
+def test_interpreter_rejects_json_with_trailing_model_text() -> None:
+    provider = FakeProvider([
+        '{"intent":"LIST_TASKS","confidence":0.9,"parameters":{}} arbitrary text',
+        '{"intent":"UNSUPPORTED","confidence":0.9,"parameters":{}}',
+    ])
+    proposal = AIInterpreter(provider, "model").interpret("show tasks")
+    assert proposal.intent == IntentName.UNSUPPORTED
+
+
+def test_interpreter_rejects_model_generated_shell_command() -> None:
+    provider = FakeProvider(
+        '{"intent":"CREATE_TASK","confidence":0.9,"parameters":{"title":"x","shell":"rm -rf /"}}'
+    )
+    with pytest.raises(AIProviderError):
+        AIInterpreter(provider, "model").interpret("create a task")
+
+
+def test_interpreter_repairs_model_generated_uuid_and_uses_task_reference() -> None:
+    provider = FakeProvider([
+        '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_id":"123e4567-e89b-12d3-a456-426614174000"}}',
+        '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}',
+    ])
+    proposal = AIInterpreter(provider, "model").interpret("Complete the Website task")
+    assert proposal.parameters.task_id is None
+    assert proposal.parameters.task_reference == "Website"
+    assert provider.calls == 2
+
+
+def test_interpreter_repairs_model_generated_uuid_and_uses_task_reference() -> None:
+    provider = FakeProvider([
+        '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_id":"123e4567-e89b-12d3-a456-426614174000"}}',
+        '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}',
+    ])
+    proposal = AIInterpreter(provider, "model").interpret("Complete the Website task")
+    assert proposal.parameters.task_id is None
+    assert proposal.parameters.task_reference == "Website"
+    assert provider.calls == 2
 
 
 def test_interpreter_preserves_provider_failure_during_schema_repair() -> None:

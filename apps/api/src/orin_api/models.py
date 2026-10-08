@@ -296,12 +296,15 @@ class Activity(CreatedAtMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    command_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("commands.id", ondelete="SET NULL"))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
     task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"))
     activity_type: Mapped[ActivityType] = mapped_column(enum_column(ActivityType, "activity_type"), nullable=False)
     summary: Mapped[str] = mapped_column(String(240), nullable=False)
+    intent: Mapped[str | None] = mapped_column(String(40))
+    result_status: Mapped[str] = mapped_column(String(20), nullable=False, default="succeeded", server_default="succeeded")
 
 
 class AuthSession(CreatedAtMixin, Base):

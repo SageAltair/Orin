@@ -9,7 +9,7 @@ export class ApiError extends Error {
 export interface User { id: string; email: string; display_name: string; created_at: string }
 export interface Task { id: string; title: string; description: string | null; status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"; priority: "low" | "normal" | "high" | "urgent"; due_at: string | null; project_id: string | null; created_at: string; updated_at: string }
 export interface Project { id: string; name: string; description: string | null; status: string; created_at: string; updated_at: string }
-export interface Activity { id: string; summary: string; activity_type: string; created_at: string; task_id: string | null; project_id: string | null }
+export interface Activity { id: string; summary: string; activity_type: string; created_at: string; task_id: string | null; project_id: string | null; command_id?: string | null; intent?: string | null; result_status?: string }
 export interface Preferences { density: "comfortable" | "compact"; theme: "light" | "dark" | "system"; locale: string; visible_capabilities: string[]; hidden_capabilities: string[]; pinned_capabilities: string[] }
 export interface CommandResult { command_id: string; status: string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string }
 

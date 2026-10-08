@@ -8,6 +8,12 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
 
   const email = `orin-docker-e2e-${Date.now()}@example.com`;
   const password = `Orin-smoke-${crypto.randomUUID()}!`;
+  const commandResults: Array<{ intent?: string; status: string; result: unknown }> = [];
+  page.on("response", async response => {
+    if (response.url().includes("/api/v1/commands") && response.request().method() === "POST") {
+      try { commandResults.push(await response.json() as { intent?: string; status: string; result: unknown }); } catch { /* response may be an error */ }
+    }
+  });
   await page.goto("http://localhost:5273");
   const indexPath = resolve(process.cwd(), "index.html");
   const originalIndex = await readFile(indexPath, "utf8");
@@ -33,16 +39,53 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
   await ask.fill("hey");
   await page.getByRole("button", { name: "Send to Orin" }).click();
   await expect(page.locator(".command-message, .success-message, .api-error").filter({ hasText: /.+/ })).not.toContainText("AI returned an invalid command proposal");
-  await expect(page.locator(".command-result")).toContainText('"response"', { timeout: 60_000 });
+  await expect(page.locator(".command-result")).toContainText("Hey! What can I help you with?", { timeout: 60_000 });
 
   await ask.fill("How are you today?");
   await page.getByRole("button", { name: "Send to Orin" }).click();
-  await expect(page.locator(".command-result")).toContainText('"intent": "RESPOND"', { timeout: 60_000 });
+  await expect(page.locator(".command-result")).toBeVisible({ timeout: 60_000 });
+  await expect(page.locator(".command-result")).not.toBeEmpty();
+
+  const projectName = `Project ${Date.now()}`;
+  await ask.fill(`Create a project called ${projectName}`);
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(projectName, { timeout: 60_000 });
+
+  await ask.fill("Show me my projects");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(projectName, { timeout: 60_000 });
 
   const aiTaskTitle = `AI task ${Date.now()}`;
   await ask.fill(`Create a task called ${aiTaskTitle}`);
   await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(aiTaskTitle, { timeout: 60_000 });
   await expect(page.getByRole("textbox", { name: `Edit ${aiTaskTitle}` })).toBeVisible({ timeout: 60_000 });
+
+  await ask.fill("What tasks do I have?");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(aiTaskTitle, { timeout: 60_000 });
+
+  const updatedTaskTitle = `${aiTaskTitle} revised`;
+  await ask.fill(`Update my ${aiTaskTitle} task by changing its title to ${updatedTaskTitle}`);
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(updatedTaskTitle, { timeout: 60_000 });
+
+  await ask.fill(`Mark the ${updatedTaskTitle} task as complete`);
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText("done", { timeout: 60_000 });
+
+  await ask.fill("Show me my recent activity");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText(`Completed task: ${updatedTaskTitle}`, { timeout: 60_000 });
+
+  await ask.fill("Delete my entire database");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".api-error")).toContainText("not supported", { timeout: 60_000 });
+
+  await expect.poll(() => commandResults.map(result => result.intent)).toEqual([
+    "RESPOND", "RESPOND", "CREATE_PROJECT", "LIST_PROJECTS", "CREATE_TASK", "LIST_TASKS",
+    "UPDATE_TASK", "COMPLETE_TASK", "GET_ACTIVITY", "UNSUPPORTED",
+  ]);
 
   await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
   const manualTitle = `Manual task ${Date.now()}`;

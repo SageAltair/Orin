@@ -102,11 +102,14 @@ class ActivityRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    command_id: uuid.UUID | None
     actor_user_id: uuid.UUID | None
     project_id: uuid.UUID | None
     task_id: uuid.UUID | None
     activity_type: str
     summary: str
+    intent: str | None
+    result_status: str
     created_at: datetime
 
 

@@ -134,6 +134,8 @@ def add_activity(
     summary: str,
     project_id: uuid.UUID | None = None,
     task_id: uuid.UUID | None = None,
+    command_id: uuid.UUID | None = None,
+    intent: str | None = None,
 ) -> None:
     session.add(Activity(
         user_id=user_id,
@@ -142,6 +144,9 @@ def add_activity(
         summary=summary,
         project_id=project_id,
         task_id=task_id,
+        command_id=command_id,
+        intent=intent,
+        result_status="succeeded",
     ))
 
 
