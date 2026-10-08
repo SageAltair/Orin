@@ -3,6 +3,10 @@ import { expect, test, type Page } from "@playwright/test";
 async function mockApi(page: Page) {
   let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
   const tasks: Record<string, unknown>[] = [];
+  const projects: Record<string, unknown>[] = [];
+  const memories: Record<string, unknown>[] = [];
+  const environment: Record<string, unknown>[] = [];
+  const focusSessions: Record<string, unknown>[] = [];
   const devices: Record<string, unknown>[] = [];
   const workerJobs: Record<string, Record<string, unknown>[]> = {};
   const approvals: Record<string, unknown>[] = [];
@@ -14,6 +18,17 @@ async function mockApi(page: Page) {
     if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     if (pathname.endsWith("/auth/email") && route.request().method() === "POST") return route.fulfill({ json: { id: "user-1", email: "updated@example.com", display_name: "Morgan", created_at: "2026-10-08T00:00:00Z" } });
     if (pathname.endsWith("/auth/password") || pathname.includes("/auth/sessions/")) return route.fulfill({ status: 204 });
+    if (pathname === "/api/v1/environment/preferences" && route.request().method() === "GET") return route.fulfill({ json: environment });
+    if (pathname === "/api/v1/environment/preferences" && route.request().method() === "DELETE") { environment.splice(0); return route.fulfill({ status: 204 }); }
+    if (pathname === "/api/v1/environment/preferences" && route.request().method() === "PUT") { const item = await route.request().postDataJSON() as Record<string, unknown>; const existing = environment.findIndex(value => value.item === item.item && value.surface === item.surface); if (existing >= 0) environment.splice(existing, 1); environment.push(item); return route.fulfill({ json: item }); }
+    if (pathname === "/api/v1/memories" && route.request().method() === "GET") return route.fulfill({ json: memories });
+    if (pathname === "/api/v1/memories" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const memory = { ...item, type: item.memory_type, id: `memory-${memories.length + 1}`, archived: false, updated_at: "2026-10-08T00:00:00Z" }; memories.push(memory); return route.fulfill({ status: 201, json: memory }); }
+    if (/\/api\/v1\/memories\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const id = pathname.split("/").at(-1); const memory = memories.find(item => item.id === id); if (memory) Object.assign(memory, await route.request().postDataJSON()); return route.fulfill({ json: memory }); }
+    if (/\/api\/v1\/memories\/[^/]+$/.test(pathname) && route.request().method() === "DELETE") { const index = memories.findIndex(item => item.id === pathname.split("/").at(-1)); if (index >= 0) memories.splice(index, 1); return route.fulfill({ status: 204 }); }
+    if (pathname === "/api/v1/focus-sessions" && route.request().method() === "GET") return route.fulfill({ json: focusSessions });
+    if (pathname === "/api/v1/focus-sessions" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const focus = { ...item, id: "focus-1", status: "active", ends_at: "2026-10-08T02:00:00Z" }; focusSessions.push(focus); return route.fulfill({ status: 201, json: focus }); }
+    if (/\/api\/v1\/focus-sessions\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const session = focusSessions[0]; if (session) Object.assign(session, { status: (await route.request().postDataJSON() as { action: string }).action === "cancel" ? "cancelled" : "paused" }); return route.fulfill({ json: session }); }
+    if (/\/api\/v1\/projects\/[^/]+\/context$/.test(pathname)) return route.fulfill({ json: { project: {}, progress: { completed_tasks: 0, total_tasks: 0, percentage: null }, tasks: [], blockers: [], activity: [], knowledge: memories, next_actions: [], active_focus: null, agents: [], files: [] } });
     if (pathname === "/api/v1/approvals" && route.request().method() === "GET") return route.fulfill({ json: approvals });
     if (pathname.includes("/approvals/") && route.request().method() === "POST") {
       if (pathname.endsWith("/decision")) {
@@ -66,7 +81,10 @@ async function mockApi(page: Page) {
       tasks.push(task);
       return route.fulfill({ status: 201, json: task });
     }
-    if (["/projects", "/activity"].some(path => pathname.endsWith(path))) return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/projects" && route.request().method() === "GET") return route.fulfill({ json: projects });
+    if (pathname === "/api/v1/projects" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const project = { ...item, id: `project-${projects.length + 1}`, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }; projects.push(project); return route.fulfill({ status: 201, json: project }); }
+    if (/\/api\/v1\/projects\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const project = projects.find(item => item.id === pathname.split("/").at(-1)); if (project) Object.assign(project, await route.request().postDataJSON()); return route.fulfill({ json: project }); }
+    if (pathname.endsWith("/activity")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 }
@@ -141,4 +159,42 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
   await expect(addTaskButton).toHaveText("");
   await addTaskButton.click();
   await expect(page.getByRole("textbox", { name: "Edit Manual task" })).toBeVisible();
+});
+
+test("project intelligence stores knowledge and starts a persistent focus session", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("checkbox", { name: "Show Projects" }).check();
+  await page.getByRole("navigation").getByRole("button", { name: "Projects" }).click();
+  await page.getByRole("textbox", { name: "Project name" }).fill("The Small Voice");
+  await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByRole("heading", { name: "The Small Voice" })).toBeVisible();
+  await page.getByLabel("Objective", { exact: true }).fill("Help people begin and grow");
+  await page.getByRole("button", { name: "Save project" }).click();
+  await page.getByLabel("Focus objective").fill("Review presentation cards");
+  await page.getByLabel("Duration").selectOption("120");
+  await page.getByRole("button", { name: "Start focus" }).click();
+  await expect(page.getByRole("region", { name: "Active focus session" })).toContainText("Review presentation cards");
+  await page.getByLabel("Title", { exact: true }).last().fill("Database decision");
+  await page.getByLabel("Details").fill("Use PostgreSQL for consistent project data.");
+  await page.getByRole("button", { name: "Save memory" }).click();
+  await expect(page.getByText("Database decision · decision")).toBeVisible();
+});
+
+test("adaptive navigation can minimize, hide, recover, and reset tools", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences" }).click();
+  const projects = page.getByRole("combobox", { name: "projects", exact: true });
+  await projects.selectOption("minimized");
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveClass(/minimized/);
+  await projects.selectOption("hidden");
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveCount(0);
+  await projects.selectOption("prioritized");
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
+  await page.getByRole("button", { name: "Reset layout" }).click();
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveCount(0);
 });

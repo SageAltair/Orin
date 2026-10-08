@@ -32,6 +32,7 @@ button:disabled { cursor: not-allowed; }
 .nav-icon { display: grid; width: 17px; place-items: center; color: #828e85; font-size: 16px; }
 .active .nav-icon { color: var(--accent); }
 .tiny-pin { margin-left: auto; color: var(--accent); }
+.nav-link.minimized { min-height: 29px; font-size: 11px; opacity: .76; }
 .nav-empty { padding: 0 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .sidebar-bottom { margin-top: auto; }
 .settings-link { margin-bottom: 11px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 14px; }
@@ -190,3 +191,21 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   .page-footer { gap: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+/* Project intelligence and the persistent focus bar extend the existing workspace surfaces. */
+.focus-environment { display: flex; align-items: center; gap: 1rem; padding: .65rem 1.5rem; border-bottom: 1px solid var(--line); background: var(--hover); color: var(--soft); font-size: .82rem; }
+.focus-environment strong { color: var(--text); }
+.focus-environment div { display: flex; gap: .4rem; margin-left: auto; }
+.project-workspace { display: grid; gap: 1rem; }
+.project-picker, .project-workspace label, .workspace-settings label { display: grid; gap: .4rem; color: var(--soft); font-size: .83rem; }
+.project-heading { padding: 1.1rem 0; }
+.project-heading h2 { margin: .3rem 0; color: var(--text); }
+.project-workspace progress { width: 100%; height: .6rem; accent-color: var(--accent); }
+.project-workspace ul { margin: .6rem 0; padding-left: 1.3rem; color: var(--soft); }
+.project-workspace li { margin: .4rem 0; }
+.project-workspace textarea, .workspace-settings textarea, .workspace-settings input, .workspace-settings select { max-width: 100%; }
+.workspace-settings { display: grid; gap: .8rem; }
+.workspace-settings .inline-check { display: flex; align-items: center; }
+.workspace-settings .inline-check input { width: auto; }
+.project-workspace .settings-section { display: grid; gap: .8rem; margin-top: 1rem; }
+.project-workspace .data-row p, .workspace-settings .data-row p { white-space: pre-wrap; }
+@media (max-width: 600px) { .focus-environment { align-items: flex-start; flex-direction: column; } .focus-environment div { margin-left: 0; } }

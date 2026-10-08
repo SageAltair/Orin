@@ -5,6 +5,7 @@ export type Theme = "light" | "dark" | "system";
 export interface UserPreferences {
   visibleCapabilities: CapabilityId[];
   hiddenCapabilities: CapabilityId[];
+  minimizedCapabilities: CapabilityId[];
   pinnedCapabilities: CapabilityId[];
   density: Density;
   theme: Theme;
@@ -31,6 +32,7 @@ export const capabilities: Capability[] = [
 export const defaultPreferences: UserPreferences = {
   visibleCapabilities: ["home", "tasks"],
   hiddenCapabilities: ["projects", "activity", "settings"],
+  minimizedCapabilities: [],
   pinnedCapabilities: ["home", "tasks"],
   density: "comfortable",
   theme: "light",
@@ -42,7 +44,8 @@ export function getNavigationCapabilities(granted: Capability[], preferences: Us
   const visible = new Set(preferences.visibleCapabilities);
   const pinned = new Set(preferences.pinnedCapabilities);
   return granted.filter((capability) => visible.has(capability.id))
-    .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)));
+    .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) ||
+      Number(preferences.minimizedCapabilities.includes(a.id)) - Number(preferences.minimizedCapabilities.includes(b.id)));
 }
 
 export function normalizePreferences(value: unknown): UserPreferences {
@@ -56,6 +59,7 @@ export function normalizePreferences(value: unknown): UserPreferences {
   return {
     visibleCapabilities,
     hiddenCapabilities: capabilities.map(({ id }) => id).filter((id) => !visibleCapabilities.includes(id)),
+    minimizedCapabilities: ids(candidate.minimizedCapabilities, defaultPreferences.minimizedCapabilities).filter((id) => visibleCapabilities.includes(id)),
     pinnedCapabilities: ids(candidate.pinnedCapabilities, defaultPreferences.pinnedCapabilities).filter((id) => visibleCapabilities.includes(id)),
     density: candidate.density === "compact" ? "compact" : "comfortable",
     theme: candidate.theme === "dark" || candidate.theme === "system" ? candidate.theme : "light",
