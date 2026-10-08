@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -10,6 +14,9 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from orin_api.config import Settings
+
+
+logger = logging.getLogger(__name__)
 
 
 class AITaskType(StrEnum):
@@ -35,6 +42,138 @@ MODEL_REGISTRY: dict[str, ModelInfo] = {}
 
 class AIProviderError(Exception):
     """Safe application-level error for provider failures."""
+
+    def __init__(self, message: str, *, category: str = "provider_error") -> None:
+        super().__init__(message)
+        self.category = category
+
+
+def _error_details(response: httpx.Response) -> tuple[str, str]:
+    """Extract stable, non-secret provider error fields from common API formats."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return "", ""
+    error = payload.get("error", {}) if isinstance(payload, dict) else {}
+    if isinstance(error, str):
+        return error[:160], ""
+    if not isinstance(error, dict):
+        return "", ""
+    code = error.get("code") or error.get("type") or error.get("status") or ""
+    message = error.get("message") or ""
+    return str(code)[:160], str(message)[:320]
+
+
+def _provider_failure(provider: str, model: str, exc: Exception, attempt: int, api_key: str = "") -> AIProviderError:
+    response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+    status_code = response.status_code if response is not None else None
+    code, detail = _error_details(response) if response is not None else ("", "")
+    if api_key:
+        detail = detail.replace(api_key, "[REDACTED]")
+    searchable = f"{code} {detail}".lower()
+    quota = any(token in searchable for token in ("quota", "billing", "insufficient_credit", "credit balance"))
+
+    if quota:
+        category = "quota_exceeded"
+        message = "The configured AI provider has no available quota. Check its billing or usage limits."
+    elif status_code == 429:
+        category = "rate_limited"
+        message = "The AI provider is rate limiting requests. Please retry shortly."
+    elif isinstance(exc, (httpx.TimeoutException, TimeoutError)):
+        category = "timeout"
+        message = "The AI provider timed out. Please retry shortly."
+    elif status_code in (401, 403):
+        category = "authentication"
+        message = "The AI provider rejected its configured credentials or access. Check provider settings."
+    elif status_code is not None and status_code >= 500:
+        category = "provider_unavailable"
+        message = "The AI provider is temporarily unavailable. Please retry shortly."
+    elif status_code is not None:
+        category = "request_rejected"
+        message = "The AI provider rejected the request. Check the configured model and provider settings."
+    elif isinstance(exc, httpx.TransportError):
+        category = "connection_error"
+        message = "The AI provider could not be reached. Please retry shortly."
+    else:
+        category = "invalid_response"
+        message = "The AI provider returned an invalid response. Please retry shortly."
+
+    log_data = {
+        "provider": provider,
+        "model": model,
+        "category": category,
+        "status_code": status_code,
+        "provider_error_code": code,
+        "provider_error_message": detail,
+        "attempt": attempt,
+        "request_id": response.headers.get("x-request-id") if response is not None else None,
+    }
+    logger.warning(
+        "AI provider request failed: %s",
+        json.dumps(log_data, sort_keys=True),
+        extra=log_data,
+    )
+    return AIProviderError(message, category=category)
+
+
+def _retry_delay(response: httpx.Response | None, attempt: int) -> float | None:
+    """Return a bounded delay for a safe retry, or None when the provider asks us to wait longer."""
+    if response is not None:
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                delay = float(retry_after)
+            except ValueError:
+                match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)s\s*", retry_after, re.IGNORECASE)
+                if match:
+                    delay = float(match.group(1))
+                else:
+                    try:
+                        retry_at = parsedate_to_datetime(retry_after)
+                        if retry_at.tzinfo is None:
+                            retry_at = retry_at.replace(tzinfo=timezone.utc)
+                        delay = max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+                    except (TypeError, ValueError, OverflowError):
+                        return None
+            return delay if 0 <= delay <= 10 else None
+        reset = response.headers.get("x-ratelimit-reset-requests") or response.headers.get("x-ratelimit-reset")
+        if reset:
+            match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)s\s*", reset, re.IGNORECASE)
+            if match:
+                delay = float(match.group(1))
+                return delay if 0 <= delay <= 10 else None
+    return min(0.25 * (2 ** (attempt - 1)), 1.0)
+
+
+def _post_with_retry(url: str, *, provider: str, model: str, api_key: str = "", **kwargs: Any) -> httpx.Response:
+    """Retry only transient inference failures; inference requests have no application side effects."""
+    for attempt in range(1, 4):
+        try:
+            response = httpx.post(url, **kwargs)
+            response.raise_for_status()
+            return response
+        except (httpx.HTTPError, TimeoutError) as exc:
+            response = exc.response if isinstance(exc, httpx.HTTPStatusError) else None
+            code, detail = _error_details(response) if response is not None else ("", "")
+            quota = any(token in f"{code} {detail}".lower() for token in ("quota", "billing", "insufficient_credit", "credit balance"))
+            status_code = response.status_code if response is not None else None
+            retryable = (
+                not quota
+                and attempt < 3
+                and (status_code == 429 or status_code == 408 or (status_code is not None and status_code >= 500)
+                     or isinstance(exc, (httpx.TimeoutException, httpx.TransportError, TimeoutError)))
+            )
+            if retryable:
+                delay = _retry_delay(response, attempt)
+                if delay is not None:
+                    logger.info(
+                        "Retrying transient AI provider request",
+                        extra={"provider": provider, "model": model, "status_code": status_code, "attempt": attempt},
+                    )
+                    time.sleep(delay)
+                    continue
+            raise _provider_failure(provider, model, exc, attempt, api_key) from exc
+    raise AssertionError("unreachable")
 
 
 class AIProvider(Protocol):
@@ -69,16 +208,21 @@ class _OpenAICompatibleProvider:
 
     def generate(self, *, system: str, user: str, model: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
         try:
-            response = httpx.post(
-                f"{self.config.base_url}/chat/completions",
+            response = _post_with_retry(
+                f"{self.config.base_url}/chat/completions", provider=type(self).__name__, model=model, api_key=self.config.api_key,
                 headers={"Authorization": f"Bearer {self.config.api_key}", "HTTP-Referer": "https://orin.local", "X-Title": "Orin"},
                 json={"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}], "temperature": temperature, "max_tokens": max_tokens, "response_format": {"type": "json_object"}},
                 timeout=30.0,
             )
-            response.raise_for_status()
-            return str(response.json()["choices"][0]["message"]["content"])
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise AIProviderError("AI provider request failed") from exc
+            content = response.json()["choices"][0]["message"]["content"]
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("empty or non-text model content")
+            return content
+        except AIProviderError:
+            raise
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            failure = _provider_failure(type(self).__name__, model, exc, 1, self.config.api_key)
+            raise failure from exc
 
     def stream(self, *, system: str, user: str, model: str):
         try:
@@ -97,7 +241,7 @@ class _OpenAICompatibleProvider:
                     if isinstance(content, str) and content:
                         yield content
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise AIProviderError("AI provider streaming request failed") from exc
+            raise _provider_failure(type(self).__name__, model, exc, 1, self.config.api_key) from exc
 
     def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, Any]) -> str:
         schema_instruction = f"Return JSON matching this schema exactly: {json.dumps(schema, separators=(',', ':'))}"
@@ -120,16 +264,22 @@ class GoogleProvider:
 
     def generate(self, *, system: str, user: str, model: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
         try:
-            response = httpx.post(
+            response = _post_with_retry(
                 f"{self.config.base_url}/models/{model}:generateContent",
+                provider=type(self).__name__, model=model, api_key=self.config.api_key,
                 params={"key": self.config.api_key},
                 json={"systemInstruction": {"parts": [{"text": system}]}, "contents": [{"parts": [{"text": user}]}], "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens, "responseMimeType": "application/json"}},
                 timeout=30.0,
             )
-            response.raise_for_status()
-            return str(response.json()["candidates"][0]["content"]["parts"][0]["text"])
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise AIProviderError("AI provider request failed") from exc
+            content = response.json()["candidates"][0]["content"]["parts"][0]["text"]
+            if not isinstance(content, str) or not content.strip():
+                raise ValueError("empty or non-text model content")
+            return content
+        except AIProviderError:
+            raise
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            failure = _provider_failure(type(self).__name__, model, exc, 1, self.config.api_key)
+            raise failure from exc
 
     def stream(self, *, system: str, user: str, model: str):
         try:
@@ -148,7 +298,7 @@ class GoogleProvider:
                     if isinstance(content, str) and content:
                         yield content
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise AIProviderError("AI provider streaming request failed") from exc
+            raise _provider_failure(type(self).__name__, model, exc, 1, self.config.api_key) from exc
 
     def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, Any]) -> str:
         schema_instruction = f"Return JSON matching this schema exactly: {json.dumps(schema, separators=(',', ':'))}"
@@ -308,17 +458,28 @@ class AIInterpreter:
         try:
             return _parse_intent(raw)
         except (ValidationError, ValueError, TypeError) as first_error:
+            logger.warning(
+                "AI provider returned an invalid proposal; requesting one schema repair",
+                extra={"model": self.model, "category": "invalid_response", "attempt": 1},
+            )
             repair_request = (
                 f"The previous response did not match the required schema. Return only one corrected JSON object. "
                 f"Validation issue: {first_error}. User request: {command}"
             )
+            repaired = self.provider.structured_output(
+                system=SYSTEM_INSTRUCTIONS, user=repair_request, model=self.model, schema=schema
+            )
             try:
-                repaired = self.provider.structured_output(
-                    system=SYSTEM_INSTRUCTIONS, user=repair_request, model=self.model, schema=schema
-                )
                 return _parse_intent(repaired)
-            except (AIProviderError, ValidationError, ValueError, TypeError) as exc:
-                raise AIProviderError("AI returned an invalid command proposal") from exc
+            except (ValidationError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "AI provider proposal remained invalid after schema repair",
+                    extra={"model": self.model, "category": "invalid_response", "attempt": 2},
+                )
+                raise AIProviderError(
+                    "The AI provider returned an invalid response. Please retry shortly.",
+                    category="invalid_response",
+                ) from exc
 
 
 class ModelSelector:

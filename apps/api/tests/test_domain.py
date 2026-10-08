@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from orin_api.auth import get_current_user
-from orin_api.ai import AIIntent
+from orin_api.ai import AIIntent, AIProviderError
 from orin_api.config import Settings, get_settings
 from orin_api.domain_router import AIInterpreter
 from orin_api.database import Base, get_session
@@ -163,3 +163,22 @@ def test_command_pipeline_never_interprets_without_ai_configuration(client: Test
     app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="", ai_model="")
     response = client.post("/api/v1/commands", json={"text": "create a task"})
     assert response.status_code == 503
+
+
+def test_command_pipeline_returns_provider_availability_message(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FailedInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            raise AIProviderError("The AI provider is temporarily unavailable. Please retry shortly.", category="provider_unavailable")
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FailedInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ai_provider="openai", ai_model="test", openai_api_key="fake"
+    )
+    response = client.post("/api/v1/commands", json={"text": "How are you?"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The AI provider is temporarily unavailable. Please retry shortly."

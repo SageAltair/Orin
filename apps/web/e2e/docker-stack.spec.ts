@@ -35,6 +35,10 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
   await expect(page.locator(".command-message, .success-message, .api-error").filter({ hasText: /.+/ })).not.toContainText("AI returned an invalid command proposal");
   await expect(page.locator(".command-result")).toContainText('"response"', { timeout: 60_000 });
 
+  await ask.fill("How are you today?");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText('"intent": "RESPOND"', { timeout: 60_000 });
+
   const aiTaskTitle = `AI task ${Date.now()}`;
   await ask.fill(`Create a task called ${aiTaskTitle}`);
   await page.getByRole("button", { name: "Send to Orin" }).click();
