@@ -21,12 +21,16 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5273}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY in .env}
+      AUTH_REFRESH_COOKIE_SECURE: ${AUTH_REFRESH_COOKIE_SECURE:-true}
+      ACCESS_TOKEN_LIFETIME_MINUTES: ${ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      REFRESH_TOKEN_LIFETIME_DAYS: ${REFRESH_TOKEN_LIFETIME_DAYS:-30}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "${API_PORT:-8100}:8000"
     restart: unless-stopped
 
   web:
@@ -34,11 +38,11 @@ services:
       context: .
       dockerfile: infrastructure/docker/web.Dockerfile
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8100}
     depends_on:
       - api
     ports:
-      - "5173:5173"
+      - "${WEB_PORT:-5273}:5173"
 
   worker:
     build:

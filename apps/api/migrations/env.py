@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from orin_api.config import get_settings
 from orin_api.database import Base
+import orin_api.models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
