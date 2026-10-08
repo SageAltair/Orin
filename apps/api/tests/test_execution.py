@@ -13,6 +13,7 @@ from orin_api.database import Base, get_session
 from orin_api.execution import ActionContext, ActionDefinition, ActionRegistry, ActionRequest, ActionStatus, ExecutionEngine, Reversibility, RiskLevel, StrictActionInput
 from orin_api.main import app
 from orin_api.models import Approval, ApprovalStatus, Command, ExecutionAudit, User
+from orin_api.approval_policy import decide_approval
 
 
 @pytest.fixture
@@ -56,6 +57,14 @@ def test_registry_is_trusted_and_metadata_immutable() -> None:
         ActionRegistry([definition, definition])
     with pytest.raises(TypeError, match="StrictActionInput"):
         ActionRegistry([ActionDefinition("bad", object, "x", RiskLevel.LOW, handler, Reversibility.REVERSIBLE)])  # type: ignore[arg-type]
+
+
+def test_approval_policy_is_deterministic_and_custom_cannot_lower_protected_actions() -> None:
+    assert decide_approval("create_task", "low", "automatic").requires_approval is False
+    assert decide_approval("send_email", "high", "balanced").requires_approval is True
+    assert decide_approval("delete_file", "medium", "custom", custom={"delete_file": "automatic"}).requires_approval is False
+    decision = decide_approval("deploy_production", "restricted", "custom", custom={"deploy_production": "automatic"})
+    assert decision.requires_approval and decision.policy_source == "protected_action"
 
 
 def test_validation_permission_unknown_and_audit(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
@@ -133,6 +142,8 @@ def test_routes_execute_registered_actions_and_approval_decisions(world: tuple[T
     approval_req = client.post("/api/v1/actions", json={"action": "send_notification", "inputs": {"recipient": "user@example.test", "message": "hello"}})
     assert approval_req.json()["status"] == "awaiting_approval"
     approval_id = approval_req.json()["execution"]["approval_id"]
+    assert any(item["id"] == approval_id for item in client.get("/api/v1/approvals").json())
+    assert client.get(f"/api/v1/approvals/{approval_id}").json()["risk_level"] == "medium"
     with sessions.begin() as session:
         approval = session.get(Approval, uuid.UUID(approval_id))
         assert approval and approval.risk_level == "medium" and approval.permission == "notification.send"
@@ -156,3 +167,37 @@ def test_routes_execute_registered_actions_and_approval_decisions(world: tuple[T
     assert unknown.json()["status"] == "unsupported"
     malformed = client.post("/api/v1/actions", json={"action": "complete_task", "inputs": {"task_id": "not-a-uuid"}})
     assert malformed.json()["status"] == "failed"
+
+
+def test_worker_registration_approval_claim_progress_and_revocation(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    registration = client.post("/api/v1/devices", json={"name": "Sage-PC", "platform": "Windows", "version": "0.1.0"})
+    assert registration.status_code == 201, registration.text
+    created = registration.json()
+    token = created["credential"]
+    device_id = created["id"]
+    assert "credential" not in client.get("/api/v1/devices").json()[0]
+    assert client.post(f"/api/v1/devices/{device_id}/jobs", json={"action": "run_any_shell_command", "parameters": {"command": "whoami"}}).status_code == 422
+    job_response = client.post(f"/api/v1/devices/{device_id}/jobs", json={"action": "get_system_info", "parameters": {}})
+    assert job_response.status_code == 202, job_response.text
+    job = job_response.json()
+    assert job["status"] == "pending_approval"
+    no_credential = client.post("/api/v1/worker/jobs/claim")
+    assert no_credential.status_code == 401
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.post("/api/v1/worker/heartbeat", headers=headers).json()["status"] == "active"
+    assert client.post("/api/v1/worker/jobs/claim", headers=headers).json() is None
+    decision = client.post(f"/api/v1/approvals/{job['approval_id']}/decision", json={"approved": True})
+    assert decision.status_code == 200 and decision.json()["result"]["status"] == "queued"
+    claim = client.post("/api/v1/worker/jobs/claim", headers=headers)
+    assert claim.status_code == 200, claim.text
+    assert claim.json()["payload"]["job_id"] == job["id"]
+    assert client.post("/api/v1/worker/jobs/claim", headers=headers).json() is None
+    assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "starting"}).status_code == 200
+    assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "running", "message": "Reading system details"}).status_code == 200
+    finished = client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "completed", "result": {"platform": "Windows"}})
+    assert finished.json()["status"] == "completed"
+    assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "completed", "result": {"platform": "Windows"}}).json()["status"] == "completed"
+    assert client.get(f"/api/v1/devices/{device_id}/jobs").json()[0]["result"] == {"platform": "Windows"}
+    assert client.delete(f"/api/v1/devices/{device_id}").status_code == 204
+    assert client.post("/api/v1/worker/heartbeat", headers=headers).status_code == 401

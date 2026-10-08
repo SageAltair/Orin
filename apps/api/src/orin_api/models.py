@@ -83,6 +83,26 @@ class ApprovalStatus(str, enum.Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    EXECUTED = "executed"
+
+
+class DeviceStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    OFFLINE = "offline"
+
+
+class WorkerJobStatus(str, enum.Enum):
+    PENDING_APPROVAL = "pending_approval"
+    QUEUED = "queued"
+    STARTING = "starting"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class ActivityType(str, enum.Enum):
@@ -141,6 +161,8 @@ class UserPreferences(TimestampMixin, Base):
     density: Mapped[Density] = mapped_column(enum_column(Density, "density"), nullable=False, default=Density.COMFORTABLE, server_default=Density.COMFORTABLE.value)
     theme: Mapped[Theme] = mapped_column(enum_column(Theme, "theme"), nullable=False, default=Theme.LIGHT, server_default=Theme.LIGHT.value)
     locale: Mapped[str] = mapped_column(String(20), nullable=False, default="en", server_default="en")
+    autonomy_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="balanced", server_default="balanced")
+    custom_autonomy: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
     user: Mapped[User] = relationship(back_populates="preferences")
 
@@ -291,6 +313,7 @@ class Approval(TimestampMixin, Base):
     risk_level: Mapped[str | None] = mapped_column(String(20))
     permission: Mapped[str | None] = mapped_column(String(80))
     reversible: Mapped[bool | None] = mapped_column(Boolean)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ExecutionAudit(CreatedAtMixin, Base):
@@ -365,3 +388,41 @@ class RefreshToken(CreatedAtMixin, Base):
     replaced_by_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("refresh_tokens.id", ondelete="SET NULL"), unique=True)
 
     auth_session: Mapped[AuthSession] = relationship(back_populates="refresh_tokens", foreign_keys=[session_id])
+
+
+class WorkerDevice(TimestampMixin, Base):
+    __tablename__ = "worker_devices"
+    __table_args__ = (Index("ix_worker_devices_owner_status", "owner_id", "status"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    platform: Mapped[str] = mapped_column(String(80), nullable=False)
+    version: Mapped[str] = mapped_column(String(40), nullable=False)
+    credential_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    status: Mapped[DeviceStatus] = mapped_column(enum_column(DeviceStatus, "device_status"), nullable=False, default=DeviceStatus.PENDING, server_default="pending")
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkerJob(TimestampMixin, Base):
+    __tablename__ = "worker_jobs"
+    __table_args__ = (
+        UniqueConstraint("nonce", name="uq_worker_job_nonce"),
+        Index("ix_worker_jobs_device_status_created", "device_id", "status", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    device_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("worker_devices.id", ondelete="CASCADE"), nullable=False)
+    approval_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("approvals.id", ondelete="CASCADE"), nullable=False, unique=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    parameters: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False)
+    status: Mapped[WorkerJobStatus] = mapped_column(enum_column(WorkerJobStatus, "worker_job_status"), nullable=False, default=WorkerJobStatus.PENDING_APPROVAL, server_default="pending_approval")
+    nonce: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    progress: Mapped[str | None] = mapped_column(String(240))
+    result: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    failure: Mapped[str | None] = mapped_column(String(240))

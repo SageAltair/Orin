@@ -8,6 +8,8 @@ export interface UserPreferences {
   pinnedCapabilities: CapabilityId[];
   density: Density;
   theme: Theme;
+  autonomyMode: "conservative" | "balanced" | "automatic" | "custom";
+  customAutonomy: Record<string, "automatic" | "approval">;
 }
 
 export interface Capability {
@@ -32,6 +34,8 @@ export const defaultPreferences: UserPreferences = {
   pinnedCapabilities: ["home", "tasks"],
   density: "comfortable",
   theme: "light",
+  autonomyMode: "balanced",
+  customAutonomy: {},
 };
 
 export function getNavigationCapabilities(granted: Capability[], preferences: UserPreferences): Capability[] {
@@ -55,5 +59,7 @@ export function normalizePreferences(value: unknown): UserPreferences {
     pinnedCapabilities: ids(candidate.pinnedCapabilities, defaultPreferences.pinnedCapabilities).filter((id) => visibleCapabilities.includes(id)),
     density: candidate.density === "compact" ? "compact" : "comfortable",
     theme: candidate.theme === "dark" || candidate.theme === "system" ? candidate.theme : "light",
+    autonomyMode: candidate.autonomyMode === "conservative" || candidate.autonomyMode === "automatic" || candidate.autonomyMode === "custom" ? candidate.autonomyMode : "balanced",
+    customAutonomy: candidate.customAutonomy && typeof candidate.customAutonomy === "object" ? candidate.customAutonomy as Record<string, "automatic" | "approval"> : {},
   };
 }

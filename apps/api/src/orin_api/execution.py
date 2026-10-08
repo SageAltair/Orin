@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 import re
 import json
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -13,12 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
 from orin_api.models import Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit
+from orin_api.approval_policy import decide_approval
 
 
 class RiskLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    RESTRICTED = "restricted"
+    # Kept for existing action metadata; restricted is the public policy term.
     CRITICAL = "critical"
 
 
@@ -55,6 +59,8 @@ class ActionContext:
     permissions: frozenset[str]
     approval_id: uuid.UUID | None = None
     command_text: str = ""
+    autonomy_mode: str = "balanced"
+    custom_autonomy: Mapping[str, str] | None = None
 
 
 ActionHandler = Callable[[ActionContext, BaseModel], dict[str, Any] | list[dict[str, Any]] | None]
@@ -119,7 +125,7 @@ class ActionExecutionError(Exception):
 class ExecutionEngine:
     def __init__(self, registry: ActionRegistry, approval_policy: ApprovalPolicy | None = None):
         self.registry = registry
-        self.approval_policy = approval_policy or (lambda definition: definition.requires_approval)
+        self.approval_policy = approval_policy
 
     def execute(self, request: ActionRequest, context: ActionContext) -> ExecutionResult:
         definition = self.registry.get(request.action)
@@ -135,7 +141,12 @@ class ExecutionEngine:
             return self._audit(context, definition.name, definition, inputs, ActionStatus.DENIED, "You do not have permission to perform this action.")
 
         approval_id: uuid.UUID | None = None
-        if self.approval_policy(definition):
+        requires_approval = (
+            self.approval_policy(definition) if self.approval_policy is not None else
+            decide_approval(definition.name, definition.risk_level.value, context.autonomy_mode,
+                            definition.requires_approval, context.custom_autonomy).requires_approval
+        )
+        if requires_approval:
             approval = context.session.get(Approval, context.approval_id) if context.approval_id else None
             valid_approval = (
                 approval is not None
@@ -144,6 +155,7 @@ class ExecutionEngine:
                 and approval.command_id == context.command_id
                 and approval.action_name == definition.name
                 and approval.action_payload == inputs.model_dump(mode="json")
+                and (approval.expires_at is None or (approval.expires_at.replace(tzinfo=timezone.utc) if approval.expires_at.tzinfo is None else approval.expires_at) > datetime.now(timezone.utc))
             )
             if not valid_approval:
                 if approval is not None:
@@ -157,6 +169,7 @@ class ExecutionEngine:
                     risk_level=definition.risk_level.value,
                     permission=definition.permission,
                     reversible=definition.reversibility != Reversibility.IRREVERSIBLE,
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
                 )
                 context.session.add(approval)
                 command = context.session.get(Command, context.command_id)
@@ -182,6 +195,10 @@ class ExecutionEngine:
         if isinstance(result, dict) and result.get("status") == "pending_approval":
             approval = context.session.get(Approval, result_approval_id) if result_approval_id else None
             return self._audit(context, definition.name, definition, inputs, ActionStatus.PENDING_APPROVAL, "This action requires approval before it can run.", result=result, approval=approval)
+        if approval_id is not None:
+            approved = context.session.get(Approval, approval_id)
+            if approved is not None:
+                approved.status = ApprovalStatus.EXECUTED
         return self._audit(context, definition.name, definition, inputs, ActionStatus.EXECUTED, None, result=result, approval_id=approval_id or result_approval_id)
 
     @staticmethod

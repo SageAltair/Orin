@@ -90,6 +90,8 @@ def preference_view(session: Session, user: User, preferences: UserPreferences) 
         "visible_capabilities": [row.code for row in rows if row.visible and row.granted and row.is_enabled],
         "hidden_capabilities": [row.code for row in rows if row.granted and not row.visible and row.is_enabled],
         "pinned_capabilities": [row.code for row in rows if row.pinned and row.visible and row.granted and row.is_enabled],
+        "autonomy_mode": preferences.autonomy_mode,
+        "custom_autonomy": preferences.custom_autonomy,
     }
 
 
@@ -121,6 +123,12 @@ def update_preferences(session: Session, user: User, data: PreferencesUpdate) ->
     preferences.density = data.density
     preferences.theme = data.theme
     preferences.locale = data.locale
+    if any(value not in {"automatic", "approval"} for value in data.custom_autonomy.values()):
+        raise HTTPException(status_code=422, detail="Custom autonomy values must be automatic or approval")
+    if len(data.custom_autonomy) > 100:
+        raise HTTPException(status_code=422, detail="Too many custom autonomy rules")
+    preferences.autonomy_mode = data.autonomy_mode
+    preferences.custom_autonomy = data.custom_autonomy
     session.flush()
     return preferences
 

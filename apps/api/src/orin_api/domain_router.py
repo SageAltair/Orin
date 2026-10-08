@@ -29,6 +29,9 @@ from orin_api.models import (
     TaskPriority,
     User,
     UserCapability,
+    UserPreferences,
+    WorkerJob,
+    WorkerJobStatus,
 )
 from orin_api.schemas import (
     ActivityRead,
@@ -94,8 +97,10 @@ def submit_command(
             session.commit()
             return CommandResult(command_id=command.id, status="unsupported", intent=proposal.intent.value, message="This request is not supported.")
         ensure_user_preferences(session, user)
+        autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
         result = EXECUTION_ENGINE.execute(ActionRequest(action=plan.action, inputs=plan.inputs),
-            ActionContext(session=session, user_id=user.id, command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=data.text))
+            ActionContext(session=session, user_id=user.id, command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=data.text,
+                autonomy_mode=autonomy.autonomy_mode if autonomy else "balanced", custom_autonomy=autonomy.custom_autonomy if autonomy else {}))
         return _commit_execution_result(session, command, plan.intent.value, result)
     except AIProviderError as exc:
         session.rollback()
@@ -170,8 +175,10 @@ def execute_registered_action(request: ActionRequest, user: User = Depends(get_c
     try:
         session.flush()
         ensure_user_preferences(session, user)
+        autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
         result = EXECUTION_ENGINE.execute(request, ActionContext(session=session, user_id=user.id,
-            command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=command.text))
+            command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=command.text,
+            autonomy_mode=autonomy.autonomy_mode if autonomy else "balanced", custom_autonomy=autonomy.custom_autonomy if autonomy else {}))
         return _commit_execution_result(session, command, request.action.upper(), result)
     except SQLAlchemyError as exc:
         session.rollback()
@@ -182,7 +189,7 @@ def execute_registered_action(request: ActionRequest, user: User = Depends(get_c
 @router.post("/approvals/{approval_id}/decision", response_model=CommandResult)
 def decide_approval(approval_id: uuid.UUID, decision: ApprovalDecision, user: User = Depends(get_current_user),
     session: Session = Depends(get_session)) -> CommandResult:
-    approval = session.scalar(select(Approval).where(Approval.id == approval_id, Approval.requested_by_id == user.id))
+    approval = session.scalar(select(Approval).where(Approval.id == approval_id, Approval.requested_by_id == user.id).with_for_update())
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval request not found")
     if approval.status != ApprovalStatus.PENDING or not approval.action_name or approval.action_payload is None:
@@ -190,15 +197,80 @@ def decide_approval(approval_id: uuid.UUID, decision: ApprovalDecision, user: Us
     command = session.get(Command, approval.command_id) if approval.command_id else None
     if command is None or command.user_id != user.id:
         raise HTTPException(status_code=404, detail="Approval request not found")
+    expiry = approval.expires_at.replace(tzinfo=timezone.utc) if approval.expires_at and approval.expires_at.tzinfo is None else approval.expires_at
+    if expiry and expiry <= datetime.now(timezone.utc):
+        approval.status = ApprovalStatus.EXPIRED
+        session.commit()
+        raise HTTPException(status_code=409, detail="Approval request has expired")
     approval.status = ApprovalStatus.APPROVED if decision.approved else ApprovalStatus.REJECTED
     approval.decided_by_id = user.id
     approval.decision_note = decision.note
     approval.decided_at = datetime.now(timezone.utc)
+    worker_job = session.scalar(select(WorkerJob).where(WorkerJob.approval_id == approval.id).with_for_update())
+    if worker_job is not None:
+        worker_job.status = WorkerJobStatus.QUEUED if decision.approved else WorkerJobStatus.CANCELLED
+        if not decision.approved:
+            worker_job.finished_at = datetime.now(timezone.utc)
+        session.commit()
+        return CommandResult(command_id=command.id, status="approved" if decision.approved else "denied",
+            intent="WORKER_ACTION", result={"job_id": str(worker_job.id), "status": worker_job.status.value},
+            message="Approved worker job is queued for its registered device." if decision.approved else "Worker job rejected; no work was sent.")
     ensure_user_preferences(session, user)
+    autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
     result = EXECUTION_ENGINE.execute(ActionRequest(action=approval.action_name, inputs=approval.action_payload),
         ActionContext(session=session, user_id=user.id, command_id=command.id,
-            permissions=_user_action_permissions(session, user.id), approval_id=approval.id, command_text=command.text))
+            permissions=_user_action_permissions(session, user.id), approval_id=approval.id, command_text=command.text,
+            autonomy_mode=autonomy.autonomy_mode if autonomy else "balanced", custom_autonomy=autonomy.custom_autonomy if autonomy else {}))
+    if result.success:
+        approval.status = ApprovalStatus.EXECUTED
     return _commit_execution_result(session, command, approval.action_name.upper(), result)
+
+
+def _approval_view(row: Approval) -> dict[str, object]:
+    return {"id": row.id, "status": row.status.value, "action": row.action_name,
+        "parameters": row.action_payload or {}, "risk_level": row.risk_level or "medium",
+        "permission": row.permission, "reversible": row.reversible, "reason": row.decision_note,
+        "created_at": row.created_at, "expires_at": row.expires_at, "decided_at": row.decided_at}
+
+
+@router.get("/approvals")
+def list_approvals(status_filter: str | None = Query(default=None, alias="status"), user: User = Depends(get_current_user),
+                   session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    query = select(Approval).where(Approval.requested_by_id == user.id).order_by(Approval.created_at.desc())
+    rows = session.scalars(query).all()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        expiry = row.expires_at.replace(tzinfo=timezone.utc) if row.expires_at and row.expires_at.tzinfo is None else row.expires_at
+        if row.status == ApprovalStatus.PENDING and expiry and expiry <= now:
+            row.status = ApprovalStatus.EXPIRED
+    session.commit()
+    return [_approval_view(row) for row in rows if status_filter is None or row.status.value == status_filter]
+
+
+@router.get("/approvals/{approval_id}")
+def get_approval(approval_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    row = session.scalar(select(Approval).where(Approval.id == approval_id, Approval.requested_by_id == user.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    return _approval_view(row)
+
+
+@router.post("/approvals/{approval_id}/cancel")
+def cancel_approval(approval_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    row = session.scalar(select(Approval).where(Approval.id == approval_id, Approval.requested_by_id == user.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    if row.status != ApprovalStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Approval request is no longer pending")
+    row.status = ApprovalStatus.CANCELLED
+    worker_job = session.scalar(select(WorkerJob).where(WorkerJob.approval_id == row.id).with_for_update())
+    if worker_job is not None and worker_job.status == WorkerJobStatus.PENDING_APPROVAL:
+        worker_job.status = WorkerJobStatus.CANCELLED
+        worker_job.finished_at = datetime.now(timezone.utc)
+    row.decided_by_id = user.id
+    row.decided_at = datetime.now(timezone.utc)
+    session.commit()
+    return _approval_view(row)
 
 
 @router.get("/users/me/preferences", response_model=PreferencesRead)
@@ -375,3 +447,7 @@ def list_activity(
 ) -> list[Activity]:
     statement = select(Activity).where(Activity.user_id == user.id).order_by(Activity.created_at.desc(), Activity.id.desc())
     return list(session.scalars(statement.limit(limit).offset(offset)).all())
+    if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
+        approval.status = ApprovalStatus.EXPIRED
+        session.commit()
+        raise HTTPException(status_code=409, detail="Approval request has expired")

@@ -8,6 +8,7 @@ from orin_api.config import get_settings
 from orin_api.auth_router import router as auth_router
 from orin_api.domain_router import router as domain_router
 from orin_api.health.router import router as health_router
+from orin_api.worker_router import router as worker_router
 
 settings = get_settings()
 app = FastAPI(title="Orin API", version="0.1.0", description="Orin platform API foundation")
@@ -21,6 +22,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(domain_router)
+app.include_router(worker_router)
 
 
 @app.middleware("http")

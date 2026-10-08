@@ -101,6 +101,23 @@ button:disabled { cursor: not-allowed; }
 .preference-controls { display: flex; gap: 14px; margin-top: 17px; }
 .preference-controls label { display: grid; gap: 7px; color: var(--soft); font-size: 10px; }
 .preference-controls select { min-width: 175px; padding: 9px 11px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; }
+.secondary-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 10px; color: var(--soft, #68736b); background: var(--surface, #fff); border: 1px solid var(--line, #e1e7e1); border-radius: 6px; font-size: 10px; }
+.secondary-button:hover:not(:disabled) { background: var(--hover, #f3f6f3); }
+.secondary-button:disabled { cursor: not-allowed; opacity: .5; }
+.preference-controls input, .preference-controls textarea, .device-enrollment textarea { min-width: 0; padding: 9px 11px; color: var(--text, #252c28); background: var(--surface, #fff); border: 1px solid var(--line, #e1e7e1); border-radius: 6px; font: inherit; font-size: 11px; }
+.preference-controls textarea { min-width: min(100%, 380px); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.settings-section { margin-top: 34px; }
+.settings-section > p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+.settings-section h3 { margin: 22px 0 7px; font-size: 13px; font-weight: 560; }
+.device-enrollment { display: grid; gap: 8px; margin: 15px 0; padding: 14px; background: var(--hover); border: 1px solid var(--line); border-radius: 8px; }
+.device-enrollment p { margin: 0; color: var(--muted); font-size: 10px; }
+.device-enrollment textarea { width: 100%; resize: vertical; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.device-enrollment pre, .data-main pre { overflow: auto; max-width: 100%; padding: 10px; color: var(--soft); background: var(--surface); border-radius: 6px; font-size: 10px; white-space: pre-wrap; }
+.device-state { font-weight: 600; }
+.state-active { color: #4c8159; }
+.state-pending { color: #9a7534; }
+.state-offline { color: #8a918c; }
+.state-revoked { color: #a25048; }
 .quiet-retry { display: block; margin: 12px auto; padding: 6px 12px; color: var(--muted); background: transparent; border: 0; font-size: 10px; }
 .unavailable-note { margin-top: 14px; color: var(--muted); text-align: center; font-size: 10px; }
 .loading-state { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 183px; color: var(--muted); font-size: 11px; }

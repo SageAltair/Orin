@@ -3,5 +3,5 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY apps/worker/pyproject.toml ./pyproject.toml
 COPY apps/worker/src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir --timeout 600 --retries 10 .
 CMD ["orin-worker"]

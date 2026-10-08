@@ -154,6 +154,48 @@ def test_logout_revokes_current_access_and_refresh_tokens(auth_client: TestClien
     assert client.post("/api/v1/auth/refresh").status_code == 401
 
 
+def test_profile_update_and_password_change_revoke_sessions(auth_client: TestClient) -> None:
+    client = auth_client
+    register(client, "profile@example.com")
+    authenticated = login(client, "profile@example.com")
+    authenticate(client, str(authenticated["access_token"]))
+    assert client.patch("/api/v1/auth/me", json={"display_name": "Updated Name"}).json()["display_name"] == "Updated Name"
+    listed = client.get("/api/v1/auth/sessions")
+    assert listed.status_code == 200 and listed.json()[0]["current"] is True
+    assert client.post("/api/v1/auth/password", json={"current_password": "wrong password", "new_password": "new password sufficiently long"}).status_code == 400
+    changed = client.post("/api/v1/auth/password", json={"current_password": PASSWORD, "new_password": "a new password sufficiently long"})
+    assert changed.status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "profile@example.com", "password": "a new password sufficiently long"}).status_code == 200
+
+
+def test_email_change_requires_password_and_invalidates_sessions(auth_client: TestClient) -> None:
+    client = auth_client
+    register(client, "email-before@example.com")
+    token = login(client, "email-before@example.com")
+    authenticate(client, str(token["access_token"]))
+    assert client.post("/api/v1/auth/email", json={"current_password": "incorrect", "new_email": "email-after@example.com"}).status_code == 400
+    changed = client.post("/api/v1/auth/email", json={"current_password": PASSWORD, "new_email": "Email-After@example.com"})
+    assert changed.status_code == 200 and changed.json()["email"] == "email-after@example.com"
+    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.post("/api/v1/auth/login", json={"email": "email-after@example.com", "password": PASSWORD}).status_code == 200
+
+
+def test_user_can_list_and_revoke_another_owned_session(auth_client: TestClient) -> None:
+    client = auth_client
+    register(client, "sessions@example.com")
+    first = login(client, "sessions@example.com")
+    second = login(client, "sessions@example.com")
+    authenticate(client, str(second["access_token"]))
+    sessions = client.get("/api/v1/auth/sessions").json()
+    old_session = next(row for row in sessions if not row["current"])
+    assert client.delete(f"/api/v1/auth/sessions/{old_session['id']}").status_code == 204
+    authenticate(client, str(first["access_token"]))
+    assert client.get("/api/v1/auth/me").status_code == 401
+    authenticate(client, str(second["access_token"]))
+    assert client.get("/api/v1/auth/me").status_code == 200
+
+
 def test_user_cannot_list_or_modify_another_users_data(auth_client: TestClient) -> None:
     client = auth_client
     first_user = register(client, "first@example.com")

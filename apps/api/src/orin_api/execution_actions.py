@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from pydantic import Field
@@ -215,6 +215,7 @@ def build_action_registry(
             risk_level=target.risk_level.value,
             permission=target.permission,
             reversible=target.reversibility != Reversibility.IRREVERSIBLE,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
         )
         context.session.add(approval)
         command = context.session.get(Command, context.command_id)
