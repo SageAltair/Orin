@@ -14,11 +14,9 @@ describe("capability navigation", () => {
     expect(getNavigationCapabilities(granted, preferences).map(({ id }) => id)).toEqual(["projects", "home", "tasks"]);
   });
 
-  it("renders the minimal shell with an honest Ask Orin input", () => {
+  it("checks for a refreshable session before showing private workspace data", () => {
     const markup = renderToStaticMarkup(<App />);
-    expect(markup).toContain("What matters now?");
-    expect(markup).toContain("Ask Orin");
-    expect(markup).not.toContain("Activity</button>");
-    expect(markup).toContain("Nothing competing for your attention");
+    expect(markup).toContain("Checking your session");
+    expect(markup).not.toContain("Morgan");
   });
 });

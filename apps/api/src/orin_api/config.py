@@ -18,6 +18,17 @@ class Settings(BaseSettings):
     access_token_lifetime_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_lifetime_days: int = Field(default=30, ge=1, le=90)
     auth_refresh_cookie_secure: bool = True
+    ai_provider: str = ""
+    ai_model: str = ""
+    openai_api_key: str | None = Field(default=None, repr=False)
+    mistral_api_key: str | None = Field(default=None, repr=False)
+    google_api_key: str | None = Field(default=None, repr=False)
+    openrouter_api_key: str | None = Field(default=None, repr=False)
+    qwen_api_key: str | None = Field(default=None, repr=False)
+    groq_api_key: str | None = Field(default=None, repr=False)
+    cerebras_api_key: str | None = Field(default=None, repr=False)
+    cloudflare_api_key: str | None = Field(default=None, repr=False)
+    cloudflare_account_id: str | None = Field(default=None, repr=False)
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> Settings:

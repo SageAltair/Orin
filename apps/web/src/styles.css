@@ -73,7 +73,7 @@ button:disabled { cursor: not-allowed; }
 .command-form { display: flex; align-items: center; gap: 9px; height: 47px; margin-top: 12px; padding: 0 9px 0 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 3px 12px #1c35200a; }
 .command-form:focus-within { border-color: #a8bcaa; box-shadow: 0 0 0 3px #688b7013; }
 .command-form input { flex: 1; min-width: 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 12px; }
-.command-form input::placeholder { color: #a2aaa4; }
+.command-form input::placeholder { color: var(--soft); opacity: 1; }
 .command-form button { display: grid; width: 29px; height: 29px; place-items: center; color: white; background: #66836b; border: 0; border-radius: 6px; }
 .command-form button:disabled { color: #9aa39b; background: #f0f2f0; }
 .command-form kbd { color: #a4aca6; font-size: 11px; }
@@ -113,6 +113,36 @@ button:disabled { cursor: not-allowed; }
 .skip-link:focus { transform: translateY(0); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .mobile-menu, .mobile-scrim { display: none; }
+.auth-screen { display: grid; min-height: 100vh; place-items: center; padding: 24px; background: #fbfcfa; }
+.auth-card { display: grid; gap: 14px; width: min(100%, 390px); padding: 32px; background: white; border: 1px solid #e9ede9; border-radius: 12px; box-shadow: 0 12px 40px #1c35200a; }
+.auth-card > .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; }
+.auth-card h1 { margin: 4px 0 0; font-size: 22px; font-weight: 550; }
+.auth-card > p { margin: -8px 0 5px; color: #909992; font-size: 12px; }
+.auth-card label { display: grid; gap: 6px; font-size: 11px; color: #68736b; }
+.auth-card label input, .create-form input { width: 100%; min-width: 0; padding: 10px 11px; color: #252c28; background: white; border: 1px solid #e1e7e1; border-radius: 6px; }
+.auth-card label small { color: #909992; }
+.primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 13px; color: white; background: #537b61; border: 0; border-radius: 6px; font-size: 11px; }
+.primary-button:disabled { opacity: .55; }
+.icon-only-button { width: 38px; min-width: 38px; padding: 0; }
+.auth-switch { padding: 4px; color: #537b61; background: transparent; border: 0; font-size: 11px; }
+.create-form { display: flex; gap: 9px; margin: 0 0 16px; }
+.data-list { display: grid; margin-top: 16px; border-top: 1px solid var(--line); }
+.data-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.data-main { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.data-main strong { overflow: hidden; font-size: 12px; font-weight: 550; text-overflow: ellipsis; }
+.data-main .task-title { width: 100%; padding: 0; color: var(--text); background: transparent; border: 0; outline: 0; font-size: 12px; font-weight: 550; }
+.data-main .task-title:focus { box-shadow: 0 1px 0 var(--accent); }
+.data-main small { color: var(--muted); font-size: 10px; text-transform: capitalize; }
+.data-row select, .data-row input { max-width: 125px; padding: 7px; color: var(--soft); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; font-size: 10px; }
+.complete-button { display: grid; flex: 0 0 auto; width: 21px; height: 21px; place-items: center; color: var(--accent); background: transparent; border: 1px solid #bdcbbf; border-radius: 50%; }
+.complete-button.done { color: white; background: #66836b; border-color: #66836b; }
+.task-done { color: var(--muted); text-decoration: line-through; }
+.success-message, .api-error { margin: 10px 0; color: #52775a; font-size: 11px; }
+.api-error { padding: 10px 12px; color: #9a5148; background: #fff4f2; border-radius: 5px; }
+.api-error button { color: inherit; background: transparent; border: 0; text-decoration: underline; }
+.command-result { overflow: auto; max-height: 180px; padding: 10px; color: var(--soft); background: var(--hover); border-radius: 6px; font-size: 10px; }
+.logout-button { display: grid; width: 28px; height: 28px; place-items: center; margin-left: auto; color: var(--muted); background: transparent; border: 0; }
+.profile-menu { display: none; }
 button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .density-compact .nav-link { min-height: 32px; }
 .density-compact .capability-row { min-height: 49px; }

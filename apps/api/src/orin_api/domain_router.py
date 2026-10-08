@@ -1,21 +1,28 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
+from orin_api.ai import AITaskType, AIInterpreter, AIProviderError, IntentName, ModelSelector, create_provider
+from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
 from orin_api.models import (
     Activity,
     ActivityType,
     Capability,
+    Command,
+    CommandStatus,
     Project,
     ProjectStatus,
     Task,
     TaskStatus,
+    TaskPriority,
     User,
     UserCapability,
 )
@@ -30,6 +37,8 @@ from orin_api.schemas import (
     TaskCreate,
     TaskRead,
     TaskUpdate,
+    CommandCreate,
+    CommandResult,
 )
 from orin_api.services import (
     add_activity,
@@ -42,6 +51,115 @@ from orin_api.services import (
 )
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
+
+
+@router.post("/commands", response_model=CommandResult, status_code=status.HTTP_200_OK)
+def submit_command(
+    data: CommandCreate,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> CommandResult:
+    command = Command(user_id=user.id, text=data.text, status=CommandStatus.SUBMITTED)
+    session.add(command)
+    session.flush()
+    try:
+        if not settings.ai_provider or not settings.ai_model:
+            raise AIProviderError("AI command interpretation is not configured")
+        model = ModelSelector(settings.ai_model).select(AITaskType.COMMAND_INTERPRETATION)
+        proposal = AIInterpreter(create_provider(settings), model).interpret(data.text)
+        p = proposal.parameters
+        if proposal.intent == IntentName.RESPOND:
+            command.status = CommandStatus.COMPLETED
+            session.commit()
+            return CommandResult(
+                command_id=command.id,
+                status="completed",
+                intent=proposal.intent.value,
+                result={"response": p.response or "Hello! What would you like help with?"},
+                message=p.response or "Hello! What would you like help with?",
+            )
+        if proposal.intent == IntentName.UNSUPPORTED:
+            command.status = CommandStatus.FAILED
+            session.commit()
+            return CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED", message="This request is not supported.")
+
+        result: dict[str, object] | list[dict[str, object]] | None
+        if proposal.intent == IntentName.CREATE_TASK:
+            project_id = uuid.UUID(p.project_id) if p.project_id else None
+            validate_task_links(session, user.id, project_id, None)
+            due_at = datetime.fromisoformat(p.due_at.replace("Z", "+00:00")) if p.due_at else None
+            task = Task(owner_id=user.id, title=p.title or "", description=p.description, due_at=due_at, project_id=project_id)
+            session.add(task)
+            session.flush()
+            command.task_id = task.id
+            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_CREATED, summary=f"Created task: {task.title}")
+            result = {"id": str(task.id), "title": task.title, "status": task.status.value}
+        elif proposal.intent in (IntentName.UPDATE_TASK, IntentName.COMPLETE_TASK):
+            task_id = uuid.UUID(p.task_id or "")
+            task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+            if task is None:
+                raise HTTPException(status_code=404, detail="Task not found")
+            changes = {"status": TaskStatus.DONE} if proposal.intent == IntentName.COMPLETE_TASK else dict(p.fields_to_update or {})
+            if "project_id" in changes and changes["project_id"] is not None:
+                changes["project_id"] = uuid.UUID(str(changes["project_id"]))
+            try:
+                validated = TaskUpdate.model_validate(changes)
+            except ValidationError as exc:
+                raise HTTPException(status_code=422, detail="Task update parameters are invalid") from exc
+            changes = validated.model_dump(exclude_unset=True)
+            validate_task_links(session, user.id, changes.get("project_id", task.project_id), task.assignee_id)
+            for field, value in changes.items():
+                setattr(task, field, value)
+            command.task_id = task.id
+            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Updated task: {task.title}")
+            result = {"id": str(task.id), "title": task.title, "status": task.status.value}
+        elif proposal.intent == IntentName.CREATE_PROJECT:
+            project = Project(owner_id=user.id, name=p.name or "", description=p.description)
+            session.add(project)
+            session.flush()
+            add_project_owner_membership(session, project)
+            command.project_id = project.id
+            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project.id, activity_type=ActivityType.PROJECT_CREATED, summary=f"Created project: {project.name}")
+            result = {"id": str(project.id), "name": project.name, "status": project.status.value}
+        elif proposal.intent == IntentName.LIST_PROJECTS:
+            statement = select(Project).where(Project.owner_id == user.id)
+            if p.status is not None:
+                statement = statement.where(Project.status == ProjectStatus(p.status))
+            rows = session.scalars(statement.order_by(Project.updated_at.desc()).limit(p.limit or 50)).all()
+            result = [{"id": str(row.id), "name": row.name, "status": row.status.value} for row in rows]
+        elif proposal.intent == IntentName.LIST_TASKS:
+            statement = select(Task).where(Task.owner_id == user.id)
+            if p.status is not None:
+                statement = statement.where(Task.status == TaskStatus(p.status))
+            if p.project_id is not None:
+                project_id = uuid.UUID(p.project_id)
+                validate_task_links(session, user.id, project_id, None)
+                statement = statement.where(Task.project_id == project_id)
+            rows = session.scalars(statement.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc()).limit(p.limit or 50)).all()
+            result = [{"id": str(row.id), "title": row.title, "status": row.status.value} for row in rows]
+        elif proposal.intent == IntentName.GET_ACTIVITY:
+            rows = session.scalars(select(Activity).where(Activity.user_id == user.id).order_by(Activity.created_at.desc()).limit(p.limit or 50)).all()
+            result = [{"id": str(row.id), "activity_type": row.activity_type.value, "summary": row.summary, "created_at": row.created_at.isoformat()} for row in rows]
+        else:
+            raise HTTPException(status_code=422, detail="Unsupported command intent")
+        command.status = CommandStatus.COMPLETED
+        session.commit()
+        return CommandResult(command_id=command.id, status="completed", intent=proposal.intent.value, result=result, message="Command completed.")
+    except AIProviderError as exc:
+        command.status = CommandStatus.FAILED
+        session.commit()
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except (ValueError, ValidationError) as exc:
+        session.rollback()
+        command.status = CommandStatus.FAILED
+        session.add(command)
+        session.commit()
+        raise HTTPException(status_code=422, detail="Command parameters are invalid") from exc
+    except HTTPException:
+        command.status = CommandStatus.FAILED
+        session.commit()
+        raise
 
 
 @router.get("/users/me/preferences", response_model=PreferencesRead)

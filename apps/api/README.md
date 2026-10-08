@@ -1,5 +1,7 @@
 # Orin API
 
+The API optionally supports AI-backed `POST /api/v1/commands`. Configure `AI_PROVIDER` and `AI_MODEL` plus the selected provider's key; without them the API starts normally and the command endpoint reports that interpretation is unavailable. All command proposals are validated and entity access is scoped to the authenticated user before application actions run. See the repository README for provider configuration and security boundaries.
+
 The API uses PostgreSQL through SQLAlchemy 2. The default development URL targets a local PostgreSQL server. When running under Docker Compose, `DATABASE_URL` is supplied by the root `.env` and should use the `db` hostname.
 
 ```powershell

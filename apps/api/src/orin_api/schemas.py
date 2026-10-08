@@ -110,6 +110,18 @@ class ActivityRead(BaseModel):
     created_at: datetime
 
 
+class CommandCreate(BaseModel):
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+
+
+class CommandResult(BaseModel):
+    command_id: uuid.UUID
+    status: str
+    intent: str | None = None
+    result: dict[str, object] | list[dict[str, object]] | None = None
+    message: str
+
+
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: Annotated[str, StringConstraints(min_length=15, max_length=128)]

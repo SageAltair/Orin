@@ -8,6 +8,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from orin_api.auth import get_current_user
+from orin_api.ai import AIIntent
+from orin_api.config import Settings, get_settings
+from orin_api.domain_router import AIInterpreter
 from orin_api.database import Base, get_session
 from orin_api.main import app
 from orin_api.models import User
@@ -113,3 +116,50 @@ def test_preference_rejects_pinning_a_hidden_capability(client: TestClient) -> N
         },
     )
     assert response.status_code == 422
+
+
+def test_command_pipeline_uses_validated_proposal_and_records_activity(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"CREATE_TASK","confidence":0.9,"parameters":{"title":"Call John"}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Remind me to call John"})
+    assert response.status_code == 200
+    assert response.json()["intent"] == "CREATE_TASK"
+    assert response.json()["result"]["title"] == "Call John"
+    assert client.get("/api/v1/tasks").json()[0]["title"] == "Call John"
+
+
+def test_greeting_command_returns_safe_conversation_without_creating_work(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            assert command == "hey"
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.9,"parameters":{"response":"Hey! What can I help you with?"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "hey"})
+    assert response.status_code == 200
+    assert response.json()["intent"] == "RESPOND"
+    assert response.json()["result"] == {"response": "Hey! What can I help you with?"}
+    assert client.get("/api/v1/tasks").json() == []
+
+
+def test_command_pipeline_never_interprets_without_ai_configuration(client: TestClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="", ai_model="")
+    response = client.post("/api/v1/commands", json={"text": "create a task"})
+    assert response.status_code == 503
