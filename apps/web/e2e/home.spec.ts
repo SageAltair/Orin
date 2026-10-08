@@ -50,6 +50,8 @@ test("sign in opens the connected Orin workspace", async ({ page }) => {
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("autocomplete", "off");
+  await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("placeholder", "Ask Orin what you need");
 });
 
 test("workspace preferences control visible capabilities", async ({ page }) => {
@@ -77,6 +79,8 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
 
   await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
   await page.getByLabel("Task title").fill("Manual task");
-  await page.getByRole("button", { name: "Add task" }).click();
+  const addTaskButton = page.getByRole("button", { name: "Add task" });
+  await expect(addTaskButton).toHaveText("");
+  await addTaskButton.click();
   await expect(page.getByRole("textbox", { name: "Edit Manual task" })).toBeVisible();
 });

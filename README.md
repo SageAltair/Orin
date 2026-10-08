@@ -6,8 +6,10 @@ Orin is an adaptive personal execution environment. The repository includes auth
 
 1. Copy `.env.example` to `.env` and adjust values for your environment. If you change `POSTGRES_PASSWORD`, update its matching password in `DATABASE_URL` too (URL-encode special characters).
 2. Run `docker compose up --build`.
-3. Open the web app at http://localhost:5173 and API docs at http://localhost:8000/docs.
-4. Check API health at http://localhost:8000/health/live and database health at `/health/ready`.
+3. Open the web app at http://localhost:5273 and API docs at http://localhost:8100/docs.
+4. Check API health at http://localhost:8100/health/live and database health at `/health/ready`.
+
+The Docker web service runs Vite in development mode. `apps/web` and `packages` are bind-mounted for hot reload, while Linux dependencies live in the `web_node_modules` volume. The image installs from `package-lock.json` with optional dependencies enabled and verifies Linux esbuild during build. The entrypoint checks the lockfile when the container starts and refreshes dependencies if they changed or esbuild is missing. The API source is also bind-mounted and Uvicorn reloads on code changes. Normal source edits do not rebuild either image.
 
 For local development without Docker, see [AGENTS.md](AGENTS.md) and the app READMEs. Database migrations run with `alembic upgrade head` from `apps/api`.
 
@@ -30,4 +32,4 @@ Run `scripts/check.ps1` on Windows or `scripts/check.sh` on Unix. See [AGENTS.md
 
 AI is optional. Leave `AI_PROVIDER` empty to run without provider credentials. To enable it, set `AI_PROVIDER` to `openai`, `mistral`, `google`, `openrouter`, `qwen`, `groq`, `cerebras`, or `cloudflare`, set `AI_MODEL`, and supply only the selected provider's API key in `.env`. Cloudflare also requires `CLOUDFLARE_ACCOUNT_ID`. Keep `.env` private; `.env.example` contains placeholders only. Providers are isolated behind adapters; compatible services use the OpenAI chat API format and Google uses its generate-content API.
 
-Initial commands support `CREATE_TASK`, `UPDATE_TASK`, `COMPLETE_TASK`, `CREATE_PROJECT`, `LIST_PROJECTS`, `LIST_TASKS`, and `GET_ACTIVITY`; other requests fail safely. Responses contain application results, not raw provider output. Unit and route tests use fake providers and need no AI credentials.
+Commands support safe conversational replies plus `CREATE_TASK`, `UPDATE_TASK`, `COMPLETE_TASK`, `CREATE_PROJECT`, `LIST_PROJECTS`, `LIST_TASKS`, and `GET_ACTIVITY`; other requests fail safely. Responses contain application results, not raw provider output. Unit and route tests use fake providers and need no AI credentials.

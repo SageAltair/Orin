@@ -26,6 +26,7 @@ services:
       AUTH_REFRESH_COOKIE_SECURE: ${AUTH_REFRESH_COOKIE_SECURE:-true}
       ACCESS_TOKEN_LIFETIME_MINUTES: ${ACCESS_TOKEN_LIFETIME_MINUTES:-15}
       REFRESH_TOKEN_LIFETIME_DAYS: ${REFRESH_TOKEN_LIFETIME_DAYS:-30}
+      PYTHONPATH: /app/src
       AI_PROVIDER: ${AI_PROVIDER:-}
       AI_MODEL: ${AI_MODEL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -40,6 +41,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src
+    command: ["uvicorn", "orin_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "${API_PORT:-8100}:8000"
     restart: unless-stopped
@@ -50,8 +54,13 @@ services:
       dockerfile: infrastructure/docker/web.Dockerfile
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8100}
+      VITE_USE_POLLING: "true"
     depends_on:
       - api
+    volumes:
+      - ./apps/web:/app/apps/web
+      - ./packages:/app/packages
+      - web_node_modules:/app/apps/web/node_modules
     ports:
       - "${WEB_PORT:-5273}:5173"
 
@@ -68,3 +77,4 @@ services:
 
 volumes:
   postgres_data:
+  web_node_modules:

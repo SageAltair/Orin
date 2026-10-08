@@ -66,7 +66,7 @@ def test_interpreter_validates_json_enum_strings() -> None:
 
 def test_interpreter_returns_safe_conversational_response_for_greeting() -> None:
     provider = FakeProvider('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Hey! What can I help you with?"}}')
-    proposal = AIInterpreter(provider, "model").interpret("hey")
+    proposal = AIInterpreter(provider, "model").interpret("Help me figure this out")
     assert proposal.intent == IntentName.RESPOND
     assert proposal.parameters.response == "Hey! What can I help you with?"
 
@@ -78,9 +78,16 @@ def test_interpreter_accepts_task_proposal_from_fenced_json() -> None:
     assert proposal.parameters.title == "Call John"
 
 
+def test_interpreter_ignores_null_optional_parameters_returned_by_providers() -> None:
+    provider = FakeProvider('{"intent":"CREATE_TASK","confidence":0.9,"parameters":{"title":"Call John","description":null,"due_at":null,"project_id":null,"task_id":null,"name":null,"status":null,"limit":null,"response":null,"fields_to_update":null}}')
+    proposal = AIInterpreter(provider, "model").interpret("Create a task called Call John")
+    assert proposal.intent == IntentName.CREATE_TASK
+    assert proposal.parameters.title == "Call John"
+
+
 def test_interpreter_repairs_malformed_or_unstructured_output() -> None:
     provider = FakeProvider(["I can help with that!", '{"intent":"RESPOND","confidence":0.9,"parameters":{"response":"Hey!"}}'])
-    proposal = AIInterpreter(provider, "model").interpret("hey")
+    proposal = AIInterpreter(provider, "model").interpret("Help me figure this out")
     assert proposal.intent == IntentName.RESPOND
     assert provider.calls == 2
 
@@ -88,7 +95,7 @@ def test_interpreter_repairs_malformed_or_unstructured_output() -> None:
 def test_interpreter_rejects_unrepairable_output() -> None:
     provider = FakeProvider("not json")
     with pytest.raises(AIProviderError, match="invalid command proposal"):
-        AIInterpreter(provider, "model").interpret("hey")
+        AIInterpreter(provider, "model").interpret("Help me figure this out")
 
 
 def test_streaming_yields_only_text_and_sends_stream_request(monkeypatch: pytest.MonkeyPatch) -> None:

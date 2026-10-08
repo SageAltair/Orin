@@ -285,6 +285,10 @@ def _parse_intent(raw: str) -> AIIntent:
                     continue
         else:
             raise ValueError("No JSON object in model response")
+    if isinstance(payload, dict) and isinstance(payload.get("parameters"), dict):
+        payload["parameters"] = {
+            key: value for key, value in payload["parameters"].items() if value is not None
+        }
     return AIIntent.model_validate_json(json.dumps(payload))
 
 
@@ -293,6 +297,12 @@ class AIInterpreter:
         self.provider, self.model = provider, model
 
     def interpret(self, command: str) -> AIIntent:
+        if re.fullmatch(r"(?:hi|hey|hello|good morning|good afternoon|good evening)[.!?,\s]*", command.strip(), re.IGNORECASE):
+            return AIIntent(
+                intent=IntentName.RESPOND,
+                confidence=1.0,
+                parameters=IntentParameters(response="Hey! What can I help you with?"),
+            )
         schema = AIIntent.model_json_schema()
         raw = self.provider.structured_output(system=SYSTEM_INSTRUCTIONS, user=command, model=self.model, schema=schema)
         try:
