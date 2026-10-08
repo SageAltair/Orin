@@ -11,7 +11,7 @@ export interface Task { id: string; title: string; description: string | null; s
 export interface Project { id: string; name: string; description: string | null; status: string; created_at: string; updated_at: string }
 export interface Activity { id: string; summary: string; activity_type: string; created_at: string; task_id: string | null; project_id: string | null; command_id?: string | null; intent?: string | null; result_status?: string }
 export interface Preferences { density: "comfortable" | "compact"; theme: "light" | "dark" | "system"; locale: string; visible_capabilities: string[]; hidden_capabilities: string[]; pinned_capabilities: string[] }
-export interface CommandResult { command_id: string; status: string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string }
+export interface CommandResult { command_id: string; status: "completed" | "awaiting_approval" | "denied" | "failed" | "unsupported" | string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string; execution?: { success: boolean; action: string; status: string; result: Record<string, unknown> | Record<string, unknown>[] | null; error: string | null; approval_required: boolean; approval_id: string | null; audit_id: string | null } | null }
 
 async function refresh(): Promise<boolean> {
   if (!refreshPromise) refreshPromise = fetch(`${baseUrl}/api/v1/auth/refresh`, { method: "POST", credentials: "include" }).then(async response => {

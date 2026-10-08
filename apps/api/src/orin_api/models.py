@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -285,6 +286,32 @@ class Approval(TimestampMixin, Base):
     status: Mapped[ApprovalStatus] = mapped_column(enum_column(ApprovalStatus, "approval_status"), nullable=False, default=ApprovalStatus.PENDING, server_default=ApprovalStatus.PENDING.value)
     decision_note: Mapped[str | None] = mapped_column(Text)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    action_name: Mapped[str | None] = mapped_column(String(80))
+    action_payload: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    risk_level: Mapped[str | None] = mapped_column(String(20))
+    permission: Mapped[str | None] = mapped_column(String(80))
+    reversible: Mapped[bool | None] = mapped_column(Boolean)
+
+
+class ExecutionAudit(CreatedAtMixin, Base):
+    __tablename__ = "execution_audit"
+    __table_args__ = (
+        Index("ix_execution_audit_user_created", "user_id", "created_at"),
+        Index("ix_execution_audit_command", "command_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    command_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("commands.id", ondelete="CASCADE"), nullable=False)
+    action_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False)
+    permission: Mapped[str] = mapped_column(String(80), nullable=False)
+    approval_required: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    execution_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    result_status: Mapped[str] = mapped_column(String(30), nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(String(40))
+    entity_id: Mapped[str | None] = mapped_column(String(36))
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("approvals.id", ondelete="SET NULL"))
 
 
 class Activity(CreatedAtMixin, Base):

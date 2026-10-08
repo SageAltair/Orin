@@ -213,13 +213,6 @@ def test_command_completion_resolves_only_the_users_exact_task_name(client: Test
     assert activity["command_id"] == response.json()["command_id"]
 
 
-def test_task_reference_normalization_ignores_conversational_wrappers() -> None:
-    from orin_api.domain_router import _normalize_task_reference
-
-    assert _normalize_task_reference("the Website task") == _normalize_task_reference("Website")
-    assert _normalize_task_reference('Task called "Website"') == _normalize_task_reference("Website")
-
-
 def test_command_rejects_task_id_owned_by_another_user(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     import orin_api.domain_router as domain_router
     from orin_api.database import get_session
@@ -247,5 +240,7 @@ def test_command_rejects_task_id_owned_by_another_user(client: TestClient, monke
     monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
     app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
     response = client.post("/api/v1/commands", json={"text": "complete private task"})
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json()["status"] == "denied"
+    assert response.json()["execution"]["status"] == "denied"
     assert client.get("/api/v1/tasks").json() == []

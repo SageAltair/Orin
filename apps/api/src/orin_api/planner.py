@@ -1,28 +1,30 @@
-"""Translate validated model proposals into the application's explicit action set."""
+"""Translate validated AI intents into registered application actions."""
 from dataclasses import dataclass
+from typing import Any
 
-from orin_api.ai import AIIntent, IntentName, IntentParameters
+from orin_api.ai import AIIntent, IntentName
 
 
 @dataclass(frozen=True)
 class ActionPlan:
+    action: str
+    inputs: dict[str, Any]
     intent: IntentName
-    parameters: IntentParameters
 
 
-_SUPPORTED_ACTIONS = {
-    IntentName.CREATE_TASK,
-    IntentName.UPDATE_TASK,
-    IntentName.COMPLETE_TASK,
-    IntentName.CREATE_PROJECT,
-    IntentName.LIST_PROJECTS,
-    IntentName.LIST_TASKS,
-    IntentName.GET_ACTIVITY,
+_INTENT_ACTIONS = {
+    IntentName.CREATE_TASK: "create_task",
+    IntentName.UPDATE_TASK: "update_task",
+    IntentName.COMPLETE_TASK: "complete_task",
+    IntentName.CREATE_PROJECT: "create_project",
+    IntentName.LIST_PROJECTS: "list_projects",
+    IntentName.LIST_TASKS: "list_tasks",
+    IntentName.GET_ACTIVITY: "get_activity",
 }
 
 
 def plan_intent(proposal: AIIntent) -> ActionPlan | None:
-    """Return a plan only for explicitly supported application actions."""
-    if proposal.intent not in _SUPPORTED_ACTIONS:
+    action = _INTENT_ACTIONS.get(proposal.intent)
+    if action is None:
         return None
-    return ActionPlan(intent=proposal.intent, parameters=proposal.parameters)
+    return ActionPlan(action=action, inputs=proposal.parameters.model_dump(exclude_none=True, mode="python"), intent=proposal.intent)

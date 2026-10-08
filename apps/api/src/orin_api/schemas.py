@@ -123,6 +123,12 @@ class CommandResult(BaseModel):
     intent: str | None = None
     result: dict[str, object] | list[dict[str, object]] | None = None
     message: str
+    execution: dict[str, object] | None = None
+
+
+class ApprovalDecision(BaseModel):
+    approved: bool
+    note: Annotated[str | None, StringConstraints(max_length=1000)] = None
 
 
 class RegisterRequest(BaseModel):

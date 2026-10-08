@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import uuid
-import re
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
@@ -20,6 +20,8 @@ from orin_api.models import (
     Capability,
     Command,
     CommandStatus,
+    Approval,
+    ApprovalStatus,
     Project,
     ProjectStatus,
     Task,
@@ -41,6 +43,7 @@ from orin_api.schemas import (
     TaskUpdate,
     CommandCreate,
     CommandResult,
+    ApprovalDecision,
 )
 from orin_api.services import (
     add_activity,
@@ -52,18 +55,13 @@ from orin_api.services import (
     update_preferences,
 )
 from orin_api.planner import plan_intent
-import logging
+from orin_api.execution import ActionContext, ActionRequest, ActionStatus, ExecutionEngine, ExecutionResult
+from orin_api.execution_actions import build_action_registry
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 logger = logging.getLogger(__name__)
-
-
-def _normalize_task_reference(reference: str) -> str:
-    normalized = re.sub(r"[^\w\s-]", " ", reference.strip().strip("\"'`“”‘’")).casefold()
-    normalized = re.sub(r"\s+", " ", normalized)
-    normalized = re.sub(r"^(?:the|my|a)\s+", "", normalized)
-    normalized = re.sub(r"^(?:task\s+(?:called|named)\s+)", "", normalized)
-    return re.sub(r"\s+task$", "", normalized).strip()
+ACTION_REGISTRY = build_action_registry()
+EXECUTION_ENGINE = ExecutionEngine(ACTION_REGISTRY)
 
 
 @router.post("/commands", response_model=CommandResult, status_code=status.HTTP_200_OK)
@@ -81,113 +79,28 @@ def submit_command(
             raise AIProviderError("AI command interpretation is not configured")
         model = ModelSelector(settings.ai_model).select(AITaskType.COMMAND_INTERPRETATION)
         proposal = AIInterpreter(create_provider(settings), model).interpret(data.text)
-        p = proposal.parameters
-        plan = plan_intent(proposal)
         if proposal.intent == IntentName.RESPOND:
             command.status = CommandStatus.COMPLETED
             session.commit()
-            return CommandResult(
-                command_id=command.id,
-                status="completed",
-                intent=proposal.intent.value,
-                result={"response": p.response or "Hello! What would you like help with?"},
-                message=p.response or "Hello! What would you like help with?",
-            )
+            return CommandResult(command_id=command.id, status="completed", intent="RESPOND",
+                result={"response": proposal.parameters.response}, message=proposal.parameters.response or "Hello! What would you like help with?")
         if proposal.intent == IntentName.UNSUPPORTED:
             command.status = CommandStatus.FAILED
             session.commit()
             return CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED", message="This request is not supported.")
-
+        plan = plan_intent(proposal)
         if plan is None:
-            raise HTTPException(status_code=422, detail="Unsupported command intent")
-        result: dict[str, object] | list[dict[str, object]] | None
-        if plan.intent == IntentName.CREATE_TASK:
-            project_id = p.project_id
-            validate_task_links(session, user.id, project_id, None)
-            due_at = datetime.fromisoformat(p.due_at.replace("Z", "+00:00")) if p.due_at else None
-            task = Task(owner_id=user.id, title=p.title or "", description=p.description, due_at=due_at, project_id=project_id)
-            session.add(task)
-            session.flush()
-            command.task_id = task.id
-            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_CREATED, summary=f"Created task: {task.title}", command_id=command.id, intent=plan.intent.value)
-            result = {"id": str(task.id), "title": task.title, "status": task.status.value}
-        elif plan.intent in (IntentName.UPDATE_TASK, IntentName.COMPLETE_TASK):
-            if p.task_id:
-                task = session.scalar(select(Task).where(Task.id == p.task_id, Task.owner_id == user.id))
-            else:
-                reference = _normalize_task_reference(p.task_reference or "")
-                owned_tasks = session.scalars(select(Task).where(Task.owner_id == user.id)).all()
-                command_reference = _normalize_task_reference(data.text)
-                command_matches = [
-                    task for task in owned_tasks
-                    if _normalize_task_reference(task.title) in command_reference
-                ]
-                reference_matches = [task for task in owned_tasks if _normalize_task_reference(task.title) == reference]
-                matches = command_matches if len(command_matches) == 1 else reference_matches
-                if not matches and reference:
-                    reference_words = set(reference.split())
-                    matches = [
-                        task for task in owned_tasks
-                        if set(_normalize_task_reference(task.title).split()).issubset(reference_words)
-                    ]
-                if len(matches) > 1:
-                    raise HTTPException(status_code=409, detail="More than one task matches that name. Please be more specific.")
-                task = matches[0] if matches else None
-            if task is None:
-                raise HTTPException(status_code=404, detail="Task not found in your workspace")
-            changes = {"status": TaskStatus.DONE} if plan.intent == IntentName.COMPLETE_TASK else dict(p.fields_to_update or {})
-            if "project_id" in changes and changes["project_id"] is not None:
-                changes["project_id"] = uuid.UUID(str(changes["project_id"]))
-            try:
-                validated = TaskUpdate.model_validate(changes)
-            except ValidationError as exc:
-                raise HTTPException(status_code=422, detail="Task update parameters are invalid") from exc
-            changes = validated.model_dump(exclude_unset=True)
-            validate_task_links(session, user.id, changes.get("project_id", task.project_id), task.assignee_id)
-            for field, value in changes.items():
-                setattr(task, field, value)
-            command.task_id = task.id
-            summary = f"Completed task: {task.title}" if plan.intent == IntentName.COMPLETE_TASK else f"Updated task: {task.title}"
-            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=summary, command_id=command.id, intent=plan.intent.value)
-            result = {"id": str(task.id), "title": task.title, "status": task.status.value}
-        elif plan.intent == IntentName.CREATE_PROJECT:
-            project = Project(owner_id=user.id, name=p.name or "", description=p.description)
-            session.add(project)
-            session.flush()
-            add_project_owner_membership(session, project)
-            command.project_id = project.id
-            add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project.id, activity_type=ActivityType.PROJECT_CREATED, summary=f"Created project: {project.name}", command_id=command.id, intent=plan.intent.value)
-            result = {"id": str(project.id), "name": project.name, "status": project.status.value}
-        elif plan.intent == IntentName.LIST_PROJECTS:
-            statement = select(Project).where(Project.owner_id == user.id)
-            if p.status is not None:
-                statement = statement.where(Project.status == ProjectStatus(p.status))
-            rows = session.scalars(statement.order_by(Project.updated_at.desc()).limit(p.limit or 50)).all()
-            result = [{"id": str(row.id), "name": row.name, "status": row.status.value} for row in rows]
-        elif plan.intent == IntentName.LIST_TASKS:
-            statement = select(Task).where(Task.owner_id == user.id)
-            if p.status is not None:
-                try:
-                    task_status = TaskStatus(p.status)
-                except ValueError as exc:
-                    raise HTTPException(status_code=422, detail="Task status filter is invalid") from exc
-                statement = statement.where(Task.status == task_status)
-            if p.project_id is not None:
-                project_id = p.project_id
-                validate_task_links(session, user.id, project_id, None)
-                statement = statement.where(Task.project_id == project_id)
-            rows = session.scalars(statement.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc()).limit(p.limit or 50)).all()
-            result = [{"id": str(row.id), "title": row.title, "status": row.status.value} for row in rows]
-        elif plan.intent == IntentName.GET_ACTIVITY:
-            rows = session.scalars(select(Activity).where(Activity.user_id == user.id).order_by(Activity.created_at.desc()).limit(p.limit or 50)).all()
-            result = [{"id": str(row.id), "activity_type": row.activity_type.value, "summary": row.summary, "created_at": row.created_at.isoformat()} for row in rows]
-        else:
-            raise HTTPException(status_code=422, detail="Unsupported command intent")
-        command.status = CommandStatus.COMPLETED
-        session.commit()
-        return CommandResult(command_id=command.id, status="completed", intent=proposal.intent.value, result=result, message="Command completed.")
+            command.status = CommandStatus.FAILED
+            session.commit()
+            return CommandResult(command_id=command.id, status="unsupported", intent=proposal.intent.value, message="This request is not supported.")
+        ensure_user_preferences(session, user)
+        result = EXECUTION_ENGINE.execute(ActionRequest(action=plan.action, inputs=plan.inputs),
+            ActionContext(session=session, user_id=user.id, command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=data.text))
+        return _commit_execution_result(session, command, plan.intent.value, result)
     except AIProviderError as exc:
+        session.rollback()
         command.status = CommandStatus.FAILED
+        session.add(command)
         session.commit()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, ValidationError) as exc:
@@ -197,13 +110,95 @@ def submit_command(
         session.commit()
         raise HTTPException(status_code=422, detail="Command parameters are invalid") from exc
     except HTTPException:
-        command.status = CommandStatus.FAILED
-        session.commit()
+        session.rollback()
         raise
     except SQLAlchemyError as exc:
         session.rollback()
         logger.exception("Database failure while processing command", extra={"user_id": str(user.id)})
         raise HTTPException(status_code=503, detail="Orin could not save this command. Please retry shortly.") from exc
+
+
+def _user_action_permissions(session: Session, user_id: uuid.UUID) -> frozenset[str]:
+    grants = {
+        row.code for row in session.execute(
+            select(Capability.code).join(UserCapability, UserCapability.capability_id == Capability.id)
+            .where(UserCapability.user_id == user_id, UserCapability.granted.is_(True), Capability.is_enabled.is_(True))
+        ).all()
+    }
+    permissions: set[str] = set()
+    if "tasks" in grants:
+        permissions.update({"task.create", "task.update", "task.complete", "task.read"})
+    if "projects" in grants:
+        permissions.update({"project.create", "project.read"})
+    if "activity" in grants:
+        permissions.add("activity.read")
+    if "settings" in grants:
+        permissions.update({"approval.request", "notification.send"})
+    return frozenset(permissions)
+
+
+def _execution_payload(result: ExecutionResult) -> dict[str, object]:
+    return {"success": result.success, "action": result.action, "status": result.status.value,
+        "result": result.result, "error": result.error, "approval_required": result.approval_required,
+        "approval_id": str(result.approval_id) if result.approval_id else None,
+        "audit_id": str(result.audit_id) if result.audit_id else None}
+
+
+def _commit_execution_result(session: Session, command: Command, intent: str | None, result: ExecutionResult) -> CommandResult:
+    statuses = {ActionStatus.EXECUTED: "completed", ActionStatus.PENDING_APPROVAL: "awaiting_approval",
+        ActionStatus.DENIED: "denied", ActionStatus.INVALID: "failed", ActionStatus.FAILED: "failed",
+        ActionStatus.UNSUPPORTED: "unsupported"}
+    command.status = CommandStatus.AWAITING_APPROVAL if result.status == ActionStatus.PENDING_APPROVAL else (
+        CommandStatus.COMPLETED if result.status == ActionStatus.EXECUTED else CommandStatus.FAILED)
+    if result.success and isinstance(result.result, dict) and result.result.get("id"):
+        entity_id = uuid.UUID(str(result.result["id"]))
+        if result.result.get("entity_type") == "task":
+            command.task_id = entity_id
+        elif result.result.get("entity_type") == "project":
+            command.project_id = entity_id
+    session.commit()
+    message = result.error or ("Action completed." if result.success else "Approval is required." if result.approval_required else "The action was not executed.")
+    return CommandResult(command_id=command.id, status=statuses[result.status], intent=intent,
+        result=result.result, message=message, execution=_execution_payload(result))
+
+
+@router.post("/actions", response_model=CommandResult, status_code=status.HTTP_200_OK)
+def execute_registered_action(request: ActionRequest, user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)) -> CommandResult:
+    command = Command(user_id=user.id, text=f"User action request: {request.action}")
+    session.add(command)
+    try:
+        session.flush()
+        ensure_user_preferences(session, user)
+        result = EXECUTION_ENGINE.execute(request, ActionContext(session=session, user_id=user.id,
+            command_id=command.id, permissions=_user_action_permissions(session, user.id), command_text=command.text))
+        return _commit_execution_result(session, command, request.action.upper(), result)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        logger.exception("Database failure while executing registered action", extra={"user_id": str(user.id)})
+        raise HTTPException(status_code=503, detail="Orin could not save this action. Please retry shortly.") from exc
+
+
+@router.post("/approvals/{approval_id}/decision", response_model=CommandResult)
+def decide_approval(approval_id: uuid.UUID, decision: ApprovalDecision, user: User = Depends(get_current_user),
+    session: Session = Depends(get_session)) -> CommandResult:
+    approval = session.scalar(select(Approval).where(Approval.id == approval_id, Approval.requested_by_id == user.id))
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    if approval.status != ApprovalStatus.PENDING or not approval.action_name or approval.action_payload is None:
+        raise HTTPException(status_code=409, detail="Approval request is no longer pending")
+    command = session.get(Command, approval.command_id) if approval.command_id else None
+    if command is None or command.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Approval request not found")
+    approval.status = ApprovalStatus.APPROVED if decision.approved else ApprovalStatus.REJECTED
+    approval.decided_by_id = user.id
+    approval.decision_note = decision.note
+    approval.decided_at = datetime.now(timezone.utc)
+    ensure_user_preferences(session, user)
+    result = EXECUTION_ENGINE.execute(ActionRequest(action=approval.action_name, inputs=approval.action_payload),
+        ActionContext(session=session, user_id=user.id, command_id=command.id,
+            permissions=_user_action_permissions(session, user.id), approval_id=approval.id, command_text=command.text))
+    return _commit_execution_result(session, command, approval.action_name.upper(), result)
 
 
 @router.get("/users/me/preferences", response_model=PreferencesRead)
