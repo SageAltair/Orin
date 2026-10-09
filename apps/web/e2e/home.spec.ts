@@ -97,12 +97,12 @@ async function signIn(page: Page) {
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
 }
 
-test("home explains Orin without showing request history and offers Ask Orin", async ({ page }) => {
+test("home shows the personal dashboard and offers Ask Orin", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Welcome to Orin" })).toBeVisible();
   await signIn(page);
-  await expect(page.getByRole("heading", { name: "Make space for what matters." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What needs your attention, Morgan?" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("Recent requests")).toHaveCount(0);
@@ -293,7 +293,7 @@ test("compact work toolbar searches, restores, renames, and starts sessions", as
   await signIn(page);
   await page.getByRole("button", { name: "Ask Orin" }).last().click();
   await page.getByRole("button", { name: "Conversation history" }).click();
-  await page.getByRole("button", { name: /Release planning/ }).click();
+  await page.locator(".history-entry").filter({ hasText: "Release planning" }).click();
   await expect(page.getByText("The rollout starts with a pilot.")).toBeVisible();
   await page.getByLabel("Work session title").fill("Release plan revised");
   await page.getByLabel("Work session title").press("Enter");
@@ -362,4 +362,27 @@ test("Ask Orin composer grows for multiline text and sends with Enter", async ({
   expect(uploadedFilename).toBe("brief.txt");
   await expect(composer).toHaveValue("");
   await expect(page.getByText("Message received.")).toBeVisible();
+});
+
+test("home dashboard shows persisted tasks, projects, and work sessions", async ({ page }) => {
+  await mockApi(page);
+  const updated = new Date().toISOString();
+  await page.route("**/api/v1/tasks", route => route.fulfill({ json: [
+    { id: "task-next", title: "Prepare the launch outline", status: "todo", priority: "high", due_at: null, project_id: "project-active" },
+    { id: "task-done", title: "Already finished", status: "done", priority: "urgent", due_at: null, project_id: "project-active" },
+  ] }));
+  await page.route("**/api/v1/projects", route => route.fulfill({ json: [
+    { id: "project-active", name: "Orin launch", description: "Product work", objective: "Ship a reliable first release", status: "active", created_at: updated, updated_at: updated },
+  ] }));
+  await page.route("**/api/v1/conversations", route => route.fulfill({ json: [
+    { id: "session-1", title: "Release planning", task_id: null, project_id: "project-active", objective: "Plan the release", summary: null, pending_question: null, updated_at: updated },
+  ] }));
+  await page.route("**/api/v1/commands?**", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.getByRole("heading", { name: "What needs your attention, Morgan?" })).toBeVisible();
+  await expect(page.getByText("Prepare the launch outline")).toBeVisible();
+  await expect(page.getByText("Already finished")).toHaveCount(0);
+  await expect(page.getByText("Orin launch")).toBeVisible();
+  await expect(page.getByText("Release planning")).toBeVisible();
 });
