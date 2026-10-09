@@ -90,13 +90,21 @@ def test_interpreter_returns_safe_conversational_response_for_greeting() -> None
     "Help me organize my studies, family commitments, a software project, and my search for work into a realistic weekly plan.",
     "I have five ideas, two unfinished projects, and a meeting tomorrow. Help me decide what to do first.",
     "Plan my next month.",
+    "I need income immediately to cover rent next week while finishing a software project.",
+    "I have a confirmed grant deadline on Friday and a family commitment tonight. Help me choose.",
+    "Help me plan around my existing tasks without creating or saving any records.",
 ])
 def test_general_planning_is_a_supported_response(prompt: str) -> None:
     class PlanningProvider(FakeProvider):
         def structured_output(self, **kwargs: object) -> str:
             system = str(kwargs["system"])
-            assert "RESPOND is the general reasoning capability" in system
-            assert "Do not use UNSUPPORTED merely because no dedicated application command matches" in system
+            user = str(kwargs["user"])
+            assert "use RESPOND for general reasoning and conversation" in system
+            assert "Never use UNSUPPORTED because a request lacks a dedicated command" in system
+            assert "Do not invent deadlines, schedules, budgets, income targets, quantities" in system
+            assert "ask at most one high-value follow-up question" in system
+            assert prompt in user
+            assert "No relevant project, task, or saved-memory records were available" in user
             return '{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"## Overview\\n\\nA first-pass plan."}}'
 
     proposal = AIInterpreter(PlanningProvider(""), "model").interpret(prompt)

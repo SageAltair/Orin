@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from orin_api.auth import get_current_user
 from orin_api.database import Base, get_session
 from orin_api.main import app
-from orin_api.models import User
+from orin_api.models import TaskDependency, User
 from orin_api.config import Settings, get_settings
 from orin_api.ai import AIIntent
 
@@ -128,6 +128,69 @@ def test_project_questions_send_only_matching_structured_context_to_ai(client: T
     assert '"name": "The Small Voice"' in captured["context"]
     assert '"content": "Use PostgreSQL"' in captured["context"]
     assert "unrelated" not in captured["context"]
+
+
+def test_planning_context_includes_live_status_decisions_and_task_dependencies(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.database import get_session
+
+    project = _project(client, name="Voice Platform")
+    complete = client.post("/api/v1/tasks", json={"title": "Approve first story", "project_id": project["id"]}).json()
+    blocked = client.post("/api/v1/tasks", json={"title": "Prepare story cards", "project_id": project["id"]}).json()
+    next_task = client.post("/api/v1/tasks", json={"title": "Publish reviewed cards", "project_id": project["id"]}).json()
+    client.patch(f"/api/v1/tasks/{complete['id']}", json={"status": "done"})
+    client.patch(f"/api/v1/tasks/{blocked['id']}", json={"status": "blocked"})
+    client.post("/api/v1/memories", json={
+        "project_id": project["id"], "memory_type": "decision", "title": "Release scope",
+        "content": "Keep the initial release focused on the story library.", "source": "user",
+    })
+    session_factory = app.dependency_overrides[get_session]
+    with next(session_factory()) as session:
+        session.add(TaskDependency(task_id=uuid.UUID(next_task["id"]), depends_on_task_id=uuid.UUID(blocked["id"])))
+        session.commit()
+
+    captured: dict[str, str] = {}
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured["context"] = context or ""
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Use the existing blocker as the next action."}}')
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Help me plan the Voice Platform workstream"})
+    assert response.status_code == 200
+    assert "Approve first story" in captured["context"]
+    assert '"status": "done"' in captured["context"]
+    assert "Prepare story cards" in captured["context"]
+    assert "Publish reviewed cards" in captured["context"]
+    assert '"task": "Prepare story cards", "status": "blocked"' in captured["context"]
+    assert "Keep the initial release focused on the story library" in captured["context"]
+
+
+def test_unrelated_reasoning_does_not_send_workspace_records_to_the_model(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    project = _project(client)
+    client.post("/api/v1/tasks", json={"title": "Review story library", "project_id": project["id"]})
+    captured: dict[str, str] = {}
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured["context"] = context or ""
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Photosynthesis converts light energy into chemical energy."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Explain photosynthesis in one sentence."})
+    assert response.status_code == 200
+    assert captured["context"] == ""
 
 
 @pytest.mark.parametrize(("command", "intent"), [
