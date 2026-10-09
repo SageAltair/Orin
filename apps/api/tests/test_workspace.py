@@ -190,7 +190,36 @@ def test_unrelated_reasoning_does_not_send_workspace_records_to_the_model(
     app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
     response = client.post("/api/v1/commands", json={"text": "Explain photosynthesis in one sentence."})
     assert response.status_code == 200
-    assert captured["context"] == ""
+    assert "Explain photosynthesis" in captured["context"]
+    assert "Review story library" not in captured["context"]
+
+
+def test_planning_uses_stated_workstreams_without_inserting_unrelated_records(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    unrelated = _project(client, name="Healing")
+    client.post("/api/v1/tasks", json={"title": "Call three named contacts", "project_id": unrelated["id"]})
+    client.post("/api/v1/tasks", json={"title": "Offline use improvements"})
+    captured: dict[str, str] = {}
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured["context"] = context or ""
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"I will use the six workstreams you named."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    prompt = "Organize The Small Voice, Orin, AI automation, storytelling videos, income opportunities, and ministry responsibilities into priorities."
+    response = client.post("/api/v1/commands", json={"text": prompt})
+    assert response.status_code == 200
+    assert all(term in captured["context"] for term in ("The Small Voice", "storytelling videos", "ministry responsibilities"))
+    assert "Healing" not in captured["context"]
+    assert "Call three named contacts" not in captured["context"]
+    assert "Offline use improvements" not in captured["context"]
 
 
 @pytest.mark.parametrize(("command", "intent"), [
@@ -240,7 +269,7 @@ def test_explicit_hide_tool_command_changes_the_saved_layout(client: TestClient,
     class FakeInterpreter:
         def __init__(self, provider: object, model: str):
             pass
-        def interpret(self, _command: str) -> AIIntent:
+        def interpret(self, _command: str, *, context: str | None = None) -> AIIntent:
             return AIIntent.model_validate_json('{"intent":"SET_TOOL_VISIBILITY","confidence":0.95,"parameters":{"tool":"projects","visibility":"hidden"}}')
     monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
     app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")

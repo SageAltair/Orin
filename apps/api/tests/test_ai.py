@@ -85,6 +85,29 @@ def test_interpreter_returns_safe_conversational_response_for_greeting() -> None
     assert proposal.parameters.response == "Hey! What can I help you with?"
 
 
+def test_interpreter_passes_images_to_vision_capable_models_and_rejects_unsupported_models() -> None:
+    class VisionProvider(FakeProvider):
+        def __init__(self, response: str, vision: bool):
+            super().__init__(response)
+            self.vision = vision
+            self.images: list[dict[str, str]] | None = None
+
+        def supports_vision(self, _model: str) -> bool:
+            return self.vision
+
+        def structured_output(self, **kwargs: object) -> str:
+            self.images = kwargs.get("images")  # type: ignore[assignment]
+            return super().structured_output(**kwargs)
+
+    response = '{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"The image shows a landscape."}}'
+    image = {"mime_type": "image/png", "data": "aGVsbG8="}
+    provider = VisionProvider(response, True)
+    AIInterpreter(provider, "gpt-4o-mini").interpret("Describe this image", images=[image])
+    assert provider.images == [image]
+    with pytest.raises(AIProviderError, match="cannot analyze images"):
+        AIInterpreter(VisionProvider(response, False), "text-only").interpret("Describe this image", images=[image])
+
+
 @pytest.mark.parametrize("prompt", [
     "I need to improve The Small Voice, finish Orin, learn AI automation, create Christian storytelling videos, find income opportunities, and stay consistent with my ministry responsibilities. I feel like there are too many things competing for my attention. Organize these into projects, desired outcomes, next actions, dependencies, and a realistic priority order. Do not invent deadlines. Identify what information you still need from me.",
     "Help me organize my studies, family commitments, a software project, and my search for work into a realistic weekly plan.",

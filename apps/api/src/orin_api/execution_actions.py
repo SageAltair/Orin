@@ -17,7 +17,7 @@ from orin_api.execution import (
 from orin_api.models import (
     Activity, ActivityType, Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit,
     DeviceStatus, EnvironmentPreference, FocusSession, Memory, Project, ProjectStatus, ProjectMember,
-    ProjectRole, Task, TaskStatus, User, UserCapability, WorkerDevice, Capability,
+    ProjectRole, Task, TaskPriority, TaskStatus, User, UserCapability, WorkerDevice, Capability,
 )
 from orin_api.schemas import TaskUpdate
 from orin_api.services import add_activity, ensure_user_preferences
@@ -29,6 +29,31 @@ class CreateTaskInput(StrictActionInput):
     description: str | None = None
     due_at: str | None = None
     project_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    priority: str = Field(default="normal", pattern=r"^(low|normal|high|urgent)$")
+
+    @model_validator(mode="after")
+    def validate_task_role_fields(self) -> CreateTaskInput:
+        if self.assignee_id is not None:
+            from orin_api.models import User
+
+            if context := getattr(self, "context", None):
+                user = context.session.get(User, self.assignee_id)
+                if user is None or user.owner_id != context.user_id:
+                    raise ValueError("Assignee must be an owned workspace user.")
+        return self
+
+
+class BatchTaskInput(StrictActionInput):
+    tasks: list[dict[str, Any]] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_batch(self) -> BatchTaskInput:
+        for index, item in enumerate(self.tasks):
+            title = item.get("title")
+            if not title or not str(title).strip():
+                raise ValueError(f"Task at index {index} is missing a title.")
+        return self
 
 
 class UpdateTaskInput(StrictActionInput):
@@ -217,14 +242,97 @@ def _resolve_task(context: ActionContext, task_id: uuid.UUID | None, reference: 
 
 def _create_task(context: ActionContext, raw: CreateTaskInput) -> dict[str, Any]:
     project_id = raw.project_id
-    if project_id and context.session.scalar(select(Project.id).where(Project.id == project_id, Project.owner_id == context.user_id)) is None:
-        raise ActionExecutionError("Project not found in your workspace.")
-    due_at = datetime.fromisoformat(raw.due_at.replace("Z", "+00:00")) if raw.due_at else None
-    task = Task(owner_id=context.user_id, title=raw.title.strip(), description=raw.description, due_at=due_at, project_id=project_id)
+    if project_id is not None:
+        project = context.session.scalar(select(Project).where(Project.id == project_id, Project.owner_id == context.user_id))
+        if project is None:
+            raise ActionExecutionError("Project not found in your workspace.", status=ActionStatus.DENIED)
+    if raw.assignee_id is not None:
+        assignee = context.session.scalar(select(User).where(User.id == raw.assignee_id, User.owner_id == context.user_id))
+        if assignee is None:
+            raise ActionExecutionError("Assignee not found in your workspace.", status=ActionStatus.DENIED)
+    due_at = None
+    if raw.due_at:
+        due_at = datetime.fromisoformat(raw.due_at.replace("Z", "+00:00"))
+    task = Task(
+        owner_id=context.user_id,
+        title=raw.title.strip(),
+        description=raw.description,
+        due_at=due_at,
+        project_id=project_id,
+        assignee_id=raw.assignee_id,
+        priority=TaskPriority(raw.priority),
+    )
     context.session.add(task)
     context.session.flush()
-    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_CREATED, summary=f"Created task: {task.title}", command_id=context.command_id, intent="CREATE_TASK")
-    return {"id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"}
+    context.session.commit()
+    return {
+        "id": str(task.id),
+        "entity_type": "task",
+        "title": task.title,
+        "description": task.description,
+        "status": str(task.status),
+        "priority": str(task.priority),
+        "due_at": task.due_at.isoformat() if task.due_at else None,
+        "project_id": str(task.project_id) if task.project_id else None,
+        "assignee_id": str(task.assignee_id) if task.assignee_id else None,
+        "owner_id": str(task.owner_id),
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+    }
+
+
+def _create_tasks_batch(context: ActionContext, raw: BatchTaskInput) -> list[dict[str, Any]]:
+    created: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for index, item in enumerate(raw.tasks):
+        try:
+            unique_id = item.id or str(uuid.uuid4())
+            title = (item.title or "").strip()
+            if not title:
+                failed.append({"index": index, "id": unique_id, "title": "", "error": "Task title is required."})
+                continue
+            project_id = item.project_id
+            if project_id is not None:
+                project = context.session.scalar(select(Project).where(Project.id == project_id, Project.owner_id == context.user_id))
+                if project is None:
+                    raise ActionExecutionError("Project not found in your workspace.", status=ActionStatus.DENIED)
+            assignee_id = item.assignee_id
+            if assignee_id is not None:
+                assignee = context.session.scalar(select(User).where(User.id == assignee_id, User.owner_id == context.user_id))
+                if assignee is None:
+                    raise ActionExecutionError("Assignee not found in your workspace.", status=ActionStatus.DENIED)
+            due_at = None
+            if item.due_at:
+                try:
+                    due_at = datetime.fromisoformat(item.due_at.replace("Z", "+00:00"))
+                except ValueError:
+                    raise ActionExecutionError("Task due date is not a valid ISO-8601 timestamp.", status=ActionStatus.DENIED)
+            priority = TaskPriority(item.priority) if item.priority else TaskPriority.NORMAL
+            task = Task(
+                owner_id=context.user_id,
+                title=title,
+                description=item.description,
+                due_at=due_at,
+                project_id=project_id,
+                assignee_id=assignee_id,
+                priority=priority,
+            )
+            context.session.add(task)
+            context.session.flush()
+            created.append({"index": index, "id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"})
+        except ActionExecutionError as exc:
+            failed.append({"index": index, "id": str(uuid.uuid4()), "title": (item.title or "").strip(), "error": str(exc)})
+        except ValueError as exc:
+            failed.append({"index": index, "id": str(uuid.uuid4()), "title": (item.title or "").strip(), "error": "Task priority is not a valid enum value."})
+    if failed:
+        result = {"created": created, "failed": failed, "success": True}
+    else:
+        result = {"created": created, "failed": [], "success": True}
+    context.session.flush()
+    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
+        activity_type=ActivityType.TASKS_CREATED_BATCH, summary=f"Batch created {len(created)} tasks; {len(failed)} failed.",
+        command_id=context.command_id, intent="CREATE_TASKS_BATCH")
+    return result
 
 
 def _update_task(context: ActionContext, raw: UpdateTaskInput) -> dict[str, Any]:
@@ -357,6 +465,7 @@ def build_action_registry(
 
     definitions = [
         ActionDefinition("create_task", CreateTaskInput, "task.create", RiskLevel.LOW, _create_task, Reversibility.REVERSIBLE),
+        ActionDefinition("create_tasks_batch", BatchTaskInput, "task.create", RiskLevel.LOW, _create_tasks_batch, Reversibility.REVERSIBLE),
         ActionDefinition("update_task", UpdateTaskInput, "task.update", RiskLevel.LOW, _update_task, Reversibility.REVERSIBLE),
         ActionDefinition("complete_task", CompleteTaskInput, "task.complete", RiskLevel.LOW, _complete_task, Reversibility.REVERSIBLE),
         ActionDefinition("create_project", CreateProjectInput, "project.create", RiskLevel.LOW, _create_project, Reversibility.REVERSIBLE),

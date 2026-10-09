@@ -17,11 +17,18 @@ export interface EnvironmentPreference { surface: string; item: string; visibili
 export interface WorkerDevice { id: string; name: string; platform: string; version: string; status: "pending" | "active" | "revoked" | "offline"; last_seen_at: string | null; created_at: string; credential?: string }
 export type ExecutionTarget = "local" | "cloud" | "auto";
 export interface WorkerJob { id: string; action: string; status: string; requested_target: ExecutionTarget; selected_target: Exclude<ExecutionTarget, "auto"> | null; progress: string | null; result: Record<string, unknown> | null; failure: string | null; created_at: string; finished_at: string | null }
-export interface CommandResult { command_id: string; status: "completed" | "awaiting_approval" | "denied" | "failed" | "unsupported" | string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string; execution?: { success: boolean; action: string; status: string; result: Record<string, unknown> | Record<string, unknown>[] | null; error: string | null; approval_required: boolean; approval_id: string | null; audit_id: string | null } | null }
+export interface CommandResult { command_id: string; conversation_id?: string | null; status: "completed" | "awaiting_approval" | "denied" | "failed" | "unsupported" | string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string; execution?: { success: boolean; action: string; status: string; result: Record<string, unknown> | Record<string, unknown>[] | null; error: string | null; approval_required: boolean; approval_id: string | null; audit_id: string | null } | null }
 export interface CommandHistory extends CommandResult { text: string; created_at: string }
+export interface Conversation { id: string; title: string; task_id: string | null; project_id: string | null; objective: string | null; summary?: string | null; pending_question?: Record<string, unknown> | null; updated_at: string }
+export interface SearchResult { result_id: string; kind: "conversation" | "task" | "project" | "attachment" | "memory"; command_id: string | null; task_id: string | null; project_id: string | null; attachment_id?: string | null; conversation_id: string | null; text: string; excerpt: string; created_at: string; title: string | null }
+export interface Attachment { id: string; conversation_id: string | null; task_id: string | null; filename: string; media_type: string; size_bytes: number; created_at: string }
 
 async function refresh(): Promise<boolean> {
-  if (!refreshPromise) refreshPromise = fetch(`${baseUrl}/api/v1/auth/refresh`, { method: "POST", credentials: "include" }).then(async response => {
+  if (!refreshPromise) refreshPromise = fetch(`${baseUrl}/api/v1/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+    signal: AbortSignal.timeout(8000),
+  }).then(async response => {
     if (!response.ok) { accessToken = null; return false; }
     accessToken = (await response.json() as { access_token: string }).access_token; return true;
   }).catch(() => { accessToken = null; return false; }).finally(() => { refreshPromise = null; });
@@ -30,7 +37,7 @@ async function refresh(): Promise<boolean> {
 
 export async function request<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(options.headers);
-  if (options.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   let response: Response;
   try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, credentials: "include" }); }
@@ -47,6 +54,18 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+export async function requestBlob(path: string): Promise<Blob> {
+  const fetchBlob = async (retry: boolean): Promise<Blob> => {
+    const headers = new Headers();
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    const response = await fetch(`${baseUrl}/api/v1${path}`, { headers, credentials: "include" });
+    if (response.status === 401 && retry && await refresh()) return fetchBlob(false);
+    if (!response.ok) throw new ApiError(`Could not load file (${response.status}).`, response.status);
+    return response.blob();
+  };
+  return fetchBlob(true);
 }
 
 export async function login(email: string, password: string): Promise<User> {

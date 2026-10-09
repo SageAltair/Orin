@@ -32,3 +32,4 @@ Thumbs.db
 # Local data
 *.sqlite3
 *.db
+**/data/attachments/

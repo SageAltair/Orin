@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Activity, ApiError, request } from "./api";
 
 const pageSize = 30;
-const eventTypes = ["command_received", "intent_interpreted", "plan_created", "command_completed", "command_failed", "policy_decision", "approval_requested", "approval_decided", "worker_connected", "worker_disconnected", "worker_job_queued", "worker_job_started", "worker_job_progress", "worker_job_completed", "worker_job_failed", "worker_job_cancelled", "worker_job_timed_out", "integration_operation", "project_created", "project_updated", "task_created", "task_updated", "memory_changed", "focus_updated"];
+const eventTypes = ["command_received", "intent_interpreted", "plan_created", "command_completed", "command_failed", "policy_decision", "approval_requested", "approval_decided", "worker_connected", "worker_disconnected", "worker_job_queued", "worker_job_started", "worker_job_progress", "worker_job_completed", "worker_job_failed", "worker_job_cancelled", "worker_job_timed_out", "integration_operation", "project_created", "project_updated", "task_created", "task_updated", "tasks_created_batch", "memory_changed", "focus_updated"];
 
 type ActivityTimelineProps = { onOpenProject: (projectId: string) => void; onOpenTask: (taskId: string) => void };
 

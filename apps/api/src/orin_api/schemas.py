@@ -129,10 +129,15 @@ class ActivityRead(BaseModel):
 
 class CommandCreate(BaseModel):
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
+    conversation_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
 
 
 class CommandResult(BaseModel):
     command_id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
     status: str
     intent: str | None = None
     result: dict[str, object] | list[dict[str, object]] | None = None
@@ -142,6 +147,44 @@ class CommandResult(BaseModel):
 
 class CommandHistoryRead(CommandResult):
     text: str
+    created_at: datetime
+
+
+class ConversationRead(BaseModel):
+    id: uuid.UUID
+    title: str
+    task_id: uuid.UUID | None
+    project_id: uuid.UUID | None
+    objective: str | None
+    summary: str | None = None
+    pending_question: dict[str, object] | None = None
+    updated_at: datetime
+
+
+class ConversationUpdate(BaseModel):
+    title: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
+
+
+class SearchResultRead(BaseModel):
+    result_id: uuid.UUID
+    kind: str
+    command_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
+    conversation_id: uuid.UUID | None = None
+    text: str
+    excerpt: str
+    created_at: datetime
+    title: str | None
+
+
+class AttachmentRead(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    task_id: uuid.UUID | None
+    filename: str
+    media_type: str
+    size_bytes: int
     created_at: datetime
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     JSON,
     String,
     Text,
@@ -113,6 +114,7 @@ class ActivityType(str, enum.Enum):
     PROJECT_UPDATED = "project_updated"
     TASK_CREATED = "task_created"
     TASK_UPDATED = "task_updated"
+    TASKS_CREATED_BATCH = "tasks_created_batch"
     MEMORY_CHANGED = "memory_changed"
     FOCUS_UPDATED = "focus_updated"
     COMMAND_RECEIVED = "command_received"
@@ -146,14 +148,17 @@ def enum_column(enum_class: type[enum.Enum], name: str) -> Enum:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(), onupdate=lambda: datetime.now(timezone.utc)
     )
 
 
 class CreatedAtMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc), server_default=func.now())
 
 
 class User(TimestampMixin, Base):
@@ -290,6 +295,22 @@ class TaskDependency(CreatedAtMixin, Base):
     task: Mapped[Task] = relationship(foreign_keys=[task_id], back_populates="dependencies")
 
 
+class Conversation(TimestampMixin, Base):
+    """Persistent work session that owns a sequence of user and assistant turns."""
+    __tablename__ = "conversations"
+    __table_args__ = (Index("ix_conversations_user_updated", "user_id", "updated_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False, default="New work session")
+    objective: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    summary_through_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_question: Mapped[dict[str, object] | None] = mapped_column(JSON)
+
+
 class Command(TimestampMixin, Base):
     __tablename__ = "commands"
     __table_args__ = (Index("ix_commands_user_created", "user_id", "created_at"),
@@ -297,6 +318,7 @@ class Command(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("conversations.id", ondelete="SET NULL"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
     task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -306,6 +328,23 @@ class Command(TimestampMixin, Base):
     response_json: Mapped[dict[str, object] | list[dict[str, object]] | None] = mapped_column(JSON)
     response_message: Mapped[str | None] = mapped_column(Text)
     response_execution_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    attachment_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+
+
+class FileAttachment(CreatedAtMixin, Base):
+    __tablename__ = "file_attachments"
+    __table_args__ = (Index("ix_file_attachments_owner_conversation", "owner_id", "conversation_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"))
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    extracted_text: Mapped[str | None] = mapped_column(Text)
 
 
 class RequestRateWindow(Base):

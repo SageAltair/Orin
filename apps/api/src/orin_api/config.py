@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     github_app_client_secret: SecretStr | None = Field(default=None, repr=False)
     github_app_callback_url: str | None = None
     web_app_url: str = "http://localhost:5173"
+    attachment_storage_path: str = "data/attachments"
+    attachment_max_size_bytes: int = Field(default=10_485_760, ge=1024, le=52_428_800)
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> Settings:

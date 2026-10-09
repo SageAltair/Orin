@@ -14,6 +14,7 @@ from orin_api.health.router import router as health_router
 from orin_api.worker_router import router as worker_router
 from orin_api.workspace_router import router as workspace_router
 from orin_api.integration_router import router as integration_router
+from orin_api.attachment_router import router as attachment_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
@@ -31,6 +32,7 @@ app.include_router(domain_router)
 app.include_router(worker_router)
 app.include_router(workspace_router)
 app.include_router(integration_router)
+app.include_router(attachment_router)
 
 
 @app.middleware("http")

@@ -14,9 +14,9 @@ class ProjectContextService:
     def __init__(self, session: Session, user_id: uuid.UUID):
         self.session, self.user_id = session, user_id
 
-    def for_command(self, command: str) -> dict[str, object] | None:
+    def for_command(self, command: str, *, active_objective: str | None = None) -> dict[str, object] | None:
         """Return a bounded workspace snapshot, even for cross-project planning."""
-        normalized = command.casefold()
+        normalized = f"{active_objective or ''} {command}".casefold()
         words = {word for word in re.findall(r"[a-z0-9]+", normalized) if len(word) > 3}
         projects = self.session.scalars(
             select(Project).where(Project.owner_id == self.user_id)
@@ -49,10 +49,19 @@ class ProjectContextService:
             return ({"user_preferences": [{"title": item.title, "content": item.content}
                                             for item in relevant_preferences]}
                     if relevant_preferences else None)
-        selected_projects = matches if matches else [
-            project for project in projects
-            if project.status not in {ProjectStatus.COMPLETED, ProjectStatus.ARCHIVED}
-        ][:15]
+        inventory_request = any(phrase in command.casefold() for phrase in (
+            "all my projects", "all projects", "my existing projects", "review my workspace",
+            "review all my tasks", "what tasks do i have", "list my projects", "list my tasks",
+        ))
+        active_projects = [project for project in projects
+            if project.status not in {ProjectStatus.COMPLETED, ProjectStatus.ARCHIVED}]
+        if matches:
+            selected_projects = matches
+        elif inventory_request:
+            selected_projects = active_projects[:15]
+        else:
+            selected_projects = [project for project in active_projects
+                if {w for w in re.findall(r"[a-z0-9]+", project.name.casefold()) if len(w) > 3}.intersection(words)][:15]
         selected_ids = {project.id for project in selected_projects}
 
         task_query = select(Task).where(Task.owner_id == self.user_id)
@@ -69,6 +78,9 @@ class ProjectContextService:
                 Task.due_at.asc().nulls_last(), Task.updated_at.desc(),
             ).limit(60)
         ).all()
+        if not matches and not inventory_request:
+            selected_tasks = [task for task in selected_tasks if task.project_id in selected_ids or
+                words.intersection(re.findall(r"[a-z0-9]+", task.title.casefold() + " " + (task.description or "").casefold()))]
         selected_task_ids = {task.id for task in selected_tasks}
         dependencies = self.session.execute(
             select(TaskDependency.task_id, Task.title, Task.status, TaskDependency.depends_on_task_id)
@@ -91,7 +103,7 @@ class ProjectContextService:
                 r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))
                  or (asks_decisions and memory.memory_type == "decision")
                  or (memory.project_id in selected_ids and memory.memory_type == "decision")
-                 or (planning_request and memory.memory_type == "commitment"))
+                 or (planning_request and inventory_request and memory.memory_type == "commitment"))
             and (memory.project_id is None or memory.project_id in selected_ids)][:10]
         if not selected_projects and not selected_tasks and not relevant_memories:
             return None

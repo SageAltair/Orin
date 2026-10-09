@@ -234,7 +234,7 @@ def test_ai_worker_action_uses_registry_and_waits_for_user_approval(world: tuple
         def __init__(self, provider: object, model: str):
             pass
 
-        def interpret(self, command: str) -> AIIntent:
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
             return AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_allowed_command","worker_parameters":{"command":"python_tests"}}}')
 
     monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
