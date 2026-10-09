@@ -28,6 +28,9 @@ from orin_api.models import (
     CommandStatus,
     Approval,
     ApprovalStatus,
+    EnvironmentPreference,
+    ExecutionAudit,
+    FocusSession,
     Project,
     ProjectStatus,
     Task,
@@ -503,43 +506,147 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
     statuses = {ActionStatus.EXECUTED: "completed", ActionStatus.PENDING_APPROVAL: "awaiting_approval",
         ActionStatus.DENIED: "denied", ActionStatus.INVALID: "failed", ActionStatus.FAILED: "failed",
         ActionStatus.UNSUPPORTED: "unsupported"}
-    command.status = CommandStatus.AWAITING_APPROVAL if result.status == ActionStatus.PENDING_APPROVAL else (
-        CommandStatus.COMPLETED if result.status == ActionStatus.EXECUTED else CommandStatus.FAILED)
+    is_batch = isinstance(result.result, dict) and result.result.get("created") is not None and result.result.get("failed") is not None
+    batch_created = len(result.result.get("created", [])) if is_batch else 0
+    batch_failed = len(result.result.get("failed", [])) if is_batch else 0
+    partial_batch = is_batch and batch_created > 0 and batch_failed > 0
+    failed_batch = is_batch and batch_created == 0 and batch_failed > 0
+    response_status = "partial_success" if partial_batch else "failed" if failed_batch else statuses[result.status]
+    final_command_status = CommandStatus.AWAITING_APPROVAL if result.status == ActionStatus.PENDING_APPROVAL else (
+        CommandStatus.FAILED if failed_batch else CommandStatus.COMPLETED if result.status == ActionStatus.EXECUTED else CommandStatus.FAILED)
+    # Keep successful commands non-terminal until their committed result has
+    # been read back and checked below.
+    command.status = CommandStatus.SUBMITTED if result.success else final_command_status
+    if failed_batch:
+        result = ExecutionResult(success=False, action=result.action, status=ActionStatus.FAILED,
+            result=result.result, error="No batch items were created.", audit_id=result.audit_id)
     if result.success and isinstance(result.result, dict) and result.result.get("id"):
         entity_id = uuid.UUID(str(result.result["id"]))
         if result.result.get("entity_type") == "task":
             command.task_id = entity_id
         elif result.result.get("entity_type") == "project":
             command.project_id = entity_id
-    activity_status = statuses[result.status]
-    if result.status != ActionStatus.PENDING_APPROVAL:
-        if result.result is not None and isinstance(result.result, dict) and result.result.get("created") is not None:
-            created_count = len(result.result["created"])
-            failed_count = len(result.result.get("failed", []))
-            event_type = ActivityType.TASKS_CREATED_BATCH
-            summary = f"Batch created {created_count} tasks; {failed_count} failed."
-        else:
-            event_type = ActivityType.COMMAND_COMPLETED if result.status == ActionStatus.EXECUTED else ActivityType.COMMAND_FAILED
-            summary = "Command completed" if activity_status == "completed" else f"Command {activity_status}"
-        add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
-            activity_type=event_type, summary=summary,
-            command_id=command.id, intent=intent, result_status=activity_status,
-            severity="info" if activity_status == "completed" else "warning", source="command_api",
-            correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
+    activity_status = "partial_success" if partial_batch else statuses[result.status]
     if result.approval_id:
         add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
             activity_type=ActivityType.APPROVAL_REQUESTED, summary="Approval requested",
             command_id=command.id, approval_id=result.approval_id, intent=intent,
             result_status="pending", source="approval", correlation_id=str(command.id),
             idempotency_key=f"approval.requested:{result.approval_id}")
-    if result.result is not None and isinstance(result.result, dict) and result.result.get("created") is not None:
+    if is_batch:
         created_count = len(result.result["created"])
         failed_count = len(result.result.get("failed", []))
-        message = f"Batch completed: {created_count} created, {failed_count} failed."
+        failed_items = result.result.get("failed", [])
+        failure_details = " " + "; ".join(
+            f"Item {item.get('index', '?') + 1}: {item.get('error', 'failed')}" for item in failed_items
+        ) if failed_items else ""
+        label = "Batch partially succeeded" if partial_batch else "Batch failed" if failed_batch else "Batch completed"
+        message = f"{label}: {created_count} created, {failed_count} failed.{failure_details}"
     else:
-        message = result.error or ("Action completed." if result.success else ("Approval is required." if result.approval_required else "The action was not executed."))
-    response = CommandResult(command_id=command.id, conversation_id=command.conversation_id, status=statuses[result.status], intent=intent,
+        message = result.error or ("Approval is required." if result.approval_required else "The action was not executed.")
+        if result.success and isinstance(result.result, list):
+            message = f"Retrieved {len(result.result)} matching records from your workspace."
+        if result.success and isinstance(result.result, dict):
+            record = result.result
+            entity_type = record.get("entity_type")
+            record_id = record.get("id")
+            if entity_type == "memory":
+                memory_meta = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+                criteria = memory_meta.get("acceptance_criteria") or []
+                details = (f" Status: {memory_meta.get('status')}. Timing: {memory_meta.get('timing')}."
+                    + (" Acceptance criteria: " + "; ".join(criteria) + "." if criteria else "")
+                    + (f" Completion rule: {memory_meta['completion_rule']}" if memory_meta.get("completion_rule") else ""))
+                message = (f"Saved and verified **{record.get('title', 'memory')}** in your personal Orin memories "
+                    f"(record ID: `{record_id}`). In the app, use Search previous work and search this title, "
+                    f"or ask: ‘Show me my commitment about {record.get('title', 'this item')}, including its "
+                    f"acceptance criteria and current status.’{details}")
+            elif entity_type == "task":
+                message = f"Saved and verified task **{record.get('title', 'task')}** (ID: `{record_id}`) in Tasks."
+            elif entity_type == "project":
+                message = f"Created and verified project **{record.get('name', 'project')}** (ID: `{record_id}`)."
+            elif entity_type == "focus_session":
+                message = f"Started and verified focus session **{record.get('objective', 'focus session')}** (ID: `{record_id}`)."
+            elif intent == "SET_TOOL_VISIBILITY":
+                message = f"Updated and verified navigation visibility for **{record.get('tool')}** to {record.get('visibility')}."
+            else:
+                message = "The operation ran, but Orin has not verified its outcome."
+    response = CommandResult(command_id=command.id, conversation_id=command.conversation_id, status=response_status, intent=intent,
         result=result.result, message=message, execution=_execution_payload(result))
+    session.commit()
+    # Commit first, then read the row back through the repository session. A
+    # handler return value alone is not evidence that the write is durable.
+    verification_succeeded = not result.success
+    if result.success and is_batch:
+        created_rows = result.result.get("created", [])
+        raw_ids = [item.get("id") for item in created_rows]
+        try:
+            created_ids = [uuid.UUID(str(item_id)) for item_id in raw_ids if item_id]
+        except (ValueError, TypeError):
+            created_ids = []
+        persisted_ids = set(session.scalars(select(Task.id).where(
+            Task.owner_id == command.user_id, Task.id.in_(created_ids)
+        )).all()) if created_ids else set()
+        verification_succeeded = len(created_ids) == len(raw_ids) and len(persisted_ids) == len(created_ids)
+    elif result.success and isinstance(result.result, list):
+        # List actions return rows directly from their ownership-scoped query.
+        verification_succeeded = True
+    elif result.success and isinstance(result.result, dict):
+        record = result.result
+        entity_id = record.get("id")
+        entity_type = record.get("entity_type")
+        if entity_id and entity_type in {"task", "project", "memory", "focus_session"}:
+            try:
+                parsed_id = uuid.UUID(str(entity_id))
+                model = {"task": Task, "project": Project, "memory": Memory,
+                    "focus_session": FocusSession}[str(entity_type)]
+                owner_column = (Task.owner_id if entity_type == "task" else Project.owner_id if entity_type == "project"
+                    else Memory.user_id if entity_type == "memory" else FocusSession.user_id)
+                saved = session.scalar(select(model).where(model.id == parsed_id, owner_column == command.user_id))
+            except ValueError:
+                saved = None
+            expected_title = record.get("title") or record.get("name")
+            valid = saved is not None and (not expected_title or getattr(saved, "title", getattr(saved, "name", None)) == expected_title)
+            if valid and entity_type == "memory":
+                valid = (saved.content == record.get("content") and saved.metadata_json == record.get("metadata")
+                    and saved.memory_type == record.get("type"))
+            verification_succeeded = valid
+        elif intent == "SET_TOOL_VISIBILITY":
+            tool = record.get("tool")
+            visibility = record.get("visibility")
+            saved = session.scalar(select(EnvironmentPreference).where(
+                EnvironmentPreference.user_id == command.user_id,
+                EnvironmentPreference.surface == "navigation", EnvironmentPreference.item == tool,
+            ))
+            verification_succeeded = saved is not None and saved.visibility == visibility
+    if result.success and not verification_succeeded:
+        command.status = CommandStatus.FAILED
+        if result.audit_id:
+            audit = session.get(ExecutionAudit, result.audit_id)
+            if audit is not None:
+                audit.execution_status = "unverified"
+                audit.result_status = "unverified"
+        response = CommandResult(command_id=command.id, conversation_id=command.conversation_id,
+            status="unverified", intent=intent, result=result.result,
+            message="The action was attempted, but Orin could not verify its result. It has not been reported as successful.",
+            execution={**_execution_payload(result), "success": False, "status": "unverified"})
+        _cache_command_response(command, response)
+    else:
+        command.status = final_command_status
+    if result.status != ActionStatus.PENDING_APPROVAL:
+        if is_batch:
+            event_type = ActivityType.TASKS_CREATED_BATCH
+            summary = f"Batch created {batch_created} tasks; {batch_failed} failed."
+        elif result.success and verification_succeeded:
+            event_type = ActivityType.COMMAND_COMPLETED
+            summary = "Command completed" if response_status == "completed" else f"Command {response_status}"
+        else:
+            event_type = ActivityType.COMMAND_FAILED
+            summary = "Command outcome could not be verified" if result.success else f"Command {response_status}"
+        add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
+            activity_type=event_type, summary=summary, command_id=command.id, intent=intent,
+            result_status="unverified" if result.success and not verification_succeeded else activity_status,
+            severity="info" if verification_succeeded else "warning", source="command_api",
+            correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
     _cache_command_response(command, response)
     session.commit()
     return response

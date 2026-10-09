@@ -170,6 +170,20 @@ def test_routes_execute_registered_actions_and_approval_decisions(world: tuple[T
     assert malformed.json()["status"] == "failed"
 
 
+def test_batch_action_reports_exact_partial_outcome(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    response = client.post("/api/v1/actions", json={"action": "create_tasks_batch", "inputs": {"tasks": [
+        {"title": "Created task"}, {"title": "Rejected task", "project_id": str(uuid.uuid4())},
+    ]}})
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "partial_success"
+    assert payload["execution"]["success"] is True
+    assert len(payload["result"]["created"]) == 1
+    assert len(payload["result"]["failed"]) == 1
+    assert "1 created, 1 failed" in payload["message"]
+
+
 def test_worker_registration_approval_claim_progress_and_revocation(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
     client, _, _ = world
     registration = client.post("/api/v1/devices", json={"name": "Sage-PC", "platform": "Windows", "version": "0.1.0"})

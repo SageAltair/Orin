@@ -182,6 +182,116 @@ def test_command_pipeline_uses_validated_proposal_and_records_activity(client: T
         "command_received", "intent_interpreted", "plan_created", "policy_decision", "command_completed"}
 
 
+def test_commitment_is_persisted_verified_and_retrievable_in_a_new_conversation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import orin_api.domain_router as domain_router
+
+    commitment = {
+        "intent": "SAVE_MEMORY", "confidence": 0.99,
+        "parameters": {
+            "memory_type": "commitment", "memory_title": "Fix Orin's duplicate AI responses",
+            "memory_content": "Commitment: I will spend my next focused development session fixing Orin's duplicate AI responses. The task is complete only when the root cause is identified, a regression test passes, and the relevant chat flow is verified.\nDescription: Investigate and fix the root cause of duplicate AI responses in Orin.",
+            "memory_timing": "Next focused development session", "memory_status": "not_started",
+            "memory_acceptance_criteria": [
+                "Identify and document the root cause of duplicate AI responses.",
+                "Add a regression test that reproduces the relevant failure and passes after the fix.",
+                "Verify the relevant chat flow and confirm duplicate responses no longer occur.",
+            ],
+            "memory_completion_rule": "Do not mark complete until all three acceptance criteria have been verified.",
+        },
+    }
+    captured_contexts: list[dict[str, object]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            if command.startswith("For this test, record"):
+                return AIIntent.model_validate_json(json.dumps(commitment))
+            assert context
+            captured_contexts.append(json.loads(context))
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.99,"parameters":{"response":"Retrieved saved commitment."}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    unrelated = client.post("/api/v1/memories", json={"memory_type": "decision", "title": "Unrelated note",
+        "content": "Preserve this existing note", "source": "test"})
+    assert unrelated.status_code == 201
+    unrelated_id = unrelated.json()["id"]
+    exact_request = ("For this test, record the following commitment if you have persistent memory or a supported task system: "
+        "I will spend my next focused development session fixing Orin's duplicate AI responses. The task is complete only "
+        "when the root cause is identified, a regression test passes, and the relevant chat flow is verified. Tell me exactly "
+        "where you stored this information and how I can retrieve it later.")
+    saved = client.post("/api/v1/commands", json={"text": exact_request})
+    assert saved.status_code == 200, saved.text
+    result = saved.json()
+    assert result["status"] == "completed"
+    assert result["result"]["entity_type"] == "memory"
+    assert "verified" in result["message"].lower()
+    assert result["result"]["id"] in result["message"]
+    assert "Search previous work" in result["message"]
+    assert "Action completed." not in result["message"]
+
+    later = client.post("/api/v1/commands", json={"text":
+        "Show me my commitment about fixing Orin's duplicate AI responses, including its acceptance criteria and current status."})
+    assert later.status_code == 200, later.text
+    assert later.json()["status"] == "completed"
+    assert captured_contexts
+    remembered = captured_contexts[-1]["workspace"]["memories_and_commitments"]
+    assert len(remembered) == 1
+    assert remembered[0]["id"] == result["result"]["id"]
+    assert remembered[0]["metadata"]["status"] == "not_started"
+    assert len(remembered[0]["metadata"]["acceptance_criteria"]) == 3
+    assert "I will spend my next focused development session" in remembered[0]["content"]
+    assert client.get("/api/v1/memories", params={"search": "duplicate AI responses"}).json()[0]["id"] == result["result"]["id"]
+
+    repeated = client.post("/api/v1/commands", json={"text": exact_request})
+    assert repeated.status_code == 200
+    memories = client.get("/api/v1/memories", params={"search": "duplicate AI responses"}).json()
+    assert len(memories) == 1
+    assert client.get("/api/v1/memories", params={"search": "Unrelated note"}).json()[0]["id"] == unrelated_id
+
+
+def test_command_reports_unverified_when_action_claims_success_without_a_saved_record(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+    import orin_api.domain_router as domain_router
+    from orin_api.execution import ActionRegistry, ExecutionEngine
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"SAVE_MEMORY","confidence":0.99,"parameters":'
+                '{"memory_type":"commitment","memory_title":"Unwritten commitment",'
+                '"memory_content":"details","memory_timing":"next session",'
+                '"memory_status":"not_started","memory_acceptance_criteria":["verify it"],'
+                '"memory_completion_rule":"Only complete after verification"}}')
+
+    missing_id = str(uuid.uuid4())
+    definitions = [replace(item, handler=lambda _context, _inputs: {
+        "id": missing_id, "title": "Unwritten commitment", "type": "commitment",
+        "content": "details", "metadata": {}, "entity_type": "memory",
+    }) if item.name == "save_memory" else item for item in domain_router.ACTION_REGISTRY.all()]
+    monkeypatch.setattr(domain_router, "EXECUTION_ENGINE", ExecutionEngine(ActionRegistry(definitions)))
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Remember this commitment"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "unverified"
+    assert payload["execution"]["success"] is False
+    assert "could not verify" in payload["message"].lower()
+    assert "Action completed" not in payload["message"]
+
+
 def test_greeting_command_returns_safe_conversation_without_creating_work(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     import orin_api.domain_router as domain_router
 

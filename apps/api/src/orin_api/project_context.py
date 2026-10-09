@@ -135,6 +135,7 @@ class ProjectContextService:
                                   "due_at": task.due_at,
                                   "depends_on": dependency_names.get(task.id, [])}
                                  for task in selected_tasks if task.project_id is None],
-            "memories_and_commitments": [{"type": item.memory_type, "title": item.title,
-                                         "content": item.content} for item in relevant_memories],
+            "memories_and_commitments": [{"id": str(item.id), "type": item.memory_type,
+                                         "title": item.title, "content": item.content,
+                                         "metadata": item.metadata_json} for item in relevant_memories],
         }

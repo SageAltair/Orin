@@ -78,13 +78,38 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
   await page.getByRole("button", { name: "Send to Orin" }).click();
   await expect(page.locator(".command-result")).toContainText(`Completed task: ${updatedTaskTitle}`, { timeout: 60_000 });
 
+  const commitmentRequest = "For this test, record the following commitment if you have persistent memory or a supported task system: I will spend my next focused development session fixing Orin's duplicate AI responses. The task is complete only when the root cause is identified, a regression test passes, and the relevant chat flow is verified. Tell me exactly where you stored this information and how I can retrieve it later.";
+  await ask.fill(commitmentRequest);
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect(page.locator(".command-result")).toContainText("Saved and verified", { timeout: 60_000 });
+  await expect(page.locator(".command-result")).toContainText("Search previous work");
+  const commitmentResult = commandResults.at(-1);
+  expect(commitmentResult?.intent).toBe("SAVE_MEMORY");
+  const memoryId = (commitmentResult?.result as { id?: string } | null)?.id;
+  expect(memoryId).toBeTruthy();
+  const memoriesResponse = await page.request.get(`/api/v1/memories?search=${encodeURIComponent("Fix Orin's duplicate AI responses")}`);
+  expect(memoriesResponse.ok()).toBeTruthy();
+  const memories = await memoriesResponse.json() as Array<{ id: string; type: string; title: string; content: string; metadata: { status: string; acceptance_criteria: string[] } }>;
+  const savedMemory = memories.find(memory => memory.id === memoryId);
+  expect(savedMemory?.type).toBe("commitment");
+  expect(savedMemory?.metadata.status).toBe("not_started");
+  expect(savedMemory?.metadata.acceptance_criteria).toHaveLength(3);
+
+  const retrievalResponse = await page.request.post("/api/v1/commands", { data: { text: "Show me my commitment about fixing Orin's duplicate AI responses, including its acceptance criteria and current status." } });
+  expect(retrievalResponse.ok()).toBeTruthy();
+  const retrieval = await retrievalResponse.json() as { status: string; conversation_id: string; message: string; result: { response?: string } };
+  expect(retrieval.status).toBe("completed");
+  expect(retrieval.conversation_id).not.toBe(commitmentResult?.conversation_id);
+  expect(`${retrieval.message}\n${retrieval.result?.response ?? ""}`).toContain("not_started");
+  expect(`${retrieval.message}\n${retrieval.result?.response ?? ""}`).toContain("regression test");
+
   await ask.fill("Delete my entire database");
   await page.getByRole("button", { name: "Send to Orin" }).click();
   await expect(page.locator(".api-error")).toContainText("not supported", { timeout: 60_000 });
 
   await expect.poll(() => commandResults.map(result => result.intent)).toEqual([
     "RESPOND", "RESPOND", "CREATE_PROJECT", "LIST_PROJECTS", "CREATE_TASK", "LIST_TASKS",
-    "UPDATE_TASK", "COMPLETE_TASK", "GET_ACTIVITY", "UNSUPPORTED",
+    "UPDATE_TASK", "COMPLETE_TASK", "GET_ACTIVITY", "SAVE_MEMORY", "UNSUPPORTED",
   ]);
 
   await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();

@@ -44,13 +44,23 @@ class CreateTaskInput(StrictActionInput):
         return self
 
 
+class BatchTaskItem(StrictActionInput):
+    id: str | None = None
+    title: str | None = None
+    description: str | None = None
+    due_at: str | None = None
+    project_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID | None = None
+    priority: str | None = None
+
+
 class BatchTaskInput(StrictActionInput):
-    tasks: list[dict[str, Any]] = Field(min_length=1, max_length=500)
+    tasks: list[BatchTaskItem] = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def validate_batch(self) -> BatchTaskInput:
         for index, item in enumerate(self.tasks):
-            title = item.get("title")
+            title = item.title
             if not title or not str(title).strip():
                 raise ValueError(f"Task at index {index} is missing a title.")
         return self
@@ -106,6 +116,17 @@ class SaveMemoryInput(StrictActionInput):
     memory_title: str = Field(min_length=1, max_length=180)
     memory_content: str = Field(min_length=1, max_length=5000)
     project_reference: str | None = Field(default=None, max_length=160)
+    memory_timing: str | None = Field(default=None, max_length=240)
+    memory_status: Literal["not_started", "in_progress", "completed"] | None = None
+    memory_acceptance_criteria: list[str] | None = Field(default=None, max_length=20)
+    memory_completion_rule: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_commitment_details(self) -> SaveMemoryInput:
+        if self.memory_type == "commitment" and (not self.memory_timing or not self.memory_status
+                or not self.memory_acceptance_criteria or not self.memory_completion_rule):
+            raise ValueError("Commitments require timing, status, acceptance criteria, and a completion rule")
+        return self
 
 
 class StartFocusInput(StrictActionInput):
@@ -135,15 +156,33 @@ def _save_memory(context: ActionContext, raw: SaveMemoryInput) -> dict[str, Any]
     if _MEMORY_SECRET.search(data.memory_content):
         raise ActionExecutionError("This memory looks like it contains a secret. Orin will not store it.", status=ActionStatus.DENIED)
     project = _owned_project_by_name(context, data.project_reference) if data.project_reference else None
-    memory = Memory(user_id=context.user_id, project_id=project.id if project else None,
-        memory_type=data.memory_type, title=data.memory_title.strip(), content=data.memory_content.strip(),
-        source="explicit user command", confidence=0.9)
-    context.session.add(memory)
+    title = data.memory_title.strip()
+    # A retried explicit save should update the same owned memory, not create a
+    # second copy. Matching is deliberately narrow: owner, type, scope and title.
+    memory = context.session.scalar(select(Memory).where(
+        Memory.user_id == context.user_id, Memory.project_id == (project.id if project else None),
+        Memory.memory_type == data.memory_type, Memory.title.ilike(title), Memory.archived.is_(False),
+    ).order_by(Memory.updated_at.desc()).limit(1))
+    if memory is None:
+        memory = Memory(user_id=context.user_id, project_id=project.id if project else None,
+            memory_type=data.memory_type, title=title, content=data.memory_content.strip(),
+            source="explicit user command", confidence=0.9,
+            metadata_json={"timing": data.memory_timing, "status": data.memory_status,
+                "acceptance_criteria": data.memory_acceptance_criteria,
+                "completion_rule": data.memory_completion_rule})
+        context.session.add(memory)
+    else:
+        memory.content = data.memory_content.strip()
+        memory.source = "explicit user command"
+        memory.metadata_json = {"timing": data.memory_timing, "status": data.memory_status,
+            "acceptance_criteria": data.memory_acceptance_criteria,
+            "completion_rule": data.memory_completion_rule}
     context.session.flush()
     add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
         project_id=memory.project_id, activity_type=ActivityType.MEMORY_CHANGED,
         summary=f"Saved memory: {memory.title}", command_id=context.command_id)
-    return {"id": str(memory.id), "title": memory.title, "type": memory.memory_type, "entity_type": "memory"}
+    return {"id": str(memory.id), "title": memory.title, "type": memory.memory_type,
+        "content": memory.content, "metadata": memory.metadata_json, "entity_type": "memory"}
 
 
 def _start_focus(context: ActionContext, raw: StartFocusInput) -> dict[str, Any]:
