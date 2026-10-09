@@ -174,7 +174,7 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
   await page.getByRole("button", { name: "Ask Orin" }).first().click();
   const ask = page.getByRole("textbox", { name: "Ask Orin" });
   await ask.fill("hey");
-  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("hey", { exact: true })).toHaveCount(1);
   await expect(page.getByText("Hey! What can I help you with?", { exact: true })).toHaveCount(1);
   await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
@@ -182,7 +182,7 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
   await expect(page.getByText("Hey! What can I help you with?", { exact: true })).toHaveCount(1);
 
   await ask.fill("Create a task called Call John");
-  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await page.getByRole("button", { name: "Send message" }).click();
   await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
   await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("textbox", { name: "Edit Call John" })).toBeVisible();
@@ -307,4 +307,59 @@ test("compact work toolbar searches, restores, renames, and starts sessions", as
   await expect(page.getByText("The rollout starts with a pilot.")).toBeVisible();
   await page.getByRole("button", { name: "New work session" }).click();
   await expect(page.getByLabel("Work session title")).toHaveValue("");
+});
+
+test("Ask Orin composer grows for multiline text and sends with Enter", async ({ page }) => {
+  await mockApi(page);
+  let submittedText: string | undefined;
+  let uploadedFilename: string | undefined;
+  await page.route("**/api/v1/commands", async route => {
+    if (route.request().method() === "GET") return route.fulfill({ json: [] });
+    submittedText = (await route.request().postDataJSON() as { text: string }).text;
+    return route.fulfill({ json: { command_id: "composer-command", conversation_id: "composer-session", status: "completed", intent: "RESPOND", result: { response: "Message received." }, message: "Message received." } });
+  });
+  await page.route("**/api/v1/attachments**", async route => {
+    if (route.request().method() === "POST") {
+      uploadedFilename = "brief.txt";
+      return route.fulfill({ status: 201, json: [{ id: "attachment-1", conversation_id: null, task_id: null, filename: uploadedFilename, media_type: "text/plain", size_bytes: 12, created_at: new Date().toISOString() }] });
+    }
+    return route.fulfill({ json: [] });
+  });
+  await page.route("**/api/v1/conversations", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Ask Orin" }).last().click();
+  const composer = page.getByRole("textbox", { name: "Ask Orin" });
+  const send = page.getByRole("button", { name: "Send message" });
+  await expect(send).toBeDisabled();
+  await expect(page.locator(".attach-file-button")).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const composerBounds = await page.locator(".chat-composer").evaluate(element => {
+    const box = element.getBoundingClientRect();
+    return { width: box.width, scrollWidth: element.scrollWidth };
+  });
+  expect(composerBounds.scrollWidth).toBeLessThanOrEqual(composerBounds.width);
+
+  const paragraphs = Array.from({ length: 18 }, (_, index) => `Paragraph ${index + 1}: ${"meaningful words ".repeat(12)}`).join("\n");
+  await composer.fill(paragraphs);
+  await expect(composer).toHaveJSProperty("value", paragraphs);
+  await expect(composer).toHaveCSS("overflow-y", "auto");
+  const dimensions = await composer.evaluate(element => ({ height: element.clientHeight, scrollHeight: element.scrollHeight }));
+  expect(dimensions.height).toBeLessThanOrEqual(160);
+  expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.height);
+
+  await composer.press("Control+End");
+  await composer.press("Shift+Enter");
+  await composer.type("Final manually inserted line");
+  const completeMessage = `${paragraphs}\nFinal manually inserted line`;
+  await expect(composer).toHaveJSProperty("value", completeMessage);
+  expect(submittedText).toBeUndefined();
+
+  await page.locator("#attachment-input").setInputFiles({ name: "brief.txt", mimeType: "text/plain", buffer: Buffer.from("short brief") });
+  await expect(page.locator(".pending-attachment span")).toContainText("brief.txt");
+  await composer.press("Enter");
+  await expect.poll(() => submittedText).toBe(completeMessage);
+  expect(uploadedFilename).toBe("brief.txt");
+  await expect(composer).toHaveValue("");
+  await expect(page.getByText("Message received.")).toBeVisible();
 });

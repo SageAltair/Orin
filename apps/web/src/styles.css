@@ -390,3 +390,16 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .task-context-panel summary{display:flex;justify-content:space-between;gap:8px;cursor:pointer;color:var(--muted);}
 .task-context-panel summary span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 @media(max-width:600px){.compact-chat-header{padding-inline:9px;gap:4px}.chat-toolbar-actions{gap:0}.toolbar-icon,.chat-more-actions summary{width:31px;height:33px}.compact-chat-header .work-session-title{width:min(43vw,220px)}.chat-discovery-panel{max-height:42vh}}
+.chat-composer{grid-template-columns:34px minmax(0,1fr) 34px;grid-template-rows:auto auto;align-items:end;gap:2px 4px;padding:8px 9px;border-radius:12px;}
+.chat-composer .attachment-staging{grid-column:1/-1;grid-row:1;min-width:0;padding-bottom:4px;}
+.chat-composer .attachment-staging:empty{display:none;}
+.chat-composer .attach-file-button{grid-column:1;grid-row:2;display:grid;place-items:center;width:34px;height:34px;margin:0;border-radius:8px;color:var(--muted);cursor:pointer;}
+.chat-composer .attach-file-button:hover{background:var(--hover);color:var(--text);}
+.chat-composer .attachment-input:focus-visible+.attach-file-button{outline:2px solid var(--accent);outline-offset:2px;}
+.chat-composer textarea{grid-column:2;grid-row:2;display:block;width:100%;min-width:0;min-height:42px;max-height:160px;box-sizing:border-box;resize:none;overflow-x:hidden;overflow-y:hidden;padding:10px 2px;border:0;outline:0;background:transparent;color:var(--text);font:inherit;font-size:13px;line-height:21px;white-space:pre-wrap;overflow-wrap:anywhere;}
+.chat-composer textarea::placeholder{color:var(--soft);opacity:1;}
+.chat-composer textarea:focus-visible{outline:0;}
+.chat-composer button[type="submit"]{grid-column:3;grid-row:2;display:grid;width:32px;height:32px;place-items:center;align-self:end;margin:1px 0;border:0;border-radius:9px;background:var(--accent);color:white;}
+.chat-composer button[type="submit"]:disabled{background:var(--hover);color:var(--muted);}
+.chat-composer:focus-within{border-color:#a8bcaa;box-shadow:0 0 0 3px #688b7013;}
+@media(max-width:600px){.chat-composer{margin:10px 12px max(12px,env(safe-area-inset-bottom));padding:7px 8px;grid-template-columns:32px minmax(0,1fr) 32px;gap:2px}.chat-composer .attach-file-button{width:32px;height:34px}.chat-composer button[type="submit"]{width:31px;height:31px}}
