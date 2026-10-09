@@ -49,6 +49,7 @@ from orin_api.schemas import (
     TaskUpdate,
     CommandCreate,
     CommandResult,
+    CommandHistoryRead,
     ApprovalDecision,
 )
 from orin_api.services import (
@@ -70,6 +71,23 @@ router = APIRouter(prefix="/api/v1", tags=["core"])
 logger = logging.getLogger(__name__)
 ACTION_REGISTRY = build_action_registry()
 EXECUTION_ENGINE = ExecutionEngine(ACTION_REGISTRY)
+
+
+@router.get("/commands", response_model=list[CommandHistoryRead])
+def list_commands(
+    user: User = Depends(get_current_user),
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_session),
+) -> list[CommandHistoryRead]:
+    """Return this user's recent persisted command exchanges."""
+    rows = session.scalars(
+        select(Command).where(Command.user_id == user.id)
+        .order_by(Command.created_at.desc()).limit(limit)
+    ).all()
+    return [CommandHistoryRead(command_id=row.id, status=row.status.value,
+        intent=row.response_intent, result=row.response_json,
+        message=row.response_message or "This command is still being processed.",
+        execution=row.response_execution_json, text=row.text, created_at=row.created_at) for row in rows]
 
 
 @router.post("/commands", response_model=CommandResult, status_code=status.HTTP_200_OK)

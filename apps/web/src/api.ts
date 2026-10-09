@@ -18,6 +18,7 @@ export interface WorkerDevice { id: string; name: string; platform: string; vers
 export type ExecutionTarget = "local" | "cloud" | "auto";
 export interface WorkerJob { id: string; action: string; status: string; requested_target: ExecutionTarget; selected_target: Exclude<ExecutionTarget, "auto"> | null; progress: string | null; result: Record<string, unknown> | null; failure: string | null; created_at: string; finished_at: string | null }
 export interface CommandResult { command_id: string; status: "completed" | "awaiting_approval" | "denied" | "failed" | "unsupported" | string; intent: string | null; result: Record<string, unknown> | Record<string, unknown>[] | null; message: string; execution?: { success: boolean; action: string; status: string; result: Record<string, unknown> | Record<string, unknown>[] | null; error: string | null; approval_required: boolean; approval_id: string | null; audit_id: string | null } | null }
+export interface CommandHistory extends CommandResult { text: string; created_at: string }
 
 async function refresh(): Promise<boolean> {
   if (!refreshPromise) refreshPromise = fetch(`${baseUrl}/api/v1/auth/refresh`, { method: "POST", credentials: "include" }).then(async response => {

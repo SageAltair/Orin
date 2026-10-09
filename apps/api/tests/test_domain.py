@@ -14,7 +14,7 @@ from orin_api.config import Settings, get_settings
 from orin_api.domain_router import AIInterpreter
 from orin_api.database import Base, get_session
 from orin_api.main import app
-from orin_api.models import User
+from orin_api.models import Command, User
 
 
 @pytest.fixture
@@ -92,6 +92,25 @@ def test_activity_filter_and_detail_are_user_scoped(client: TestClient) -> None:
     assert client.get(f"/api/v1/activity/{event['id']}").json()["id"] == event["id"]
     assert client.get(f"/api/v1/activity/{uuid.uuid4()}").status_code == 404
     assert client.get("/api/v1/activity", params={"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}).status_code == 422
+
+
+def test_command_history_returns_only_owned_persisted_requests(client: TestClient) -> None:
+    session_factory = app.dependency_overrides[get_session]
+    # The test fixture's session override shares the same in-memory database.
+    with next(session_factory()) as session:
+        owner = session.query(User).filter_by(email="morgan@example.test").one()
+        other = User(email="other@example.test", password_hash="test-hash", display_name="Other")
+        session.add(other)
+        session.flush()
+        session.add_all([
+            Command(user_id=owner.id, text="My request", response_message="My answer"),
+            Command(user_id=other.id, text="Private request", response_message="Private answer"),
+        ])
+        session.commit()
+    response = client.get("/api/v1/commands")
+    assert response.status_code == 200
+    assert [item["text"] for item in response.json()] == ["My request"]
+    assert response.json()[0]["message"] == "My answer"
 
 
 def test_project_task_activity_flow_and_user_scoping(client: TestClient) -> None:

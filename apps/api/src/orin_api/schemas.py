@@ -140,6 +140,11 @@ class CommandResult(BaseModel):
     execution: dict[str, object] | None = None
 
 
+class CommandHistoryRead(CommandResult):
+    text: str
+    created_at: datetime
+
+
 class ApprovalDecision(BaseModel):
     approved: bool
     note: Annotated[str | None, StringConstraints(max_length=1000)] = None
