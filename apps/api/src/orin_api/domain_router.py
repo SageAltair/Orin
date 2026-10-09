@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.ai import AITaskType, AIInterpreter, AIProviderError, IntentName, ModelSelector, create_provider
 from orin_api.config import Settings, get_settings
+from orin_api.product_context import needs_product_context, product_context_for_prompt
 from orin_api.database import get_session
 from orin_api.models import (
     Activity,
@@ -316,6 +317,9 @@ def submit_command(
             "conversation_history": [{"user": row.text, "assistant": row.response_message}
                                     for row in prior_commands],
         }
+        recent_user_messages = [row.text for row in prior_commands]
+        if needs_product_context(data.text, recent_user_messages):
+            active_context["current_application"] = product_context_for_prompt()
         if conversation.pending_question and conversation.pending_question.get("status") == "pending":
             conversation.pending_question = {**conversation.pending_question, "status": "answered",
                                              "answer": data.text,

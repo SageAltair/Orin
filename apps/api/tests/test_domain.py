@@ -182,6 +182,36 @@ def test_command_pipeline_uses_validated_proposal_and_records_activity(client: T
         "command_received", "intent_interpreted", "plan_created", "policy_decision", "command_completed"}
 
 
+def test_follow_up_clarifying_that_user_means_orin_receives_product_context(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured.append((command, json.loads(context or "{}")))
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"I understand you mean Orin itself. I can review its available implementation evidence."}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    first = client.post("/api/v1/commands", json={"text": "Act as a designer. Look at this system and audit it."})
+    assert first.status_code == 200
+    follow_up = client.post("/api/v1/commands", json={
+        "text": "I mean this Orin system application I'm using here with you.",
+        "conversation_id": first.json()["conversation_id"],
+    })
+    assert follow_up.status_code == 200
+    assert "current_application" in captured[1][1]
+    assert "I understand you mean Orin itself" in follow_up.json()["message"]
+
+
 def test_commitment_is_persisted_verified_and_retrievable_in_a_new_conversation(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

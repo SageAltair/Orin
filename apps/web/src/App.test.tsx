@@ -43,6 +43,9 @@ describe("Markdown response rendering", () => {
     expect(markup).toContain("table-scroll");
     expect(markup).toContain("&lt;script&gt;");
     expect(markup).toContain('aria-label="Copy code"');
+    expect(markup).toContain("Copy response");
+    expect(markup).not.toContain("svgCopy response");
+    expect(markup).not.toContain("svgAdd attachmentAsk Orin");
   });
 
   it("rejects unsafe URL schemes", () => {
