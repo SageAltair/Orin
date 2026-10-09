@@ -204,6 +204,62 @@ def test_greeting_command_returns_safe_conversation_without_creating_work(client
     assert event_types == {"command_received", "intent_interpreted", "command_completed"}
 
 
+def test_original_planning_request_uses_general_reasoning_and_existing_workspace_records(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import orin_api.domain_router as domain_router
+
+    client.post("/api/v1/projects", json={"name": "The Small Voice", "description": "Storytelling platform"})
+    client.post("/api/v1/projects", json={"name": "Orin", "description": "Personal operating system"})
+    captured: dict[str, str] = {}
+
+    class PlanningProvider:
+        def structured_output(self, **kwargs: object) -> str:
+            captured["system"] = str(kwargs["system"])
+            captured["user"] = str(kwargs["user"])
+            return json.dumps({"intent": "RESPOND", "confidence": 0.96, "parameters": {
+                "response": "## Overview\n\nStart with a provisional sequence.\n\n| Project | Desired outcome | Next action | Dependencies | Priority |\n|---|---|---|---|---|\n| The Small Voice | A clearer platform | Identify its largest unresolved issue | None known | 2 |\n| Orin | A useful release | Define the smallest release | None known | 3 |\n\nWhat fixed ministry commitments and weekly hours should I protect?"
+            }})
+
+    monkeypatch.setattr(domain_router, "create_provider", lambda settings: PlanningProvider())
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    prompt = "I need to improve The Small Voice, finish Orin, learn AI automation, create Christian storytelling videos, find income opportunities, and stay consistent with my ministry responsibilities. I feel like there are too many things competing for my attention. Organize these into projects, desired outcomes, next actions, dependencies, and a realistic priority order. Do not invent deadlines. Identify what information you still need from me."
+    response = client.post("/api/v1/commands", json={"text": prompt})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "completed"
+    assert result["intent"] == "RESPOND"
+    answer = result["result"]["response"]
+    assert "| Project | Desired outcome |" in answer
+    assert "What fixed ministry commitments" in answer
+    assert "not supported" not in answer.lower()
+    assert "The Small Voice" in captured["user"] and "Orin" in captured["user"]
+    assert "Otherwise use UNSUPPORTED" not in captured["system"]
+    assert client.get("/api/v1/projects").json() and client.get("/api/v1/tasks").json() == []
+
+
+def test_genuine_unsupported_operation_explains_limitation_and_alternative(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"UNSUPPORTED","confidence":0.95,"parameters":{"response":"Orin has no travel booking integration. I can help compare options and prepare an itinerary for you to book."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    result = client.post("/api/v1/commands", json={"text": "Book my flights"})
+    assert result.status_code == 200
+    assert result.json()["status"] == "unsupported"
+    assert "no travel booking integration" in result.json()["result"]["response"]
+    assert "prepare an itinerary" in result.json()["message"]
+
+
 def test_command_idempotency_replays_cached_result_and_rejects_key_reuse(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     import orin_api.domain_router as domain_router
     calls = 0
@@ -283,7 +339,7 @@ def test_command_completion_resolves_only_the_users_exact_task_name(client: Test
         def __init__(self, provider: object, model: str):
             pass
 
-        def interpret(self, command: str) -> AIIntent:
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
             return AIIntent.model_validate_json(
                 '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'
             )

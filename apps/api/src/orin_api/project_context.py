@@ -1,13 +1,13 @@
 """Bounded, ownership-scoped project context for model interpretation."""
 from __future__ import annotations
 
-import uuid
 import re
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from orin_api.models import Activity, Memory, Project, Task, TaskStatus
+from orin_api.models import Memory, Project, Task, TaskStatus
 
 
 class ProjectContextService:
@@ -15,30 +15,55 @@ class ProjectContextService:
         self.session, self.user_id = session, user_id
 
     def for_command(self, command: str) -> dict[str, object] | None:
+        """Return a bounded workspace snapshot, even for cross-project planning."""
         normalized = command.casefold()
         words = {word for word in re.findall(r"[a-z0-9]+", normalized) if len(word) > 3}
-        projects = self.session.scalars(select(Project).where(Project.owner_id == self.user_id).order_by(Project.updated_at.desc()).limit(50)).all()
+        projects = self.session.scalars(
+            select(Project).where(Project.owner_id == self.user_id)
+            .order_by(Project.updated_at.desc()).limit(30)
+        ).all()
         matches = [project for project in projects if project.name.casefold() in normalized]
-        project = matches[0] if len(matches) == 1 else None
-        personal = self.session.scalars(select(Memory).where(Memory.user_id == self.user_id,
-            Memory.project_id.is_(None), Memory.memory_type == "preference", Memory.archived.is_(False))
-            .order_by(Memory.updated_at.desc()).limit(20)).all()
-        preferences = [memory for memory in personal if not words or words.intersection(
-            re.findall(r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))][:3]
-        if project is None:
-            return {"user_preferences": [{"title": item.title, "content": item.content} for item in preferences]} if preferences else None
-        tasks = self.session.scalars(select(Task).where(Task.owner_id == self.user_id, Task.project_id == project.id).order_by(Task.updated_at.desc()).limit(15)).all()
-        activities = self.session.scalars(select(Activity).where(Activity.user_id == self.user_id, Activity.project_id == project.id).order_by(Activity.created_at.desc()).limit(8)).all()
-        memories = self.session.scalars(select(Memory).where(Memory.user_id == self.user_id, Memory.project_id == project.id, Memory.archived.is_(False)).order_by(Memory.updated_at.desc()).limit(20)).all()
-        asks_decisions = "decision" in words or "decisions" in words
-        relevant = [memory for memory in memories if memory.memory_type in {"decision", "fact", "workflow", "project_context"}
-                    and (not words or words.intersection(re.findall(r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))
-                         or (asks_decisions and memory.memory_type == "decision"))][:5]
+        selected_projects = matches if matches else projects[:15]
+        selected_ids = {project.id for project in selected_projects}
+
+        tasks = self.session.scalars(
+            select(Task).where(Task.owner_id == self.user_id)
+            .order_by(Task.updated_at.desc()).limit(50)
+        ).all()
+        selected_tasks = [task for task in tasks if task.project_id in selected_ids or task.project_id is None][:30]
+        personal = self.session.scalars(
+            select(Memory).where(Memory.user_id == self.user_id, Memory.archived.is_(False))
+            .order_by(Memory.updated_at.desc()).limit(30)
+        ).all()
+        relevant_memories = [memory for memory in personal if
+            memory.memory_type in {"decision", "fact", "workflow", "project_context", "commitment", "preference"}
+            and (not words or words.intersection(re.findall(
+                r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))
+                 or memory.memory_type in {"commitment", "decision"})
+            and (memory.project_id is None or memory.project_id in selected_ids)][:10]
+        if not selected_projects and not selected_tasks and not relevant_memories:
+            return None
+
+        project_data = []
+        for project in selected_projects:
+            project_tasks = [task for task in selected_tasks if task.project_id == project.id]
+            project_data.append({
+                "name": project.name,
+                "description": project.description,
+                "objective": project.objective,
+                "status": project.status.value,
+                "tasks": [{"title": task.title, "status": task.status.value,
+                           "priority": task.priority.value if task.priority else None,
+                           "due_at": task.due_at}
+                          for task in project_tasks[:12]],
+                "blockers": [task.title for task in project_tasks if task.status == TaskStatus.BLOCKED],
+            })
         return {
-            "project": {"name": project.name, "objective": project.objective, "status": project.status.value},
-            "tasks": [{"title": task.title, "status": task.status.value} for task in tasks],
-            "blockers": [task.title for task in tasks if task.status == TaskStatus.BLOCKED],
-            "recent_activity": [item.summary for item in activities],
-            "knowledge": [{"type": item.memory_type, "title": item.title, "content": item.content} for item in relevant],
-            "user_preferences": [{"title": item.title, "content": item.content} for item in preferences],
+            "projects": project_data,
+            "unassigned_tasks": [{"title": task.title, "status": task.status.value,
+                                  "priority": task.priority.value if task.priority else None,
+                                  "due_at": task.due_at}
+                                 for task in selected_tasks if task.project_id is None],
+            "memories_and_commitments": [{"type": item.memory_type, "title": item.title,
+                                         "content": item.content} for item in relevant_memories],
         }

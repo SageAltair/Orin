@@ -153,7 +153,9 @@ def submit_command(
                 command_id=command.id, result_status="unsupported", severity="warning",
                 source="command_api", correlation_id=str(command.id),
                 idempotency_key=f"command.terminal:{command.id}")
-            response = CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED", message="This request is not supported.")
+            limitation = proposal.parameters.response or "Orin cannot perform this action with the capabilities currently available. You can ask for help planning an alternative."
+            response = CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED",
+                result={"response": limitation}, message=limitation)
             _cache_command_response(command, response)
             session.commit()
             return response

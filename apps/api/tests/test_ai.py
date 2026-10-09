@@ -43,6 +43,19 @@ def test_provider_selection_requires_only_selected_provider_credentials() -> Non
         create_provider(Settings(_env_file=None, ai_provider="mistral", ai_model="test-model"))
 
 
+def test_structured_provider_allows_longer_planning_responses(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = OpenAIProvider(ProviderConfig("secret", "https://provider.test/v1", "model"))
+    captured: dict[str, object] = {}
+
+    def generate(**kwargs: object) -> str:
+        captured.update(kwargs)
+        return "{}"
+
+    monkeypatch.setattr(provider, "generate", generate)
+    provider.structured_output(system="rules", user="plan", model="model", schema={})
+    assert captured["max_tokens"] == 2048
+
+
 def test_intent_parameter_schema_rejects_extra_fields() -> None:
     with pytest.raises(ValidationError):
         IntentParameters.model_validate({"title": "ok", "shell": "echo bad"})
@@ -70,6 +83,25 @@ def test_interpreter_returns_safe_conversational_response_for_greeting() -> None
     proposal = AIInterpreter(provider, "model").interpret("Help me figure this out")
     assert proposal.intent == IntentName.RESPOND
     assert proposal.parameters.response == "Hey! What can I help you with?"
+
+
+@pytest.mark.parametrize("prompt", [
+    "I need to improve The Small Voice, finish Orin, learn AI automation, create Christian storytelling videos, find income opportunities, and stay consistent with my ministry responsibilities. I feel like there are too many things competing for my attention. Organize these into projects, desired outcomes, next actions, dependencies, and a realistic priority order. Do not invent deadlines. Identify what information you still need from me.",
+    "Help me organize my studies, family commitments, a software project, and my search for work into a realistic weekly plan.",
+    "I have five ideas, two unfinished projects, and a meeting tomorrow. Help me decide what to do first.",
+    "Plan my next month.",
+])
+def test_general_planning_is_a_supported_response(prompt: str) -> None:
+    class PlanningProvider(FakeProvider):
+        def structured_output(self, **kwargs: object) -> str:
+            system = str(kwargs["system"])
+            assert "RESPOND is the general reasoning capability" in system
+            assert "Do not use UNSUPPORTED merely because no dedicated application command matches" in system
+            return '{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"## Overview\\n\\nA first-pass plan."}}'
+
+    proposal = AIInterpreter(PlanningProvider(""), "model").interpret(prompt)
+    assert proposal.intent == IntentName.RESPOND
+    assert "first-pass plan" in (proposal.parameters.response or "")
 
 
 def test_interpreter_accepts_task_proposal_from_fenced_json() -> None:
