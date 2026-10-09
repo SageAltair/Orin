@@ -7,6 +7,7 @@ from orin_worker.client import JobLedger, _verify_signed, _api_url_is_secure, ex
 import hashlib
 import hmac
 import json
+import subprocess
 
 
 def job(action: str, parameters: dict[str, object], scope: str, **changes: object) -> WorkerJob:
@@ -37,6 +38,41 @@ def test_filesystem_roots_and_shell_strings_are_blocked(tmp_path: Path) -> None:
         execute_job(job("read_file", {"path": str(tmp_path.parent / "secret")}, "filesystem.file.read"), device_id="d1", allowed_roots=(tmp_path,), now=10)
     with pytest.raises(PermissionError):
         execute_job(job("run_allowed_command", {"command": "format C:"}, "process.command.execute"), device_id="d1", allowed_roots=(tmp_path,), now=10)
+    with pytest.raises(PermissionError):
+        execute_job(job("run_allowed_command", {"command": "git_status && whoami"}, "process.command.execute"), device_id="d1", allowed_roots=(tmp_path,), now=10)
+
+
+def test_worker_protects_env_variants_and_symlink_escapes(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+    protected = root / ".env.example"
+    protected.write_text("placeholder", encoding="utf-8")
+    with pytest.raises(PermissionError):
+        execute_job(job("read_file", {"path": str(protected)}, "filesystem.file.read"), device_id="d1", allowed_roots=(root,), now=10)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("private", encoding="utf-8")
+    link = root / "link.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is not available in this environment")
+    with pytest.raises(PermissionError):
+        execute_job(job("read_file", {"path": str(link)}, "filesystem.file.read"), device_id="d1", allowed_roots=(root,), now=10)
+
+
+def test_allowlisted_process_uses_fixed_args_bounded_timeout_and_clean_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setenv("ORIN_WORKER_TOKEN", "must-not-reach-child")
+    def fake_run(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured.update(argv=argv, **kwargs)
+        return subprocess.CompletedProcess(argv, 0, "clean", "")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    output = execute_job(job("run_allowed_command", {"command": "git_status"}, "process.command.execute"), device_id="d1", allowed_roots=(tmp_path,), now=10)
+    assert output["stdout"] == "clean"
+    assert captured["shell"] is False
+    assert captured["timeout"] == 120
+    assert captured["cwd"] == str(tmp_path.resolve())
+    assert "must-not-reach-child" not in captured["env"].values()
 
 
 def test_signed_jobs_tls_requirement_and_durable_replay_ledger(tmp_path: Path) -> None:

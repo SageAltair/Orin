@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import uuid
 import logging
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, status
 from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,8 +31,10 @@ from orin_api.models import (
     User,
     UserCapability,
     UserPreferences,
+    DeviceStatus,
     WorkerJob,
     WorkerJobStatus,
+    WorkerDevice,
 )
 from orin_api.schemas import (
     ActivityRead,
@@ -57,7 +60,9 @@ from orin_api.services import (
     require_user,
     update_preferences,
 )
+from orin_api.rate_limit import consume_user_window
 from orin_api.planner import plan_intent
+from orin_api.project_context import ProjectContextService
 from orin_api.execution import ActionContext, ActionRequest, ActionStatus, ExecutionEngine, ExecutionResult
 from orin_api.execution_actions import build_action_registry
 
@@ -70,32 +75,87 @@ EXECUTION_ENGINE = ExecutionEngine(ACTION_REGISTRY)
 @router.post("/commands", response_model=CommandResult, status_code=status.HTTP_200_OK)
 def submit_command(
     data: CommandCreate,
+    response: Response,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=160),
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> CommandResult:
-    command = Command(user_id=user.id, text=data.text, status=CommandStatus.SUBMITTED)
+    if idempotency_key is not None:
+        existing = session.scalar(select(Command).where(Command.user_id == user.id, Command.idempotency_key == idempotency_key))
+        if existing is not None:
+            if existing.text != data.text:
+                raise HTTPException(status_code=409, detail="Idempotency-Key was already used for a different command.")
+            return CommandResult(command_id=existing.id, status=existing.status.value,
+                intent=existing.response_intent, result=existing.response_json,
+                message=existing.response_message or "This command is already being processed.",
+                execution=existing.response_execution_json)
+    allowance = consume_user_window(session, user_id=user.id, route="command_submit", limit=20)
+    response.headers["X-RateLimit-Limit"] = "20"
+    response.headers["X-RateLimit-Remaining"] = str(allowance.remaining)
+    if not allowance.allowed:
+        raise HTTPException(status_code=429, detail={"code": "rate_limited", "message": "Too many commands. Retry after the current minute."},
+            headers={"Retry-After": str(allowance.retry_after)})
+    command = Command(user_id=user.id, text=data.text, status=CommandStatus.SUBMITTED, idempotency_key=idempotency_key)
     session.add(command)
     try:
         session.flush()
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_RECEIVED, summary="Command received",
+            command_id=command.id, correlation_id=str(command.id), source="command_api",
+            idempotency_key=f"command.received:{command.id}")
         if not settings.ai_provider or not settings.ai_model:
             raise AIProviderError("AI command interpretation is not configured")
         model = ModelSelector(settings.ai_model).select(AITaskType.COMMAND_INTERPRETATION)
-        proposal = AIInterpreter(create_provider(settings), model).interpret(data.text)
+        project_context = ProjectContextService(session, user.id).for_command(data.text)
+        interpreter = AIInterpreter(create_provider(settings), model)
+        proposal = interpreter.interpret(data.text) if project_context is None else interpreter.interpret(
+            data.text, context=json.dumps(project_context, ensure_ascii=True, default=str)
+        )
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.INTENT_INTERPRETED,
+            summary=f"Intent interpreted: {proposal.intent.value}", command_id=command.id,
+            intent=proposal.intent.value, result_status="interpreted", source="planner",
+            correlation_id=str(command.id), idempotency_key=f"command.intent:{command.id}")
         if proposal.intent == IntentName.RESPOND:
             command.status = CommandStatus.COMPLETED
-            session.commit()
-            return CommandResult(command_id=command.id, status="completed", intent="RESPOND",
+            add_activity(session, user_id=user.id, actor_user_id=user.id,
+                activity_type=ActivityType.COMMAND_COMPLETED, summary="Command completed",
+                command_id=command.id, result_status="completed", source="command_api",
+                correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
+            response = CommandResult(command_id=command.id, status="completed", intent="RESPOND",
                 result={"response": proposal.parameters.response}, message=proposal.parameters.response or "Hello! What would you like help with?")
+            _cache_command_response(command, response)
+            session.commit()
+            return response
         if proposal.intent == IntentName.UNSUPPORTED:
             command.status = CommandStatus.FAILED
+            add_activity(session, user_id=user.id, actor_user_id=user.id,
+                activity_type=ActivityType.COMMAND_FAILED, summary="Command unsupported",
+                command_id=command.id, result_status="unsupported", severity="warning",
+                source="command_api", correlation_id=str(command.id),
+                idempotency_key=f"command.terminal:{command.id}")
+            response = CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED", message="This request is not supported.")
+            _cache_command_response(command, response)
             session.commit()
-            return CommandResult(command_id=command.id, status="unsupported", intent="UNSUPPORTED", message="This request is not supported.")
+            return response
         plan = plan_intent(proposal)
         if plan is None:
             command.status = CommandStatus.FAILED
+            add_activity(session, user_id=user.id, actor_user_id=user.id,
+                activity_type=ActivityType.COMMAND_FAILED, summary="Command unsupported",
+                command_id=command.id, result_status="unsupported", severity="warning",
+                source="command_api", correlation_id=str(command.id),
+                idempotency_key=f"command.terminal:{command.id}")
+            response = CommandResult(command_id=command.id, status="unsupported", intent=proposal.intent.value, message="This request is not supported.")
+            _cache_command_response(command, response)
             session.commit()
-            return CommandResult(command_id=command.id, status="unsupported", intent=proposal.intent.value, message="This request is not supported.")
+            return response
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.PLAN_CREATED, summary="Validated plan created",
+            command_id=command.id, intent=plan.intent.value, result_status="planned",
+            source="planner", correlation_id=str(command.id),
+            idempotency_key=f"command.plan:{command.id}")
         ensure_user_preferences(session, user)
         autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
         result = EXECUTION_ENGINE.execute(ActionRequest(action=plan.action, inputs=plan.inputs),
@@ -105,13 +165,33 @@ def submit_command(
     except AIProviderError as exc:
         session.rollback()
         command.status = CommandStatus.FAILED
+        command.idempotency_key = None
         session.add(command)
+        session.flush()
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_RECEIVED, summary="Command received",
+            command_id=command.id, correlation_id=str(command.id), source="command_api",
+            idempotency_key=f"command.received:{command.id}")
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_FAILED, summary="Command failed during interpretation",
+            command_id=command.id, result_status="failed", severity="error", source="command_api",
+            correlation_id=str(command.id), idempotency_key=f"command.failed:{command.id}")
         session.commit()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (ValueError, ValidationError) as exc:
         session.rollback()
         command.status = CommandStatus.FAILED
+        command.idempotency_key = None
         session.add(command)
+        session.flush()
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_RECEIVED, summary="Command received",
+            command_id=command.id, correlation_id=str(command.id), source="command_api",
+            idempotency_key=f"command.received:{command.id}")
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_FAILED, summary="Command parameters were invalid",
+            command_id=command.id, result_status="failed", severity="warning", source="command_api",
+            correlation_id=str(command.id), idempotency_key=f"command.failed:{command.id}")
         session.commit()
         raise HTTPException(status_code=422, detail="Command parameters are invalid") from exc
     except HTTPException:
@@ -138,8 +218,30 @@ def _user_action_permissions(session: Session, user_id: uuid.UUID) -> frozenset[
     if "activity" in grants:
         permissions.add("activity.read")
     if "settings" in grants:
-        permissions.update({"approval.request", "notification.send"})
+        permissions.update({"approval.request", "notification.send", "memory.write", "settings.personalize"})
+    if "projects" in grants:
+        permissions.add("project.read")
+    recent_worker = session.scalar(select(WorkerDevice.id).where(
+        WorkerDevice.owner_id == user_id, WorkerDevice.status == DeviceStatus.ACTIVE,
+        WorkerDevice.last_seen_at >= datetime.now(timezone.utc) - timedelta(minutes=2),
+    ).limit(1))
+    if recent_worker is not None:
+        permissions.add("worker.execute")
     return frozenset(permissions)
+
+
+@router.get("/commands/{command_id}", response_model=CommandResult)
+def get_command_status(command_id: uuid.UUID, user: User = Depends(get_current_user),
+                       session: Session = Depends(get_session)) -> CommandResult:
+    command = session.scalar(select(Command).where(Command.id == command_id, Command.user_id == user.id))
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found.")
+    status_value = command.status.value
+    message = command.response_message or ("This command is awaiting approval." if status_value == "awaiting_approval"
+        else "This command failed. Review its activity for details." if status_value == "failed"
+        else "This command is still processing.")
+    return CommandResult(command_id=command.id, status=status_value, intent=command.response_intent,
+        result=command.response_json, message=message, execution=command.response_execution_json)
 
 
 def _execution_payload(result: ExecutionResult) -> dict[str, object]:
@@ -147,6 +249,13 @@ def _execution_payload(result: ExecutionResult) -> dict[str, object]:
         "result": result.result, "error": result.error, "approval_required": result.approval_required,
         "approval_id": str(result.approval_id) if result.approval_id else None,
         "audit_id": str(result.audit_id) if result.audit_id else None}
+
+
+def _cache_command_response(command: Command, response: CommandResult) -> None:
+    command.response_intent = response.intent
+    command.response_json = response.result
+    command.response_message = response.message
+    command.response_execution_json = response.execution
 
 
 def _commit_execution_result(session: Session, command: Command, intent: str | None, result: ExecutionResult) -> CommandResult:
@@ -161,10 +270,26 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
             command.task_id = entity_id
         elif result.result.get("entity_type") == "project":
             command.project_id = entity_id
-    session.commit()
+    activity_status = statuses[result.status]
+    if result.status != ActionStatus.PENDING_APPROVAL:
+        event_type = ActivityType.COMMAND_COMPLETED if result.status == ActionStatus.EXECUTED else ActivityType.COMMAND_FAILED
+        add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
+            activity_type=event_type, summary="Command completed" if activity_status == "completed" else f"Command {activity_status}",
+            command_id=command.id, intent=intent, result_status=activity_status,
+            severity="info" if activity_status == "completed" else "warning", source="command_api",
+            correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
+    if result.approval_id:
+        add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
+            activity_type=ActivityType.APPROVAL_REQUESTED, summary="Approval requested",
+            command_id=command.id, approval_id=result.approval_id, intent=intent,
+            result_status="pending", source="approval", correlation_id=str(command.id),
+            idempotency_key=f"approval.requested:{result.approval_id}")
     message = result.error or ("Action completed." if result.success else "Approval is required." if result.approval_required else "The action was not executed.")
-    return CommandResult(command_id=command.id, status=statuses[result.status], intent=intent,
+    response = CommandResult(command_id=command.id, status=statuses[result.status], intent=intent,
         result=result.result, message=message, execution=_execution_payload(result))
+    _cache_command_response(command, response)
+    session.commit()
+    return response
 
 
 @router.post("/actions", response_model=CommandResult, status_code=status.HTTP_200_OK)
@@ -174,6 +299,10 @@ def execute_registered_action(request: ActionRequest, user: User = Depends(get_c
     session.add(command)
     try:
         session.flush()
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.COMMAND_RECEIVED, summary="Action received",
+            command_id=command.id, correlation_id=str(command.id), source="actions_api",
+            idempotency_key=f"command.received:{command.id}")
         ensure_user_preferences(session, user)
         autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
         result = EXECUTION_ENGINE.execute(request, ActionContext(session=session, user_id=user.id,
@@ -206,11 +335,30 @@ def decide_approval(approval_id: uuid.UUID, decision: ApprovalDecision, user: Us
     approval.decided_by_id = user.id
     approval.decision_note = decision.note
     approval.decided_at = datetime.now(timezone.utc)
+    add_activity(session, user_id=user.id, actor_user_id=user.id,
+        activity_type=ActivityType.APPROVAL_DECIDED,
+        summary="Approval approved" if decision.approved else "Approval denied",
+        command_id=command.id, approval_id=approval.id,
+        result_status="approved" if decision.approved else "denied",
+        source="approval", correlation_id=str(command.id),
+        idempotency_key=f"approval.decision:{approval.id}")
     worker_job = session.scalar(select(WorkerJob).where(WorkerJob.approval_id == approval.id).with_for_update())
     if worker_job is not None:
         worker_job.status = WorkerJobStatus.QUEUED if decision.approved else WorkerJobStatus.CANCELLED
         if not decision.approved:
             worker_job.finished_at = datetime.now(timezone.utc)
+        if decision.approved:
+            add_activity(session, user_id=user.id, actor_user_id=user.id,
+                activity_type=ActivityType.WORKER_JOB_QUEUED, summary="Worker job queued",
+                command_id=command.id, approval_id=approval.id, worker_job_id=worker_job.id,
+                result_status="queued", source="worker", correlation_id=str(command.id),
+                idempotency_key=f"worker.queued:{worker_job.id}")
+        else:
+            add_activity(session, user_id=user.id, actor_user_id=user.id,
+                activity_type=ActivityType.WORKER_JOB_FAILED, summary="Worker job denied",
+                command_id=command.id, approval_id=approval.id, worker_job_id=worker_job.id,
+                result_status="cancelled", severity="warning", source="worker",
+                correlation_id=str(command.id), idempotency_key=f"worker.terminal:{worker_job.id}")
         session.commit()
         return CommandResult(command_id=command.id, status="approved" if decision.approved else "denied",
             intent="WORKER_ACTION", result={"job_id": str(worker_job.id), "status": worker_job.status.value},
@@ -243,6 +391,12 @@ def list_approvals(status_filter: str | None = Query(default=None, alias="status
         expiry = row.expires_at.replace(tzinfo=timezone.utc) if row.expires_at and row.expires_at.tzinfo is None else row.expires_at
         if row.status == ApprovalStatus.PENDING and expiry and expiry <= now:
             row.status = ApprovalStatus.EXPIRED
+            command_id = row.command_id
+            add_activity(session, user_id=user.id, actor_user_id=None,
+                activity_type=ActivityType.APPROVAL_DECIDED, summary="Approval expired",
+                command_id=command_id, approval_id=row.id, result_status="expired",
+                severity="warning", source="approval",
+                correlation_id=str(command_id or row.id), idempotency_key=f"approval.decision:{row.id}")
     session.commit()
     return [_approval_view(row) for row in rows if status_filter is None or row.status.value == status_filter]
 
@@ -263,10 +417,21 @@ def cancel_approval(approval_id: uuid.UUID, user: User = Depends(get_current_use
     if row.status != ApprovalStatus.PENDING:
         raise HTTPException(status_code=409, detail="Approval request is no longer pending")
     row.status = ApprovalStatus.CANCELLED
+    command_id = row.command_id
+    add_activity(session, user_id=user.id, actor_user_id=user.id,
+        activity_type=ActivityType.APPROVAL_DECIDED, summary="Approval cancelled",
+        command_id=command_id, approval_id=row.id, result_status="cancelled",
+        severity="warning", source="approval", correlation_id=str(command_id or row.id),
+        idempotency_key=f"approval.decision:{row.id}")
     worker_job = session.scalar(select(WorkerJob).where(WorkerJob.approval_id == row.id).with_for_update())
     if worker_job is not None and worker_job.status == WorkerJobStatus.PENDING_APPROVAL:
         worker_job.status = WorkerJobStatus.CANCELLED
         worker_job.finished_at = datetime.now(timezone.utc)
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.WORKER_JOB_CANCELLED, summary="Worker job cancelled",
+            approval_id=row.id, worker_job_id=worker_job.id, result_status="cancelled",
+            severity="warning", source="worker", correlation_id=str(command_id or row.id),
+            idempotency_key=f"worker.terminal:{worker_job.id}")
     row.decided_by_id = user.id
     row.decided_at = datetime.now(timezone.utc)
     session.commit()
@@ -341,7 +506,7 @@ def create_project(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Project:
-    project = Project(owner_id=user.id, name=data.name.strip(), description=data.description)
+    project = Project(owner_id=user.id, name=data.name.strip(), description=data.description, objective=data.objective)
     session.add(project)
     session.flush()
     add_project_owner_membership(session, project)
@@ -443,10 +608,42 @@ def list_activity(
     user: User = Depends(get_current_user),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    project_id: uuid.UUID | None = None,
+    event_type: ActivityType | None = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status", max_length=20),
+    execution_id: uuid.UUID | None = None,
+    command_id: uuid.UUID | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     session: Session = Depends(get_session),
 ) -> list[Activity]:
+    if since is not None and until is not None and since > until:
+        raise HTTPException(status_code=422, detail="since must be earlier than or equal to until")
     statement = select(Activity).where(Activity.user_id == user.id).order_by(Activity.created_at.desc(), Activity.id.desc())
+    if project_id is not None:
+        statement = statement.where(Activity.project_id == project_id)
+    if event_type is not None:
+        statement = statement.where(Activity.activity_type == event_type)
+    if status_filter is not None:
+        statement = statement.where(Activity.result_status == status_filter)
+    if execution_id is not None:
+        statement = statement.where(Activity.execution_id == execution_id)
+    if command_id is not None:
+        statement = statement.where(Activity.command_id == command_id)
+    if since is not None:
+        statement = statement.where(Activity.created_at >= since)
+    if until is not None:
+        statement = statement.where(Activity.created_at <= until)
     return list(session.scalars(statement.limit(limit).offset(offset)).all())
+
+
+@router.get("/activity/{activity_id}", response_model=ActivityRead)
+def get_activity_detail(activity_id: uuid.UUID, user: User = Depends(get_current_user),
+                        session: Session = Depends(get_session)) -> Activity:
+    row = session.scalar(select(Activity).where(Activity.id == activity_id, Activity.user_id == user.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    return row
     if approval.expires_at and approval.expires_at <= datetime.now(timezone.utc):
         approval.status = ApprovalStatus.EXPIRED
         session.commit()

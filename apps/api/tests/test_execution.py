@@ -14,6 +14,7 @@ from orin_api.execution import ActionContext, ActionDefinition, ActionRegistry, 
 from orin_api.main import app
 from orin_api.models import Approval, ApprovalStatus, Command, ExecutionAudit, User
 from orin_api.approval_policy import decide_approval
+from orin_api.config import Settings, get_settings
 
 
 @pytest.fixture
@@ -182,6 +183,7 @@ def test_worker_registration_approval_claim_progress_and_revocation(world: tuple
     assert job_response.status_code == 202, job_response.text
     job = job_response.json()
     assert job["status"] == "pending_approval"
+    assert job["requested_target"] == "auto" and job["selected_target"] == "local"
     no_credential = client.post("/api/v1/worker/jobs/claim")
     assert no_credential.status_code == 401
     headers = {"Authorization": f"Bearer {token}"}
@@ -195,9 +197,65 @@ def test_worker_registration_approval_claim_progress_and_revocation(world: tuple
     assert client.post("/api/v1/worker/jobs/claim", headers=headers).json() is None
     assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "starting"}).status_code == 200
     assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "running", "message": "Reading system details"}).status_code == 200
+    assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "running", "message": "Still working"}).status_code == 200
     finished = client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "completed", "result": {"platform": "Windows"}})
     assert finished.json()["status"] == "completed"
     assert client.post(f"/api/v1/worker/jobs/{job['id']}/event", headers=headers, json={"status": "completed", "result": {"platform": "Windows"}}).json()["status"] == "completed"
     assert client.get(f"/api/v1/devices/{device_id}/jobs").json()[0]["result"] == {"platform": "Windows"}
+    progress_events = client.get("/api/v1/activity", params={"event_type": "worker_job_progress"}).json()
+    assert len(progress_events) == 2
+    assert {event["result_status"] for event in progress_events} == {"starting", "running"}
+    assert all("Reading system details" not in event["summary"] for event in progress_events)
     assert client.delete(f"/api/v1/devices/{device_id}").status_code == 204
     assert client.post("/api/v1/worker/heartbeat", headers=headers).status_code == 401
+
+
+def test_worker_job_cloud_target_fails_clearly_until_cloud_worker_exists(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    enrolled = client.post("/api/v1/devices", json={"name": "Target worker", "platform": "Windows", "version": "test"})
+    device_id = enrolled.json()["id"]
+    response = client.post(f"/api/v1/devices/{device_id}/jobs", json={
+        "action": "get_system_info", "parameters": {}, "requested_target": "cloud"})
+    assert response.status_code == 409
+    assert "cloud execution is unavailable" in response.json()["detail"]
+
+
+def test_ai_worker_action_uses_registry_and_waits_for_user_approval(world: tuple[TestClient, sessionmaker[Session], User], monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.ai import AIIntent
+
+    client, _, _ = world
+    enrolled = client.post("/api/v1/devices", json={"name": "Workflow worker", "platform": "Windows", "version": "test"})
+    token, device_id = enrolled.json()["credential"], enrolled.json()["id"]
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.post("/api/v1/worker/heartbeat", headers=headers).status_code == 200
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_allowed_command","worker_parameters":{"command":"python_tests"}}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Run the project tests"})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "awaiting_approval"
+    approval_id = response.json()["execution"]["approval_id"]
+    assert client.post("/api/v1/worker/jobs/claim", headers=headers).json() is None
+    decision = client.post(f"/api/v1/approvals/{approval_id}/decision", json={"approved": True})
+    assert decision.status_code == 200 and decision.json()["status"] == "approved"
+    delivery = client.post("/api/v1/worker/jobs/claim", headers=headers).json()
+    assert delivery["payload"]["action"] == "run_allowed_command"
+    assert delivery["payload"]["parameters"] == {"command": "python_tests"}
+    assert delivery["payload"]["approved"] is True
+    assert client.get(f"/api/v1/devices/{device_id}/jobs").json()[0]["status"] == "starting"
+
+
+def test_worker_intent_rejects_shell_injection_and_unknown_capability() -> None:
+    from orin_api.ai import AIIntent
+    with pytest.raises(Exception):
+        AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_allowed_command","worker_parameters":{"command":"python_tests && whoami"}}}')
+    with pytest.raises(Exception):
+        AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_shell","worker_parameters":{"command":"whoami"}}}')

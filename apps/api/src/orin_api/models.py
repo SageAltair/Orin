@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
@@ -35,7 +36,9 @@ class Density(str, enum.Enum):
 
 
 class ProjectStatus(str, enum.Enum):
+    PLANNING = "planning"
     ACTIVE = "active"
+    BLOCKED = "blocked"
     PAUSED = "paused"
     COMPLETED = "completed"
     ARCHIVED = "archived"
@@ -110,6 +113,26 @@ class ActivityType(str, enum.Enum):
     PROJECT_UPDATED = "project_updated"
     TASK_CREATED = "task_created"
     TASK_UPDATED = "task_updated"
+    MEMORY_CHANGED = "memory_changed"
+    FOCUS_UPDATED = "focus_updated"
+    COMMAND_RECEIVED = "command_received"
+    INTENT_INTERPRETED = "intent_interpreted"
+    PLAN_CREATED = "plan_created"
+    COMMAND_COMPLETED = "command_completed"
+    COMMAND_FAILED = "command_failed"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_DECIDED = "approval_decided"
+    WORKER_JOB_QUEUED = "worker_job_queued"
+    WORKER_JOB_STARTED = "worker_job_started"
+    WORKER_JOB_PROGRESS = "worker_job_progress"
+    WORKER_JOB_COMPLETED = "worker_job_completed"
+    WORKER_JOB_FAILED = "worker_job_failed"
+    WORKER_JOB_CANCELLED = "worker_job_cancelled"
+    WORKER_JOB_TIMED_OUT = "worker_job_timed_out"
+    WORKER_CONNECTED = "worker_connected"
+    WORKER_DISCONNECTED = "worker_disconnected"
+    POLICY_DECISION = "policy_decision"
+    INTEGRATION_OPERATION = "integration_operation"
 
 
 def enum_column(enum_class: type[enum.Enum], name: str) -> Enum:
@@ -208,6 +231,7 @@ class Project(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
+    objective: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ProjectStatus] = mapped_column(enum_column(ProjectStatus, "project_status"), nullable=False, default=ProjectStatus.ACTIVE, server_default=ProjectStatus.ACTIVE.value)
 
@@ -268,7 +292,8 @@ class TaskDependency(CreatedAtMixin, Base):
 
 class Command(TimestampMixin, Base):
     __tablename__ = "commands"
-    __table_args__ = (Index("ix_commands_user_created", "user_id", "created_at"),)
+    __table_args__ = (Index("ix_commands_user_created", "user_id", "created_at"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_command_user_idempotency"))
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -276,6 +301,25 @@ class Command(TimestampMixin, Base):
     task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
     text: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[CommandStatus] = mapped_column(enum_column(CommandStatus, "command_status"), nullable=False, default=CommandStatus.SUBMITTED, server_default=CommandStatus.SUBMITTED.value)
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
+    response_intent: Mapped[str | None] = mapped_column(String(40))
+    response_json: Mapped[dict[str, object] | list[dict[str, object]] | None] = mapped_column(JSON)
+    response_message: Mapped[str | None] = mapped_column(Text)
+    response_execution_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
+
+
+class RequestRateWindow(Base):
+    __tablename__ = "request_rate_windows"
+    __table_args__ = (
+        UniqueConstraint("user_id", "route", "window_start", name="uq_request_rate_user_route_window"),
+        Index("ix_request_rate_window_start", "window_start"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    route: Mapped[str] = mapped_column(String(60), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(nullable=False)
 
 
 class Execution(TimestampMixin, Base):
@@ -343,10 +387,16 @@ class Activity(CreatedAtMixin, Base):
         Index("ix_activity_user_created", "user_id", "created_at"),
         Index("ix_activity_project_created", "project_id", "created_at"),
         Index("ix_activity_task_created", "task_id", "created_at"),
+        Index("ix_activity_execution_created", "execution_id", "created_at"),
+        Index("ix_activity_user_type_created", "user_id", "activity_type", "created_at"),
+        UniqueConstraint("user_id", "idempotency_key", name="uq_activity_user_idempotency"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     command_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("commands.id", ondelete="SET NULL"))
+    execution_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("executions.id", ondelete="SET NULL"))
+    approval_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("approvals.id", ondelete="SET NULL"))
+    worker_job_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("worker_jobs.id", ondelete="SET NULL"))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
@@ -355,6 +405,11 @@ class Activity(CreatedAtMixin, Base):
     summary: Mapped[str] = mapped_column(String(240), nullable=False)
     intent: Mapped[str | None] = mapped_column(String(40))
     result_status: Mapped[str] = mapped_column(String(20), nullable=False, default="succeeded", server_default="succeeded")
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="info", server_default="info")
+    source: Mapped[str] = mapped_column(String(40), nullable=False, default="api", server_default="api")
+    correlation_id: Mapped[str | None] = mapped_column(String(64))
+    idempotency_key: Mapped[str | None] = mapped_column(String(160))
+    metadata_json: Mapped[dict[str, object]] = mapped_column("metadata", JSON, nullable=False, default=dict, server_default="{}")
 
 
 class AuthSession(CreatedAtMixin, Base):
@@ -408,6 +463,8 @@ class WorkerJob(TimestampMixin, Base):
     __tablename__ = "worker_jobs"
     __table_args__ = (
         UniqueConstraint("nonce", name="uq_worker_job_nonce"),
+        CheckConstraint("requested_target IN ('local', 'cloud', 'auto')", name="ck_worker_job_requested_target"),
+        CheckConstraint("selected_target IS NULL OR selected_target IN ('local', 'cloud')", name="ck_worker_job_selected_target"),
         Index("ix_worker_jobs_device_status_created", "device_id", "status", "created_at"),
     )
 
@@ -426,3 +483,101 @@ class WorkerJob(TimestampMixin, Base):
     progress: Mapped[str | None] = mapped_column(String(240))
     result: Mapped[dict[str, object] | None] = mapped_column(JSON)
     failure: Mapped[str | None] = mapped_column(String(240))
+    requested_target: Mapped[str] = mapped_column(String(12), nullable=False, default="auto", server_default="auto")
+    selected_target: Mapped[str | None] = mapped_column(String(12))
+
+
+class Memory(TimestampMixin, Base):
+    __tablename__ = "memories"
+    __table_args__ = (Index("ix_memories_user_project_type", "user_id", "project_id", "memory_type", "archived"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    memory_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(String(240), nullable=False)
+    confidence: Mapped[float | None] = mapped_column()
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    metadata_json: Mapped[dict[str, object]] = mapped_column("metadata", JSON, nullable=False, default=dict, server_default="{}")
+
+
+class EnvironmentPreference(TimestampMixin, Base):
+    __tablename__ = "environment_preferences"
+    __table_args__ = (UniqueConstraint("user_id", "surface", "item", name="uq_environment_preference_item"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    surface: Mapped[str] = mapped_column(String(60), nullable=False)
+    item: Mapped[str] = mapped_column(String(80), nullable=False)
+    visibility: Mapped[str] = mapped_column(String(16), nullable=False, default="visible", server_default="visible")
+    priority: Mapped[int] = mapped_column(default=0, server_default="0")
+    source: Mapped[str] = mapped_column(String(24), nullable=False, default="explicit", server_default="explicit")
+
+
+class FocusSession(TimestampMixin, Base):
+    __tablename__ = "focus_sessions"
+    __table_args__ = (
+        Index("ix_focus_sessions_user_status", "user_id", "status"),
+        Index("uq_focus_sessions_one_active_per_user", "user_id", unique=True, postgresql_where=text("status = 'active'"), sqlite_where=text("status = 'active'")),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    objective: Mapped[str] = mapped_column(String(500), nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
+    context_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+
+
+class IntegrationConnection(TimestampMixin, Base):
+    __tablename__ = "integration_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_integration_connection_user_provider"),
+        Index("ix_integration_connections_provider", "provider", "last_successful_sync_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    external_account_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_login: Mapped[str] = mapped_column(String(120), nullable=False)
+    credential_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    granted_scopes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    credential_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_successful_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class IntegrationOAuthState(CreatedAtMixin, Base):
+    __tablename__ = "integration_oauth_states"
+    __table_args__ = (
+        UniqueConstraint("state_hash", name="uq_integration_oauth_state_hash"),
+        Index("ix_integration_oauth_states_user_expiry", "user_id", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProjectIntegrationSource(CreatedAtMixin, Base):
+    __tablename__ = "project_integration_sources"
+    __table_args__ = (
+        UniqueConstraint("project_id", "provider", name="uq_project_integration_source_project_provider"),
+        Index("ix_project_integration_sources_user_provider", "user_id", "provider"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("integration_connections.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider_resource_id: Mapped[str] = mapped_column(String(120), nullable=False)
+    resource_owner: Mapped[str] = mapped_column(String(120), nullable=False)
+    resource_name: Mapped[str] = mapped_column(String(160), nullable=False)

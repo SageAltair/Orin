@@ -140,6 +140,29 @@ test("settings expose profile security, autonomy, approvals, and worker enrollme
   await expect(page.getByText("revoked", { exact: true })).toBeVisible();
 });
 
+test("GitHub settings show the connected account and accessible repositories", async ({ page }) => {
+  await mockApi(page);
+  await page.route("**/api/v1/integrations/github**", route => {
+    const { pathname } = new URL(route.request().url());
+    if (pathname === "/api/v1/integrations/github") return route.fulfill({ json: {
+      connected: true, provider: "github", account_login: "octo-test", granted_scopes: [],
+      capabilities: ["repositories.read", "issues.read", "pull_requests.read"], last_successful_sync_at: null,
+    } });
+    if (pathname.endsWith("/repositories")) return route.fulfill({ json: [{
+      id: "repo-1", full_name: "octo-test/orin-demo", private: true,
+      html_url: "https://github.com/octo-test/orin-demo", default_branch: "main", selected_project_ids: [],
+    }] });
+    return route.continue();
+  });
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
+  await expect(page.getByText("Connected as").getByText("octo-test")).toBeVisible();
+  await expect(page.getByText("octo-test/orin-demo")).toBeVisible();
+  await expect(page.getByText("Private")).toBeVisible();
+});
+
 test("Ask Orin answers greetings and creates tasks; manual task creation also works", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
@@ -197,4 +220,42 @@ test("adaptive navigation can minimize, hide, recover, and reset tools", async (
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
   await page.getByRole("button", { name: "Reset layout" }).click();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveCount(0);
+});
+
+test("activity links open related workspace records and exposes lifecycle event filters", async ({ page }) => {
+  await mockApi(page);
+  const project = { id: "project-1", owner_id: "user-1", name: "Roadmap project", description: null, objective: null, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" };
+  const task = { id: "task-1", owner_id: "user-1", project_id: project.id, assignee_id: null, title: "Review roadmap", description: null, status: "todo", priority: "normal", due_at: null, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" };
+  const events = [
+    { id: "activity-task", user_id: "user-1", project_id: project.id, task_id: task.id, command_id: null, execution_id: null, approval_id: null, worker_job_id: null, activity_type: "task_created", summary: "Created task: Review roadmap", created_at: "2026-10-08T00:00:00Z", result_status: "succeeded", severity: "info", source: "api", correlation_id: null, metadata: {} },
+    { id: "activity-plan", user_id: "user-1", project_id: null, task_id: null, command_id: "command-1", execution_id: null, approval_id: null, worker_job_id: null, activity_type: "plan_created", summary: "Validated plan created", created_at: "2026-10-08T00:00:00Z", result_status: "succeeded", severity: "info", source: "planner", correlation_id: "command-1", metadata: {} },
+    { id: "activity-progress", user_id: "user-1", project_id: null, task_id: null, command_id: "command-1", execution_id: "execution-1", approval_id: null, worker_job_id: "job-1", activity_type: "worker_job_progress", summary: "Worker progress updated", created_at: "2026-10-08T00:00:00Z", result_status: "running", severity: "info", source: "worker", correlation_id: "command-1", metadata: {} },
+  ];
+  await page.route("**/api/v1/projects", route => route.fulfill({ json: [project] }));
+  await page.route("**/api/v1/tasks", route => route.fulfill({ json: [task] }));
+  await page.route("**/api/v1/activity**", route => {
+    const query = new URL(route.request().url()).searchParams;
+    const filtered = events.filter(item => (!query.has("event_type") || item.activity_type === query.get("event_type"))
+      && (!query.has("command_id") || item.command_id === query.get("command_id"))
+      && (!query.has("execution_id") || item.execution_id === query.get("execution_id")));
+    return route.fulfill({ json: filtered });
+  });
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await page.getByRole("checkbox", { name: "Show Projects" }).check();
+  await page.getByRole("checkbox", { name: "Show Activity" }).check();
+  await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
+  await expect(page.getByRole("option", { name: "plan created" })).toBeAttached();
+  await expect(page.getByRole("option", { name: "worker job progress" })).toBeAttached();
+  await page.getByRole("button", { name: "Project project-" }).click();
+  await expect(page.getByRole("combobox", { name: "Select project" })).toHaveValue(project.id);
+  await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
+  await page.getByRole("button", { name: "Task task-1" }).click();
+  await expect(page.locator(`#task-${task.id}`)).toBeInViewport();
+  await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
+  await page.getByRole("button", { name: "Execution executio" }).click();
+  await expect(page.getByRole("button", { name: "Clear execution filter" })).toBeVisible();
+  await expect(page.getByText("Worker progress updated")).toBeVisible();
+  await expect(page.getByText("Validated plan created")).toHaveCount(0);
 });

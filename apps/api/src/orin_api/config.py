@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic import Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,13 +30,51 @@ class Settings(BaseSettings):
     cerebras_api_key: str | None = Field(default=None, repr=False)
     cloudflare_api_key: str | None = Field(default=None, repr=False)
     cloudflare_account_id: str | None = Field(default=None, repr=False)
+    integration_encryption_key: SecretStr | None = Field(default=None, repr=False)
+    github_app_client_id: str | None = None
+    github_app_client_secret: SecretStr | None = Field(default=None, repr=False)
+    github_app_callback_url: str | None = None
+    web_app_url: str = "http://localhost:5173"
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> Settings:
-        if self.app_env.lower() in {"production", "prod"} and self.auth_secret_key is None:
-            raise ValueError("AUTH_SECRET_KEY must be configured in production")
+        production = self.app_env.lower() in {"production", "prod"}
+        if production:
+            if self.auth_secret_key is None:
+                raise ValueError("AUTH_SECRET_KEY must be configured in production")
+            if not {"database_url", "cors_origins", "web_app_url"}.issubset(self.model_fields_set):
+                raise ValueError("DATABASE_URL, CORS_ORIGINS, and WEB_APP_URL must be explicitly configured in production")
+            if not self.allowed_cors_origins or any(urlsplit(origin).scheme != "https" for origin in self.allowed_cors_origins):
+                raise ValueError("CORS_ORIGINS must contain HTTPS origins in production")
+            if urlsplit(self.web_app_url).scheme != "https":
+                raise ValueError("WEB_APP_URL must use HTTPS in production")
+            if not self.auth_refresh_cookie_secure:
+                raise ValueError("AUTH_REFRESH_COOKIE_SECURE must be enabled in production")
         if "*" in self.allowed_cors_origins:
             raise ValueError("CORS_ORIGINS must contain explicit origins")
+        secret_set = bool(self.github_app_client_secret and self.github_app_client_secret.get_secret_value())
+        encryption_set = bool(self.integration_encryption_key and self.integration_encryption_key.get_secret_value())
+        client_id_set = bool(self.github_app_client_id and self.github_app_client_id.strip())
+        callback_set = bool(self.github_app_callback_url and self.github_app_callback_url.strip())
+        github_configured = any((client_id_set, secret_set, callback_set))
+        if github_configured and not all((client_id_set, secret_set, callback_set, encryption_set)):
+            raise ValueError("GitHub integration requires its client ID, client secret, callback URL, and INTEGRATION_ENCRYPTION_KEY")
+        if github_configured:
+            from cryptography.fernet import Fernet, InvalidToken
+            try:
+                keys = [item.strip() for item in self.integration_encryption_key.get_secret_value().split(",") if item.strip()]
+                if not keys:
+                    raise ValueError("no keys")
+                for key in keys:
+                    Fernet(key.encode("ascii"))
+            except (ValueError, TypeError, UnicodeEncodeError, InvalidToken) as exc:
+                raise ValueError("INTEGRATION_ENCRYPTION_KEY must be a valid Fernet key") from exc
+            callback = urlsplit(self.github_app_callback_url or "")
+            if callback.scheme != "https" and not (self.app_env.lower() not in {"production", "prod"} and callback.hostname in {"localhost", "127.0.0.1"}):
+                raise ValueError("GITHUB_APP_CALLBACK_URL must use HTTPS outside local development")
+            web = urlsplit(self.web_app_url)
+            if web.scheme != "https" and not (self.app_env.lower() not in {"production", "prod"} and web.hostname in {"localhost", "127.0.0.1"}):
+                raise ValueError("WEB_APP_URL must use HTTPS outside local development")
         return self
 
     def require_auth_secret(self) -> str:

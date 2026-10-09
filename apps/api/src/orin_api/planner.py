@@ -20,6 +20,10 @@ _INTENT_ACTIONS = {
     IntentName.LIST_PROJECTS: "list_projects",
     IntentName.LIST_TASKS: "list_tasks",
     IntentName.GET_ACTIVITY: "get_activity",
+    IntentName.WORKER_ACTION: "request_worker_action",
+    IntentName.SAVE_MEMORY: "save_memory",
+    IntentName.START_FOCUS: "start_focus_session",
+    IntentName.SET_TOOL_VISIBILITY: "set_tool_visibility",
 }
 
 

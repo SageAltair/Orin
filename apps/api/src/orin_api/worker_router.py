@@ -7,9 +7,8 @@ import json
 import re
 import secrets
 import uuid
-import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,17 +17,12 @@ from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
-from orin_api.models import Approval, ApprovalStatus, Command, DeviceStatus, User, WorkerDevice, WorkerJob, WorkerJobStatus
+from orin_api.models import ActivityType, Approval, ApprovalStatus, Command, DeviceStatus, User, WorkerDevice, WorkerJob, WorkerJobStatus
+from orin_api.worker_service import queue_user_job
+from orin_api.services import add_activity
 
 router = APIRouter(prefix="/api/v1", tags=["devices and worker"])
 _SECRET_PROGRESS = re.compile(r"(?i)(bearer\s+\S+|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)")
-DEVICE_SCOPES = {
-    "get_system_info": ("system.info.read", "low"),
-    "list_directory": ("filesystem.directory.read", "low"),
-    "read_file": ("filesystem.file.read", "low"),
-    "write_file": ("filesystem.file.write", "medium"),
-    "run_allowed_command": ("process.command.execute", "high"),
-}
 
 
 class DeviceCreate(BaseModel):
@@ -45,6 +39,7 @@ class JobCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str
     parameters: dict[str, Any]
+    requested_target: Literal["local", "cloud", "auto"] = "auto"
 
 
 class JobEvent(BaseModel):
@@ -119,10 +114,19 @@ def revoke_device(device_id: uuid.UUID, user: User = Depends(get_current_user), 
     if row is None:
         raise HTTPException(status_code=404, detail="Device not found")
     row.status = DeviceStatus.REVOKED
+    add_activity(session, user_id=user.id, actor_user_id=user.id,
+        activity_type=ActivityType.WORKER_DISCONNECTED, summary="Worker disconnected",
+        result_status="revoked", source="worker", correlation_id=str(row.id),
+        idempotency_key=f"worker.revoked:{row.id}")
     jobs = session.scalars(select(WorkerJob).where(WorkerJob.device_id == row.id, WorkerJob.status.in_([WorkerJobStatus.PENDING_APPROVAL, WorkerJobStatus.QUEUED])).with_for_update()).all()
     for job in jobs:
         job.status = WorkerJobStatus.CANCELLED
         job.finished_at = datetime.now(timezone.utc)
+        add_activity(session, user_id=user.id, actor_user_id=user.id,
+            activity_type=ActivityType.WORKER_JOB_CANCELLED, summary="Worker job cancelled",
+            approval_id=job.approval_id, worker_job_id=job.id, result_status="cancelled",
+            severity="warning", source="worker", correlation_id=str(job.approval_id),
+            idempotency_key=f"worker.terminal:{job.id}")
         approval = session.get(Approval, job.approval_id)
         if approval and approval.status in {ApprovalStatus.PENDING, ApprovalStatus.APPROVED}:
             approval.status = ApprovalStatus.CANCELLED
@@ -136,41 +140,21 @@ def create_job(device_id: uuid.UUID, data: JobCreate, user: User = Depends(get_c
     device = session.scalar(select(WorkerDevice).where(WorkerDevice.id == device_id, WorkerDevice.owner_id == user.id, WorkerDevice.status != DeviceStatus.REVOKED))
     if device is None:
         raise HTTPException(status_code=404, detail="Active device not found")
-    policy = DEVICE_SCOPES.get(data.action)
-    if policy is None:
-        raise HTTPException(status_code=422, detail="Worker action is not supported")
-    scope, risk = policy
-    required_parameters = {"get_system_info": set(), "list_directory": {"path"}, "read_file": {"path"},
-                          "write_file": {"path", "content"}, "run_allowed_command": {"command"}}[data.action]
-    if set(data.parameters) != required_parameters:
-        raise HTTPException(status_code=422, detail="Worker action parameters are invalid")
-    if data.action == "write_file" and not isinstance(data.parameters.get("content"), str):
-        raise HTTPException(status_code=422, detail="Worker file content must be text")
-    if data.action == "write_file" and len(data.parameters["content"].encode("utf-8")) > 1_000_000:
-        raise HTTPException(status_code=422, detail="Worker file content exceeds the 1 MB limit")
-    if data.action in {"list_directory", "read_file", "write_file"} and not isinstance(data.parameters.get("path"), str):
-        raise HTTPException(status_code=422, detail="Worker path must be text")
-    if data.action in {"list_directory", "read_file", "write_file"} and len(data.parameters["path"]) > 4096:
-        raise HTTPException(status_code=422, detail="Worker path is too long")
-    if data.action == "run_allowed_command" and data.parameters.get("command") not in {"git_status", "git_version"}:
-        raise HTTPException(status_code=422, detail="Command is not on the worker allowlist")
-    now = datetime.now(timezone.utc)
     command = Command(user_id=user.id, text=f"Worker action request: {data.action}")
     session.add(command)
     session.flush()
-    approval = Approval(command_id=command.id, requested_by_id=user.id, status=ApprovalStatus.PENDING,
-        action_name=f"worker_{data.action}", action_payload=data.parameters, risk_level=risk,
-        permission=scope, reversible=data.action in {"get_system_info", "list_directory", "read_file"},
-        decision_note="Worker actions always require explicit approval.", expires_at=now + timedelta(hours=24))
-    session.add(approval)
-    session.flush()
-    job = WorkerJob(user_id=user.id, device_id=device.id, approval_id=approval.id, action=data.action,
-        parameters=data.parameters, scopes=[scope], status=WorkerJobStatus.PENDING_APPROVAL,
-        nonce=secrets.token_hex(32), expires_at=now + timedelta(hours=24))
-    session.add(job)
+    job, approval = queue_user_job(session, user=user, device=device, command=command,
+        action=data.action, parameters=data.parameters, requested_target=data.requested_target)
+    add_activity(session, user_id=user.id, actor_user_id=user.id,
+        activity_type=ActivityType.APPROVAL_REQUESTED, summary="Worker job approval requested",
+        command_id=command.id, approval_id=approval.id, worker_job_id=job.id,
+        result_status="pending", source="worker", correlation_id=str(command.id),
+        idempotency_key=f"worker.approval:{job.id}")
     session.commit()
+    risk = approval.risk_level
     return {"id": job.id, "status": job.status.value, "approval_id": approval.id, "action": job.action,
-            "risk_level": risk, "created_at": job.created_at, "expires_at": job.expires_at}
+            "risk_level": risk, "requested_target": job.requested_target,
+            "selected_target": job.selected_target, "created_at": job.created_at, "expires_at": job.expires_at}
 
 
 @router.get("/devices/{device_id}/jobs")
@@ -183,11 +167,17 @@ def list_user_jobs(device_id: uuid.UUID, user: User = Depends(get_current_user),
         if row.status in {WorkerJobStatus.PENDING_APPROVAL, WorkerJobStatus.QUEUED, WorkerJobStatus.STARTING, WorkerJobStatus.RUNNING} and _utc(row.expires_at) <= now:
             row.status = WorkerJobStatus.EXPIRED
             row.finished_at = now
+            add_activity(session, user_id=user.id, actor_user_id=None,
+                activity_type=ActivityType.WORKER_JOB_TIMED_OUT, summary="Worker job timed out",
+                approval_id=row.approval_id, worker_job_id=row.id, result_status="expired",
+                severity="warning", source="worker", correlation_id=str(row.approval_id),
+                idempotency_key=f"worker.terminal:{row.id}")
             approval = session.get(Approval, row.approval_id)
             if approval and approval.status == ApprovalStatus.PENDING:
                 approval.status = ApprovalStatus.EXPIRED
     session.commit()
     return [{"id": row.id, "action": row.action, "status": row.status.value, "progress": row.progress,
+             "requested_target": row.requested_target, "selected_target": row.selected_target,
              "result": row.result, "failure": row.failure, "created_at": row.created_at, "finished_at": row.finished_at} for row in rows]
 
 
@@ -197,9 +187,19 @@ def heartbeat(device: WorkerDevice = Depends(_worker_device), session: Session =
               worker_version: Annotated[str | None, Header(alias="X-Worker-Version")] = None) -> dict[str, object]:
     if device.status == DeviceStatus.REVOKED:
         raise HTTPException(status_code=401, detail="Worker device is revoked")
-    device.last_seen_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    previous_seen = _utc(device.last_seen_at) if device.last_seen_at else None
+    first_connection = device.status == DeviceStatus.PENDING
+    reconnect = device.status == DeviceStatus.ACTIVE and (previous_seen is None or previous_seen < now - timedelta(minutes=2))
+    device.last_seen_at = now
     if device.status == DeviceStatus.PENDING:
         device.status = DeviceStatus.ACTIVE
+    if first_connection or reconnect:
+        suffix = "initial" if first_connection else str(int(previous_seen.timestamp())) if previous_seen else "unknown"
+        add_activity(session, user_id=device.owner_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_CONNECTED, summary="Worker connected" if first_connection else "Worker reconnected",
+            result_status="active", source="worker", correlation_id=str(device.id),
+            idempotency_key=f"worker.connected:{device.id}:{suffix}")
     if worker_platform:
         device.platform = worker_platform[:80]
     if worker_version:
@@ -219,6 +219,11 @@ def claim_job(device: WorkerDevice = Depends(_worker_device), session: Session =
     for stale in expired:
         stale.status = WorkerJobStatus.EXPIRED
         stale.finished_at = now
+        add_activity(session, user_id=stale.user_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_JOB_TIMED_OUT, summary="Worker job timed out",
+            approval_id=stale.approval_id, worker_job_id=stale.id, result_status="expired",
+            severity="warning", source="worker", correlation_id=str(stale.approval_id),
+            idempotency_key=f"worker.terminal:{stale.id}")
     device.last_seen_at = now
     job = session.scalar(select(WorkerJob).where(WorkerJob.device_id == device.id,
         WorkerJob.status == WorkerJobStatus.QUEUED, WorkerJob.expires_at > now).order_by(WorkerJob.created_at).with_for_update(skip_locked=True))
@@ -228,11 +233,21 @@ def claim_job(device: WorkerDevice = Depends(_worker_device), session: Session =
     approval = session.scalar(select(Approval).where(Approval.id == job.approval_id, Approval.requested_by_id == device.owner_id))
     if approval is None or approval.status != ApprovalStatus.APPROVED or approval.action_payload != job.parameters:
         job.status = WorkerJobStatus.CANCELLED
+        add_activity(session, user_id=job.user_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_JOB_CANCELLED, summary="Worker job cancelled",
+            approval_id=job.approval_id, worker_job_id=job.id, result_status="cancelled",
+            severity="warning", source="worker", correlation_id=str(job.approval_id),
+            idempotency_key=f"worker.terminal:{job.id}")
         session.commit()
         return None
     job.status = WorkerJobStatus.STARTING
     job.claimed_at = now
     job.progress = "Worker accepted the approved job"
+    add_activity(session, user_id=job.user_id, actor_user_id=None,
+        activity_type=ActivityType.WORKER_JOB_STARTED, summary="Worker job started",
+        approval_id=job.approval_id, worker_job_id=job.id, result_status="running",
+        source="worker", correlation_id=str(job.approval_id),
+        idempotency_key=f"worker.started:{job.id}")
     payload: dict[str, object] = {"job_id": str(job.id), "device_id": str(device.id),
         "expires_at": int(_utc(job.expires_at).timestamp()), "action": job.action,
         "parameters": job.parameters, "scopes": job.scopes, "approval_id": str(job.approval_id),
@@ -258,6 +273,11 @@ def worker_event(job_id: uuid.UUID, event: JobEvent, device: WorkerDevice = Depe
     if _utc(job.expires_at) <= now:
         job.status = WorkerJobStatus.EXPIRED
         job.finished_at = now
+        add_activity(session, user_id=job.user_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_JOB_TIMED_OUT, summary="Worker job timed out",
+            approval_id=job.approval_id, worker_job_id=job.id, result_status="expired",
+            severity="warning", source="worker", correlation_id=str(job.approval_id),
+            idempotency_key=f"worker.terminal:{job.id}")
         session.commit()
         raise HTTPException(status_code=409, detail="Job expired")
     allowed = {"starting": WorkerJobStatus.STARTING, "running": WorkerJobStatus.RUNNING,
@@ -283,8 +303,21 @@ def worker_event(job_id: uuid.UUID, event: JobEvent, device: WorkerDevice = Depe
             approval = session.get(Approval, job.approval_id)
             if approval:
                 approval.status = ApprovalStatus.EXECUTED
+        add_activity(session, user_id=job.user_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_JOB_COMPLETED if event.status == "completed" else ActivityType.WORKER_JOB_FAILED,
+            summary="Worker job completed" if event.status == "completed" else "Worker job failed",
+            approval_id=job.approval_id, worker_job_id=job.id,
+            result_status=job.status.value, severity="info" if event.status == "completed" else "error",
+            source="worker", correlation_id=str(job.approval_id),
+            idempotency_key=f"worker.terminal:{job.id}")
     else:
         job.progress = _SECRET_PROGRESS.sub("[redacted]", event.message or event.status.capitalize())
+        add_activity(session, user_id=job.user_id, actor_user_id=None,
+            activity_type=ActivityType.WORKER_JOB_PROGRESS,
+            summary=f"Worker job {event.status}", approval_id=job.approval_id,
+            worker_job_id=job.id, result_status=event.status, source="worker",
+            correlation_id=str(job.approval_id),
+            idempotency_key=f"worker.progress:{job.id}:{event.status}")
     device.last_seen_at = now
     session.commit()
     return {"job_id": str(job.id), "status": job.status.value}

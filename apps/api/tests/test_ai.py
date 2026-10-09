@@ -100,6 +100,17 @@ def test_interpreter_rejects_unrepairable_output() -> None:
     assert raised.value.category == "invalid_response"
 
 
+def test_worker_intent_allows_only_fixed_commands_and_ai_cannot_invent_project_or_tool() -> None:
+    project_intent = '{"intent":"START_FOCUS","confidence":0.95,"parameters":{"project_reference":"The Small Voice","objective":"Review presentation cards","duration_minutes":120}}'
+    with pytest.raises(AIProviderError, match="invalid response"):
+        AIInterpreter(FakeProvider(project_intent), "model").interpret("Start a focus session for two hours")
+    valid = AIInterpreter(FakeProvider(project_intent), "model").interpret("Start a focus session for The Small Voice for two hours")
+    assert valid.intent == IntentName.START_FOCUS
+    invalid_command = '{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_allowed_command","worker_parameters":{"command":"pytest && whoami"}}}'
+    with pytest.raises(AIProviderError, match="invalid response"):
+        AIInterpreter(FakeProvider(invalid_command), "model").interpret("Run tests for The Small Voice")
+
+
 def test_intent_supports_name_reference_for_task_updates() -> None:
     proposal = AIIntent.model_validate_json(
         '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'

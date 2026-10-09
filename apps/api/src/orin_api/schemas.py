@@ -46,11 +46,13 @@ TaskTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1
 class ProjectCreate(BaseModel):
     name: ProjectName
     description: str | None = None
+    objective: str | None = Field(default=None, max_length=2000)
 
 
 class ProjectUpdate(BaseModel):
     name: ProjectName | None = None
     description: str | None = None
+    objective: str | None = Field(default=None, max_length=2000)
     status: ProjectStatus | None = None
 
 
@@ -61,6 +63,7 @@ class ProjectRead(BaseModel):
     owner_id: uuid.UUID
     name: str
     description: str | None
+    objective: str | None = None
     status: ProjectStatus
     created_at: datetime
     updated_at: datetime
@@ -107,6 +110,9 @@ class ActivityRead(BaseModel):
 
     id: uuid.UUID
     command_id: uuid.UUID | None
+    execution_id: uuid.UUID | None = None
+    approval_id: uuid.UUID | None = None
+    worker_job_id: uuid.UUID | None = None
     actor_user_id: uuid.UUID | None
     project_id: uuid.UUID | None
     task_id: uuid.UUID | None
@@ -114,6 +120,10 @@ class ActivityRead(BaseModel):
     summary: str
     intent: str | None
     result_status: str
+    severity: str = "info"
+    source: str = "api"
+    correlation_id: str | None = None
+    metadata: dict[str, object] = Field(default_factory=dict, validation_alias="metadata_json")
     created_at: datetime
 
 

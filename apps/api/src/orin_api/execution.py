@@ -13,8 +13,9 @@ from typing import Any, Callable, Mapping, Type
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
-from orin_api.models import Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit
+from orin_api.models import ActivityType, Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit
 from orin_api.approval_policy import decide_approval
+from orin_api.services import add_activity
 
 
 class RiskLevel(StrEnum):
@@ -229,6 +230,15 @@ class ExecutionEngine:
         )
         context.session.add(row)
         context.session.flush()
+        add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
+            activity_type=ActivityType.POLICY_DECISION,
+            summary=f"Policy {status.value.replace('_', ' ')}: {action}",
+            command_id=context.command_id, approval_id=approval.id if approval else approval_id,
+            result_status=status.value,
+            severity="info" if status in {ActionStatus.EXECUTED, ActionStatus.PENDING_APPROVAL} else "warning",
+            source="policy", correlation_id=str(context.command_id),
+            idempotency_key=f"policy:{row.id}",
+            metadata={"action": action, "status": status.value})
         return ExecutionResult(
             success=status == ActionStatus.EXECUTED,
             action=action,

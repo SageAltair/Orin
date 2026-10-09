@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -18,6 +19,23 @@ from orin_api.models import (
     UserPreferences,
 )
 from orin_api.schemas import PreferencesUpdate
+
+_ACTIVITY_METADATA_KEYS = {"action", "status", "entity_type", "entity_id", "provider", "attempt", "count"}
+_SENSITIVE_VALUE = re.compile(r"(?i)(bearer\s+\S+|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)")
+
+
+def _safe_activity_metadata(value: dict[str, object] | None) -> dict[str, object]:
+    """Keep timeline metadata small, scalar, and limited to known non-secret fields."""
+    safe: dict[str, object] = {}
+    for key, item in (value or {}).items():
+        if key not in _ACTIVITY_METADATA_KEYS or isinstance(item, (dict, list)):
+            continue
+        if isinstance(item, str):
+            if len(item) <= 240 and not _SENSITIVE_VALUE.search(item):
+                safe[key] = item
+        elif isinstance(item, (int, float, bool)):
+            safe[key] = item
+    return safe
 
 
 CAPABILITY_CATALOG = (
@@ -144,7 +162,20 @@ def add_activity(
     task_id: uuid.UUID | None = None,
     command_id: uuid.UUID | None = None,
     intent: str | None = None,
+    execution_id: uuid.UUID | None = None,
+    approval_id: uuid.UUID | None = None,
+    worker_job_id: uuid.UUID | None = None,
+    result_status: str = "succeeded",
+    severity: str = "info",
+    source: str = "api",
+    correlation_id: str | None = None,
+    idempotency_key: str | None = None,
+    metadata: dict[str, object] | None = None,
 ) -> None:
+    if idempotency_key and session.scalar(select(Activity.id).where(
+        Activity.user_id == user_id, Activity.idempotency_key == idempotency_key
+    )) is not None:
+        return
     session.add(Activity(
         user_id=user_id,
         actor_user_id=actor_user_id,
@@ -154,7 +185,15 @@ def add_activity(
         task_id=task_id,
         command_id=command_id,
         intent=intent,
-        result_status="succeeded",
+        execution_id=execution_id,
+        approval_id=approval_id,
+        worker_job_id=worker_job_id,
+        result_status=result_status,
+        severity=severity,
+        source=source,
+        correlation_id=correlation_id,
+        idempotency_key=idempotency_key,
+        metadata_json=_safe_activity_metadata(metadata),
     ))
 
 

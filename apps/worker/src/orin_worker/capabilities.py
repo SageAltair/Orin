@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from itertools import islice
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,11 @@ SCOPES = {
 ALLOWED_COMMANDS: dict[str, tuple[str, ...]] = {
     "git_status": ("git", "status", "--short"),
     "git_version": ("git", "--version"),
+    "python_tests": (sys.executable, "-m", "pytest", "-q"),
+    "npm_tests": ("npm", "test", "--", "--run"),
 }
+
+_PROTECTED_NAMES = {".ssh", ".aws", ".azure", ".config", "credentials", "secrets", "program files", "program files (x86)", "programdata", "windows", "id_rsa", "id_ed25519"}
 
 
 class WorkerJob(BaseModel):
@@ -40,8 +45,7 @@ def _path(raw: str, roots: tuple[Path, ...]) -> Path:
     candidate = Path(raw).expanduser().resolve(strict=False)
     if not roots or not any(candidate == root or root in candidate.parents for root in roots):
         raise PermissionError("Path is outside configured worker roots")
-    if any(part.casefold() in {".ssh", ".aws", ".azure", ".config", "credentials", "secrets", "program files", "program files (x86)", "programdata", "windows"}
-           or part.casefold() in {".env", ".env.local", "id_rsa", "id_ed25519"} for part in candidate.parts):
+    if any(part.casefold() in _PROTECTED_NAMES or part.casefold().startswith(".env") for part in candidate.parts):
         raise PermissionError("Access to protected credential locations is blocked")
     return candidate
 
@@ -84,6 +88,9 @@ def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ..
         raise PermissionError("Command is not on the worker allowlist")
     if not allowed_roots:
         raise PermissionError("No worker command directory is configured")
-    completed = subprocess.run(argv, cwd=str(allowed_roots[0]) if allowed_roots else None,
-        capture_output=True, text=True, timeout=15, check=False, shell=False)
+    project_root = allowed_roots[0].resolve(strict=True)
+    environment = {key: value for key, value in os.environ.items()
+                   if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}}
+    completed = subprocess.run(argv, cwd=str(project_root), env=environment,
+        capture_output=True, text=True, timeout=120, check=False, shell=False)
     return {"return_code": completed.returncode, "stdout": completed.stdout[:4000], "stderr": completed.stderr[:1000]}

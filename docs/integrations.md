@@ -1,0 +1,11 @@
+# GitHub App integration
+
+Orin currently supports a read-only GitHub App connection. Create a GitHub App with user authorization enabled, expiring user access tokens enabled, and read-only repository Metadata, Issues, and Pull requests permissions. Set `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `GITHUB_APP_CALLBACK_URL`, `WEB_APP_URL`, and `INTEGRATION_ENCRYPTION_KEY` in the API environment. The callback URL must exactly match the GitHub App configuration and use HTTPS outside local development.
+
+`INTEGRATION_ENCRYPTION_KEY` is a Fernet key. To rotate it, configure a comma-separated key ring with the new key first and old keys after it. On credential use, Orin re-encrypts stored credentials under the first key. Remove previous keys only after connections have been used and rotated; users with dormant connections may need to reconnect after old keys are removed. Keep the key in the deployment secret manager and out of source control.
+
+The web client starts OAuth using a random, one-use state value. The API stores only a hash, expires it after ten minutes, and consumes it on callback. Tokens are used only by the API, encrypted at rest, refreshed when needed, and never returned to the client. Repository access is revalidated against GitHub before a repository is linked or read. Orin reads repository metadata, issues, and pull requests; it does not write to GitHub.
+
+The adapter uses GitHub App user access tokens and GitHub's `GET /user/installations` and `GET /user/installations/{installation_id}/repositories` routes to limit repository visibility to the connected user's accessible installations. GitHub documents these routes and the corresponding Metadata read permission in its [installation REST API](https://docs.github.com/en/rest/apps/installations?apiVersion=2022-11-28). Expiring user tokens require refresh handling; GitHub documents the refresh request and lifetimes in its [user token refresh guide](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens).
+
+The deterministic API suite mocks GitHub requests. A real OAuth smoke test requires a configured GitHub App, reachable callback URL, and a user account with an installation; it has not been run as part of repository checks unless those credentials and endpoints are explicitly configured.

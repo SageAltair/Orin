@@ -5,9 +5,9 @@ import uuid
 import re
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from sqlalchemy import func, select
 
 from orin_api.execution import (
@@ -15,11 +15,13 @@ from orin_api.execution import (
     RiskLevel, StrictActionInput,
 )
 from orin_api.models import (
-    Activity, ActivityType, Approval, ApprovalStatus, Command, CommandStatus,
-    Project, ProjectStatus, ProjectMember, ProjectRole, Task, TaskStatus,
+    Activity, ActivityType, Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit,
+    DeviceStatus, EnvironmentPreference, FocusSession, Memory, Project, ProjectStatus, ProjectMember,
+    ProjectRole, Task, TaskStatus, User, UserCapability, WorkerDevice, Capability,
 )
 from orin_api.schemas import TaskUpdate
-from orin_api.services import add_activity
+from orin_api.services import add_activity, ensure_user_preferences
+from orin_api.worker_service import queue_user_job
 
 
 class CreateTaskInput(StrictActionInput):
@@ -58,6 +60,110 @@ class ListTasksInput(StrictActionInput):
 
 class GetActivityInput(StrictActionInput):
     limit: int = Field(default=50, ge=1, le=100)
+
+
+class WorkerActionInput(StrictActionInput):
+    worker_action: Literal["get_system_info", "list_directory", "read_file", "write_file", "run_allowed_command"]
+    worker_parameters: dict[str, Any]
+
+    @model_validator(mode="after")
+    def validate_action_parameters(self) -> WorkerActionInput:
+        try:
+            from orin_api.worker_service import validate_worker_action
+            validate_worker_action(self.worker_action, self.worker_parameters)
+        except Exception as exc:
+            raise ValueError("Worker action parameters are invalid") from exc
+        return self
+
+
+class SaveMemoryInput(StrictActionInput):
+    memory_type: Literal["preference", "decision", "fact", "commitment", "workflow", "project_context"]
+    memory_title: str = Field(min_length=1, max_length=180)
+    memory_content: str = Field(min_length=1, max_length=5000)
+    project_reference: str | None = Field(default=None, max_length=160)
+
+
+class StartFocusInput(StrictActionInput):
+    project_reference: str = Field(min_length=1, max_length=160)
+    objective: str = Field(min_length=1, max_length=500)
+    duration_minutes: int = Field(ge=5, le=480)
+
+
+class SetToolVisibilityInput(StrictActionInput):
+    tool: Literal["home", "projects", "tasks", "activity"]
+    visibility: Literal["visible", "hidden", "minimized", "prioritized"]
+
+
+_MEMORY_SECRET = re.compile(r"(?i)(?:api[_-]?key|password|secret|token|authorization)\s*[:=]\s*\S+")
+
+
+def _owned_project_by_name(context: ActionContext, reference: str) -> Project:
+    rows = context.session.scalars(select(Project).where(Project.owner_id == context.user_id)).all()
+    matches = [row for row in rows if row.name.casefold() == reference.strip().casefold()]
+    if len(matches) != 1:
+        raise ActionExecutionError("Project not found by that exact name in your workspace.", status=ActionStatus.DENIED)
+    return matches[0]
+
+
+def _save_memory(context: ActionContext, raw: SaveMemoryInput) -> dict[str, Any]:
+    data = SaveMemoryInput.model_validate(raw)
+    if _MEMORY_SECRET.search(data.memory_content):
+        raise ActionExecutionError("This memory looks like it contains a secret. Orin will not store it.", status=ActionStatus.DENIED)
+    project = _owned_project_by_name(context, data.project_reference) if data.project_reference else None
+    memory = Memory(user_id=context.user_id, project_id=project.id if project else None,
+        memory_type=data.memory_type, title=data.memory_title.strip(), content=data.memory_content.strip(),
+        source="explicit user command", confidence=0.9)
+    context.session.add(memory)
+    context.session.flush()
+    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
+        project_id=memory.project_id, activity_type=ActivityType.MEMORY_CHANGED,
+        summary=f"Saved memory: {memory.title}", command_id=context.command_id)
+    return {"id": str(memory.id), "title": memory.title, "type": memory.memory_type, "entity_type": "memory"}
+
+
+def _start_focus(context: ActionContext, raw: StartFocusInput) -> dict[str, Any]:
+    data = StartFocusInput.model_validate(raw)
+    project = _owned_project_by_name(context, data.project_reference)
+    now = datetime.now(timezone.utc)
+    active = context.session.scalar(select(FocusSession).where(FocusSession.user_id == context.user_id,
+        FocusSession.status == "active").with_for_update())
+    if active:
+        started = active.started_at.replace(tzinfo=timezone.utc) if active.started_at.tzinfo is None else active.started_at
+        active.status = "expired" if started + timedelta(minutes=active.duration_minutes) <= now else "completed"
+        active.ended_at = now
+    focus = FocusSession(user_id=context.user_id, project_id=project.id, objective=data.objective.strip(),
+        duration_minutes=data.duration_minutes, started_at=now,
+        context_snapshot={"project_name": project.name, "project_objective": project.objective})
+    context.session.add(focus)
+    context.session.flush()
+    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
+        project_id=project.id, activity_type=ActivityType.FOCUS_UPDATED,
+        summary=f"Started focus: {focus.objective}", command_id=context.command_id)
+    return {"id": str(focus.id), "project_id": str(project.id), "objective": focus.objective,
+        "duration_minutes": focus.duration_minutes, "status": focus.status, "entity_type": "focus_session"}
+
+
+def _set_tool_visibility(context: ActionContext, raw: SetToolVisibilityInput) -> dict[str, Any]:
+    data = SetToolVisibilityInput.model_validate(raw)
+    user = context.session.get(User, context.user_id)
+    if user is None:
+        raise ActionExecutionError("User not found.", status=ActionStatus.DENIED)
+    ensure_user_preferences(context.session, user)
+    assignment = context.session.scalar(select(UserCapability).join(Capability, Capability.id == UserCapability.capability_id)
+        .where(UserCapability.user_id == context.user_id, Capability.code == data.tool))
+    if assignment is None or not assignment.granted:
+        raise ActionExecutionError("That tool is not available in your workspace.", status=ActionStatus.DENIED)
+    assignment.visible = data.visibility != "hidden"
+    assignment.pinned = data.visibility == "prioritized"
+    preference = context.session.scalar(select(EnvironmentPreference).where(EnvironmentPreference.user_id == context.user_id,
+        EnvironmentPreference.surface == "navigation", EnvironmentPreference.item == data.tool))
+    if preference is None:
+        preference = EnvironmentPreference(user_id=context.user_id, surface="navigation", item=data.tool)
+        context.session.add(preference)
+    preference.visibility = data.visibility
+    preference.priority = 10 if data.visibility == "prioritized" else 0
+    preference.source = "explicit"
+    return {"tool": data.tool, "visibility": data.visibility}
 
 
 class SendNotificationInput(StrictActionInput):
@@ -185,6 +291,31 @@ def _get_activity(context: ActionContext, raw: GetActivityInput) -> list[dict[st
     return [{"id": str(row.id), "activity_type": row.activity_type.value, "summary": row.summary, "created_at": row.created_at.isoformat()} for row in rows]
 
 
+def _request_worker_action(context: ActionContext, raw: WorkerActionInput) -> dict[str, Any]:
+    data = WorkerActionInput.model_validate(raw)
+    devices = context.session.scalars(select(WorkerDevice).where(
+        WorkerDevice.owner_id == context.user_id, WorkerDevice.status == DeviceStatus.ACTIVE
+    ).order_by(WorkerDevice.last_seen_at.desc()).limit(2)).all()
+    now = datetime.now(timezone.utc)
+    devices = [device for device in devices if device.last_seen_at and
+               (device.last_seen_at.replace(tzinfo=timezone.utc) if device.last_seen_at.tzinfo is None else device.last_seen_at) > now - timedelta(minutes=2)]
+    if len(devices) != 1:
+        raise ActionExecutionError("Connect exactly one worker device before asking Orin to run a project action.")
+    user = context.session.get(User, context.user_id)
+    command = context.session.get(Command, context.command_id)
+    if user is None or command is None:
+        raise ActionExecutionError("Worker action context is unavailable.")
+    job, approval = queue_user_job(context.session, user=user, device=devices[0], command=command,
+        action=data.worker_action, parameters=data.worker_parameters)
+    context.session.add(ExecutionAudit(user_id=context.user_id, command_id=context.command_id,
+        action_name=approval.action_name or "worker_action", risk_level=approval.risk_level or "high",
+        permission=approval.permission or "worker.execute", approval_required=True,
+        execution_status="pending_approval", result_status="pending_approval",
+        entity_type="worker_job", entity_id=str(job.id), approval_id=approval.id))
+    return {"id": str(job.id), "job_id": str(job.id), "approval_id": str(approval.id),
+            "status": "pending_approval", "action": job.action, "entity_type": "worker_job"}
+
+
 def build_action_registry(
     notification_provider: NotificationProvider | None = None,
     *,
@@ -232,6 +363,10 @@ def build_action_registry(
         ActionDefinition("list_projects", ListProjectsInput, "project.read", RiskLevel.LOW, _list_projects, Reversibility.REVERSIBLE),
         ActionDefinition("list_tasks", ListTasksInput, "task.read", RiskLevel.LOW, _list_tasks, Reversibility.REVERSIBLE),
         ActionDefinition("get_activity", GetActivityInput, "activity.read", RiskLevel.LOW, _get_activity, Reversibility.REVERSIBLE),
+        ActionDefinition("request_worker_action", WorkerActionInput, "worker.execute", RiskLevel.LOW, _request_worker_action, Reversibility.PARTIAL),
+        ActionDefinition("save_memory", SaveMemoryInput, "memory.write", RiskLevel.LOW, _save_memory, Reversibility.REVERSIBLE),
+        ActionDefinition("start_focus_session", StartFocusInput, "project.read", RiskLevel.LOW, _start_focus, Reversibility.REVERSIBLE),
+        ActionDefinition("set_tool_visibility", SetToolVisibilityInput, "settings.personalize", RiskLevel.LOW, _set_tool_visibility, Reversibility.REVERSIBLE),
         ActionDefinition("send_notification", SendNotificationInput, "notification.send", RiskLevel.MEDIUM, send_notification, Reversibility.IRREVERSIBLE, requires_approval=notification_requires_approval),
         ActionDefinition("request_approval", RequestApprovalInput, "approval.request", RiskLevel.LOW, request_approval, Reversibility.REVERSIBLE),
     ]

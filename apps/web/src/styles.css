@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.js";
 
 :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; color: #242b27; background: #fbfcfa; }
 * { box-sizing: border-box; }
@@ -209,3 +208,35 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .project-workspace .settings-section { display: grid; gap: .8rem; margin-top: 1rem; }
 .project-workspace .data-row p, .workspace-settings .data-row p { white-space: pre-wrap; }
 @media (max-width: 600px) { .focus-environment { align-items: flex-start; flex-direction: column; } .focus-environment div { margin-left: 0; } }
+.activity-page { display: grid; gap: 1rem; }
+.activity-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 1rem; color: var(--soft); font-size: .82rem; }
+.activity-toolbar label { display: grid; gap: .4rem; }
+.activity-toolbar select { min-width: 220px; }
+.activity-list { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.activity-list::before { position: absolute; top: 1rem; bottom: 1rem; left: .43rem; width: 1px; background: var(--line); content: ""; }
+.activity-item { position: relative; display: flex; gap: 1rem; padding: .8rem 0; }
+.activity-dot { z-index: 1; flex: 0 0 .9rem; height: .9rem; margin-top: .3rem; border: 2px solid var(--surface); border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--line); }
+.activity-dot.severity-warning { background: #d49b31; }
+.activity-dot.severity-error { background: #c85b58; }
+.activity-main { min-width: 0; flex: 1; padding: .85rem 1rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface); }
+.activity-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem; }
+.activity-status { padding: .2rem .5rem; border-radius: 999px; background: var(--hover); color: var(--soft); font-size: .72rem; text-transform: capitalize; }
+.activity-status.status-failed, .activity-status.status-denied, .activity-status.status-error { color: #a63836; background: #fae8e6; }
+.activity-main small { display: block; margin-top: .45rem; color: var(--soft); text-transform: capitalize; }
+.activity-links { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .65rem; }
+.activity-links span, .activity-links button { padding: .2rem .45rem; border: 0; border-radius: .35rem; background: var(--hover); color: var(--soft); font: inherit; font-size: .72rem; }
+.activity-links button { cursor: pointer; }
+.activity-links button:hover, .activity-links button:focus-visible { color: var(--accent); text-decoration: underline; }
+.task-highlight { outline: 2px solid var(--accent); outline-offset: 2px; }
+.activity-more { justify-self: center; }
+.activity-error { padding: 1rem; border: 1px solid #e7c1bf; border-radius: .7rem; color: #a63836; }
+.activity-loading { text-align: center; color: var(--soft); }
+.github-settings { display: grid; gap: .8rem; }
+.github-settings .github-actions { display: flex; flex-wrap: wrap; gap: .6rem; }
+.github-settings .project-picker { display: grid; gap: .4rem; max-width: 32rem; color: var(--soft); font-size: .83rem; }
+.github-settings a { color: var(--accent); }
+.github-repo-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.github-context { padding: 1rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface); }
+.github-context h3 { margin-top: 0; }
+.github-context ul { padding-left: 1.2rem; }
+.github-context li { margin: .4rem 0; }
