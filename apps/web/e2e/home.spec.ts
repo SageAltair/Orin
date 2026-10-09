@@ -63,6 +63,7 @@ async function mockApi(page: Page) {
       if (route.request().method() === "PUT") preferences = await route.request().postDataJSON() as typeof preferences;
       return route.fulfill({ json: preferences });
     }
+    if (pathname.endsWith("/commands") && route.request().method() === "GET") return route.fulfill({ json: [] });
     if (pathname.endsWith("/commands") && route.request().method() === "POST") {
       const { text } = await route.request().postDataJSON() as { text: string };
       if (text.toLowerCase() === "hey") return route.fulfill({ json: { command_id: "cmd-1", status: "completed", intent: "RESPOND", result: { response: "Hey! What can I help you with?" }, message: "Hey! What can I help you with?" } });
@@ -93,17 +94,20 @@ async function signIn(page: Page) {
   await page.getByLabel("Email").fill("morgan@example.com");
   await page.getByLabel("Password").fill("a-secure-test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
 }
 
-test("sign in opens the connected Orin workspace", async ({ page }) => {
+test("home explains Orin without showing request history and offers Ask Orin", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Welcome to Orin" })).toBeVisible();
   await signIn(page);
-  await expect(page.getByRole("heading", { name: "What matters now?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Make space for what matters." })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
-  await expect(page.getByRole("textbox", { name: "Ask Orin" })).toBeVisible();
+  await expect(page.getByText("Recent requests")).toHaveCount(0);
+  await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin" })).toBeVisible();
+  await page.getByRole("button", { name: "Ask Orin" }).first().click();
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("autocomplete", "off");
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("placeholder", "Ask Orin what you need");
 });
@@ -167,16 +171,22 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
   await mockApi(page);
   await page.goto("/");
   await signIn(page);
+  await page.getByRole("button", { name: "Ask Orin" }).first().click();
   const ask = page.getByRole("textbox", { name: "Ask Orin" });
   await ask.fill("hey");
   await page.getByRole("button", { name: "Send to Orin" }).click();
-  await expect(page.getByText("Hey! What can I help you with?").first()).toBeVisible();
+  await expect(page.getByText("hey", { exact: true })).toHaveCount(1);
+  await expect(page.getByText("Hey! What can I help you with?", { exact: true })).toHaveCount(1);
+  await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
+  await page.getByRole("button", { name: "Ask Orin" }).first().click();
+  await expect(page.getByText("Hey! What can I help you with?", { exact: true })).toHaveCount(1);
 
   await ask.fill("Create a task called Call John");
   await page.getByRole("button", { name: "Send to Orin" }).click();
+  await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
+  await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("textbox", { name: "Edit Call John" })).toBeVisible();
 
-  await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
   await page.getByLabel("Task title").fill("Manual task");
   const addTaskButton = page.getByRole("button", { name: "Add task" });
   await expect(addTaskButton).toHaveText("");
