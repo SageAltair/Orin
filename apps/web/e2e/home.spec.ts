@@ -269,3 +269,42 @@ test("activity links open related workspace records and exposes lifecycle event 
   await expect(page.getByText("Worker progress updated")).toBeVisible();
   await expect(page.getByText("Validated plan created")).toHaveCount(0);
 });
+
+test("compact work toolbar searches, restores, renames, and starts sessions", async ({ page }) => {
+  await mockApi(page);
+  const updated = new Date().toISOString();
+  const project = { id: "project-history", name: "History project", description: null, objective: null, status: "active", created_at: updated, updated_at: updated };
+  const conversations = [
+    { id: "conversation-history", title: "Release planning", task_id: "task-history", project_id: project.id, objective: "Plan the release", summary: "Decided the rollout order", pending_question: null, updated_at: updated },
+  ];
+  await page.route("**/api/v1/projects", route => route.fulfill({ json: [project] }));
+  await page.route("**/api/v1/conversations**", async route => {
+    if (route.request().method() === "PATCH") {
+      const title = (await route.request().postDataJSON() as { title: string }).title;
+      conversations[0].title = title;
+      return route.fulfill({ json: conversations[0] });
+    }
+    return route.fulfill({ json: conversations });
+  });
+  await page.route("**/api/v1/search**", route => route.fulfill({ json: [{ result_id: "command-history", kind: "conversation", command_id: "command-history", task_id: null, project_id: project.id, conversation_id: "conversation-history", text: "release timeline", excerpt: "Plan the release rollout", created_at: updated, title: "Release planning" }] }));
+  await page.route("**/api/v1/commands?**", route => route.fulfill({ json: [{ command_id: "command-history", conversation_id: "conversation-history", status: "completed", intent: "RESPOND", result: { response: "The rollout starts with a pilot." }, message: "The rollout starts with a pilot.", text: "release timeline", created_at: updated }] }));
+  await page.route("**/api/v1/attachments**", route => route.fulfill({ json: [] }));
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Ask Orin" }).last().click();
+  await page.getByRole("button", { name: "Conversation history" }).click();
+  await page.getByRole("button", { name: /Release planning/ }).click();
+  await expect(page.getByText("The rollout starts with a pilot.")).toBeVisible();
+  await page.getByLabel("Work session title").fill("Release plan revised");
+  await page.getByLabel("Work session title").press("Enter");
+  await expect.poll(() => conversations[0].title).toBe("Release plan revised");
+  await page.locator(".chat-more-actions summary").click();
+  await page.getByLabel("Associate with project").selectOption(project.id);
+  await expect(page.getByLabel("Associate with project")).toHaveValue(project.id);
+  await page.getByRole("button", { name: "Search previous work" }).click();
+  await page.getByRole("textbox", { name: "Search previous work" }).fill("release");
+  await page.getByRole("button", { name: /conversation: Release planning/ }).click();
+  await expect(page.getByText("The rollout starts with a pilot.")).toBeVisible();
+  await page.getByRole("button", { name: "New work session" }).click();
+  await expect(page.getByLabel("Work session title")).toHaveValue("");
+});

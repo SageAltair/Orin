@@ -283,6 +283,11 @@ def test_work_session_preserves_objective_pending_question_and_short_answer(clie
     second = client.post("/api/v1/commands", json={"text": "3 hours in ministry related work, and 4 on other projects.", "conversation_id": conversation_id})
     assert second.status_code == 200
     assert second.json()["conversation_id"] == conversation_id
+    renamed = client.patch(f"/api/v1/conversations/{conversation_id}", json={"title": "Ministry planning session"})
+    assert renamed.status_code == 200
+    title_results = client.get("/api/v1/search", params={"q": "PLANNING session"}).json()
+    assert any(item["conversation_id"] == conversation_id and item["command_id"] is None
+               for item in title_results)
     assert "Organize The Small Voice" in contexts[1]
     assert "How much time can you allocate" in contexts[1]
     assert '"status": "pending"' in contexts[1]

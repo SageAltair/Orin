@@ -127,14 +127,20 @@ def search_workspace(q: str = Query(min_length=2, max_length=120), user: User = 
                      limit: int = Query(default=30, ge=1, le=100), session: Session = Depends(get_session)) -> list[SearchResultRead]:
     """Search owned tasks, projects, and conversation turns with one hit per persisted record."""
     term = f"%{q.strip()}%"
+    conversation_rows = session.scalars(select(Conversation).where(
+        Conversation.user_id == user.id, Conversation.title.ilike(term)
+    ).order_by(Conversation.updated_at.desc()).limit(limit)).all()
+    results = [SearchResultRead(result_id=row.id, kind="conversation", conversation_id=row.id,
+        text=row.title, excerpt=row.title[:320], created_at=row.updated_at, title=row.title)
+        for row in conversation_rows]
     rows = session.execute(select(Command, Conversation.title).outerjoin(
         Conversation, Command.conversation_id == Conversation.id
     ).where(Command.user_id == user.id, (Command.text.ilike(term) | Command.response_message.ilike(term)))
         .order_by(Command.created_at.desc()).limit(limit)).all()
-    results = [SearchResultRead(result_id=row.id, kind="conversation", command_id=row.id,
+    results.extend(SearchResultRead(result_id=row.id, kind="conversation", command_id=row.id,
         conversation_id=row.conversation_id, text=row.text,
         excerpt=(row.response_message if row.response_message and q.casefold() in row.response_message.casefold() else row.text)[:320],
-        created_at=row.created_at, title=title) for row, title in rows]
+        created_at=row.created_at, title=title) for row, title in rows)
     task_rows = session.scalars(select(Task).where(Task.owner_id == user.id,
         (Task.title.ilike(term) | Task.description.ilike(term))).order_by(Task.updated_at.desc()).limit(limit)).all()
     results.extend(SearchResultRead(result_id=row.id, kind="task", task_id=row.id, project_id=row.project_id,
