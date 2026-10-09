@@ -212,7 +212,7 @@ def test_provider_retries_rate_limit_and_uses_selected_model(monkeypatch: pytest
 
 
 def test_provider_does_not_retry_exhausted_quota_or_log_secrets(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
-    response = _http_response(429, {"error": {"code": "insufficient_quota", "message": "secret quota exhausted"}})
+    response = _http_response(429, {"error": {"code": "insufficient_quota", "message": "secret quota exhausted; echoed-user-data-SENTINEL"}})
     calls = 0
 
     def fake_post(*args: object, **kwargs: object):
@@ -227,6 +227,7 @@ def test_provider_does_not_retry_exhausted_quota_or_log_secrets(monkeypatch: pyt
     assert raised.value.category == "quota_exceeded"
     assert calls == 1
     assert "secret" not in caplog.text
+    assert "echoed-user-data-SENTINEL" not in caplog.text
     assert any(getattr(record, "provider_error_code", None) == "insufficient_quota" for record in caplog.records)
 
 
@@ -257,8 +258,10 @@ def test_provider_reports_upstream_status_when_temporary_failure_persists(monkey
         provider.generate(system="rules", user="hello", model="model")
     assert raised.value.category == "provider_unavailable"
     assert calls == 3
-    assert '"status_code": 503' in caplog.text
-    assert "service_unavailable" in caplog.text
+    failure = next(record for record in caplog.records if record.message == "AI provider request failed")
+    assert failure.status_code == 503
+    assert failure.provider_error_code == "service_unavailable"
+    assert not hasattr(failure, "provider_error_message")
 
 
 def test_provider_reports_timeout_and_malformed_success_response(monkeypatch: pytest.MonkeyPatch) -> None:

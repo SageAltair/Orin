@@ -99,19 +99,20 @@ def _provider_failure(provider: str, model: str, exc: Exception, attempt: int, a
         category = "invalid_response"
         message = "The AI provider returned an invalid response. Please retry shortly."
 
+    # Provider error messages are untrusted and can echo submitted prompt data,
+    # credentials, or other upstream context. Keep logs to bounded diagnostics.
+    safe_code = re.sub(r"[^A-Za-z0-9_.-]", "", code)[:80]
     log_data = {
         "provider": provider,
         "model": model,
         "category": category,
         "status_code": status_code,
-        "provider_error_code": code,
-        "provider_error_message": detail,
+        "provider_error_code": safe_code,
         "attempt": attempt,
         "request_id": response.headers.get("x-request-id") if response is not None else None,
     }
     logger.warning(
-        "AI provider request failed: %s",
-        json.dumps(log_data, sort_keys=True),
+        "AI provider request failed",
         extra=log_data,
     )
     return AIProviderError(message, category=category)
