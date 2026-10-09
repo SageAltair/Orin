@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
-from orin_api.models import Density, ProjectStatus, TaskPriority, TaskStatus, Theme
+from orin_api.models import Density, EnergyLevel, FocusState, ProjectStatus, TaskPriority, TaskStatus, Theme
 
 
 class PreferencesRead(BaseModel):
@@ -77,6 +77,12 @@ class TaskCreate(BaseModel):
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.NORMAL
     due_at: datetime | None = None
+    first_step: str | None = None
+    why: str | None = None
+    energy_level: EnergyLevel | None = None
+    estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
+    is_anchor: bool = False
+    trigger: str | None = Field(default=None, max_length=240)
 
 
 class TaskUpdate(BaseModel):
@@ -87,6 +93,12 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
     due_at: datetime | None = None
+    first_step: str | None = None
+    why: str | None = None
+    energy_level: EnergyLevel | None = None
+    estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
+    is_anchor: bool | None = None
+    trigger: str | None = Field(default=None, max_length=240)
 
 
 class TaskRead(BaseModel):
@@ -103,6 +115,29 @@ class TaskRead(BaseModel):
     due_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    focus_state: FocusState | None = None
+    first_step: str | None = None
+    why: str | None = None
+    energy_level: EnergyLevel | None = None
+    estimated_minutes: int | None = None
+    is_anchor: bool = False
+    trigger: str | None = None
+    last_touched_at: datetime | None = None
+    decay_review_at: datetime | None = None
+    skip_count_today: int = 0
+    skip_day_key: str | None = None
+    today_day_key: str | None = None
+    today_position: int | None = None
+    completed_at: datetime | None = None
+    released_at: datetime | None = None
+
+
+class UserSettingsUpdate(BaseModel):
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    reduced_motion: bool | None = None
+    sound_enabled: bool | None = None
+    haptics_enabled: bool | None = None
+    theme: Literal["light", "dark", "auto"] | None = None
 
 
 class ActivityRead(BaseModel):

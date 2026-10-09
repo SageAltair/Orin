@@ -1,0 +1,97 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const enabled = process.env.VITE_FOCUS_SURFACES_ENABLED === "true";
+const timestamp = "2026-10-10T08:00:00Z";
+
+async function setupFocus(page: Page) {
+  let task: Record<string, unknown> | null = null;
+  let session: Record<string, unknown> | null = null;
+  let settings: Record<string, unknown> = { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false };
+  const plan = () => ({ day_key: "2026-10-10", energy_level: null, tasks: task ? [{ ...task, is_anchor: true, today_position: 0 }] : [] });
+  await page.addInitScript(() => localStorage.setItem("orin.focus.preview.v1", "true"));
+  await page.route("**/api/v1/**", async route => {
+    const { pathname } = new URL(route.request().url());
+    const method = route.request().method();
+    if (pathname.endsWith("/auth/refresh")) return route.fulfill({ status: 401, json: { detail: "Not authenticated" } });
+    if (pathname.endsWith("/auth/login")) return route.fulfill({ json: { access_token: "test-access-token", token_type: "bearer", expires_in: 900 } });
+    if (pathname.endsWith("/auth/me")) return route.fulfill({ json: { id: "user-1", email: "morgan@example.com", display_name: "Morgan", created_at: timestamp } });
+    if (pathname === "/api/v1/focus/settings") {
+      if (method === "PUT") settings = { ...settings, ...await route.request().postDataJSON() as Record<string, unknown> };
+      return route.fulfill({ json: settings });
+    }
+    if (pathname === "/api/v1/focus/now") return route.fulfill({ json: { task: task ? { ...task, is_anchor: true, today_position: 0 } : null, focus_session: session, day_key: "2026-10-10", energy_level: "medium", empty_state: !task } });
+    if (pathname === "/api/v1/focus/today") return route.fulfill({ json: plan() });
+    if (pathname === "/api/v1/focus/later") return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/focus/close/today") return route.fulfill({ json: { day_key: "2026-10-10", done_list: [], drift_triggers: [], drift_summary: null, tomorrow_task_id: null, reflection: null } });
+    if (pathname === "/api/v1/focus/capture" && method === "POST") {
+      const input = await route.request().postDataJSON() as { title: string };
+      task = { id: "task-1", title: input.title, status: "todo", focus_state: "inbox", first_step: null, why: null, energy_level: null, estimated_minutes: 25, project_id: null };
+      return route.fulfill({ status: 201, json: task });
+    }
+    if (pathname === "/api/v1/focus/today/tasks" && method === "PUT") return route.fulfill({ json: plan() });
+    if (pathname === "/api/v1/focus/now/start" && method === "POST") {
+      session = { id: "focus-1", task_id: "task-1", duration_minutes: 25, started_at: timestamp, status: "active" };
+      return route.fulfill({ json: { task, focus_session: session } });
+    }
+    if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
+    if (pathname.endsWith("/tasks") || pathname.endsWith("/projects") || pathname.endsWith("/commands") || pathname.endsWith("/conversations")) return route.fulfill({ json: [] });
+    if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/environment/preferences" || pathname === "/api/v1/memories" || pathname === "/api/v1/approvals" || pathname === "/api/v1/devices") return route.fulfill({ json: [] });
+    return route.fulfill({ status: 204 });
+  });
+}
+
+async function signIn(page: Page) {
+  await page.getByLabel("Email").fill("morgan@example.com");
+  await page.getByLabel("Password").fill("a-secure-test-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
+}
+
+test("capture appears on Now and starts a timer within three taps", async ({ page }) => {
+  test.skip(!enabled, "Set VITE_FOCUS_SURFACES_ENABLED=true to exercise the approved preview surfaces.");
+  await setupFocus(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Capture", exact: true }).last().click();
+  await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Write the first paragraph");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Write the first paragraph" })).toBeVisible();
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+});
+
+test("focus surfaces respect dark mode, reduced motion, and control sizing and contrast", async ({ page }) => {
+  test.skip(!enabled, "Set VITE_FOCUS_SURFACES_ENABLED=true to exercise the approved preview surfaces.");
+  await setupFocus(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await page.getByText("Settings", { exact: true }).click();
+  await page.getByText("Appearance and focus options").click();
+  await page.getByLabel("Theme").selectOption("dark");
+  await page.getByLabel("Reduce motion").check();
+  const shell = page.locator(".focus-shell");
+  await expect(shell).toHaveClass(/focus-dark/);
+  await expect(shell).toHaveClass(/focus-reduced-motion/);
+  const audit = await page.evaluate(() => {
+    const root = document.querySelector<HTMLElement>(".focus-shell")!;
+    const style = getComputedStyle(root);
+    const rgb = (value: string) => {
+      if (value.startsWith("#")) { const hex = value.slice(1); return hex.length === 3 ? [...hex].map(channel => Number.parseInt(channel + channel, 16)) : [0, 2, 4].map(index => Number.parseInt(hex.slice(index, index + 2), 16)); }
+      return value.match(/[\d.]+/g)!.slice(0, 3).map(Number);
+    };
+    const luminance = (value: string) => {
+      const channels = rgb(value).map(channel => { const s = channel / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; });
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const ratio = (a: string, b: string) => { const values = [luminance(a), luminance(b)].sort((x, y) => y - x); return (values[0] + 0.05) / (values[1] + 0.05); };
+    const text = style.getPropertyValue("--focus-text").trim();
+    const secondary = style.getPropertyValue("--focus-secondary").trim();
+    const surface = style.getPropertyValue("--focus-surface").trim();
+    const controls = [...root.querySelectorAll<HTMLElement>("button, select, input:not([type=checkbox]), textarea, input[type=checkbox]")].filter(el => el.getClientRects().length).map(el => el instanceof HTMLInputElement && el.type === "checkbox" ? el.closest("label") as HTMLElement : el);
+    return { contrast: [ratio(text, surface), ratio(secondary, surface)], small: controls.map(el => ({ name: el.getAttribute("aria-label") || el.textContent || el.tagName, width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height })) };
+  });
+  expect(audit.contrast.every(value => value >= 4.5), JSON.stringify(audit.contrast)).toBeTruthy();
+  expect(audit.small.filter(item => item.width < 48 || item.height < 48), JSON.stringify(audit.small)).toEqual([]);
+});

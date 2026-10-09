@@ -27,6 +27,78 @@ export interface ProjectSummary {
   updated_at: string;
 }
 
+export type FocusState = "inbox" | "later" | "today" | "active" | "released";
+export type EnergyLevel = "low" | "medium" | "high";
+export type DriftTrigger = "app" | "thought" | "emotion" | "person" | "tired" | "other";
+
+/** Additive focus fields; legacy task status remains unchanged. */
+export interface FocusTaskFields {
+  focus_state?: FocusState | null;
+  first_step?: string | null;
+  why?: string | null;
+  energy_level?: EnergyLevel | null;
+  estimated_minutes?: number | null;
+  is_anchor?: boolean;
+  trigger?: string | null;
+  last_touched_at?: string | null;
+  decay_review_at?: string | null;
+  skip_count_today?: number;
+  skip_day_key?: string | null;
+  today_day_key?: string | null;
+  today_position?: number | null;
+  completed_at?: string | null;
+  released_at?: string | null;
+}
+
+export interface TaskRecord extends FocusTaskFields {
+  id: string;
+  owner_id: string;
+  project_id: string | null;
+  assignee_id: string | null;
+  title: string;
+  description: string | null;
+  status: "todo" | "in_progress" | "blocked" | "done" | "cancelled";
+  priority: "low" | "normal" | "high" | "urgent";
+  due_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FocusUserSettings {
+  timezone: string;
+  day_key: string | null;
+  energy_today: EnergyLevel | null;
+  preferred_anchor_time: string | null;
+  quiet_hours: Record<string, string> | null;
+  reduced_motion: boolean;
+  hide_timer_numbers: boolean;
+  sound_enabled: boolean;
+  haptics_enabled: boolean;
+  theme: "light" | "dark" | "auto";
+  body_doubling_enabled: boolean;
+  accountability_contact: string | null;
+}
+
+export interface DriftEventRecord {
+  id: string;
+  task_id: string | null;
+  focus_session_id: string | null;
+  day_key: string;
+  trigger_type: DriftTrigger;
+  note: string | null;
+  created_at: string;
+}
+
+export interface DailyCloseRecord {
+  id: string;
+  day_key: string;
+  done_list: Array<Record<string, unknown>>;
+  drift_summary: string | null;
+  tomorrow_task_id: string | null;
+  reflection: string | null;
+  created_at: string;
+}
+
 export type MemoryType = "preference" | "decision" | "fact" | "commitment" | "workflow" | "project_context";
 
 export interface StructuredMemory {
@@ -52,7 +124,8 @@ export interface EnvironmentPreference {
 
 export interface FocusSessionSummary {
   id: string;
-  project_id: string;
+  project_id: string | null;
+  task_id?: string | null;
   objective: string;
   duration_minutes: number;
   started_at: string;

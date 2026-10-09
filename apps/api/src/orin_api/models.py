@@ -66,6 +66,29 @@ class TaskPriority(str, enum.Enum):
     URGENT = "urgent"
 
 
+class FocusState(str, enum.Enum):
+    INBOX = "inbox"
+    LATER = "later"
+    TODAY = "today"
+    ACTIVE = "active"
+    RELEASED = "released"
+
+
+class EnergyLevel(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class DriftTrigger(str, enum.Enum):
+    APP = "app"
+    THOUGHT = "thought"
+    EMOTION = "emotion"
+    PERSON = "person"
+    TIRED = "tired"
+    OTHER = "other"
+
+
 class CommandStatus(str, enum.Enum):
     SUBMITTED = "submitted"
     AWAITING_APPROVAL = "awaiting_approval"
@@ -250,7 +273,7 @@ class ProjectMember(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_member"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[ProjectRole] = mapped_column(enum_column(ProjectRole, "project_role"), nullable=False, default=ProjectRole.VIEWER, server_default=ProjectRole.VIEWER.value)
 
@@ -264,6 +287,8 @@ class Task(TimestampMixin, Base):
         Index("ix_tasks_project_status", "project_id", "status"),
         Index("ix_tasks_assignee_status", "assignee_id", "status"),
         CheckConstraint("length(trim(title)) > 0", name="ck_tasks_title_nonempty"),
+        CheckConstraint("estimated_minutes IS NULL OR estimated_minutes > 0", name="ck_tasks_estimated_minutes_positive"),
+        CheckConstraint("skip_count_today BETWEEN 0 AND 2", name="ck_tasks_skip_count_today_range"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -275,6 +300,21 @@ class Task(TimestampMixin, Base):
     status: Mapped[TaskStatus] = mapped_column(enum_column(TaskStatus, "task_status"), nullable=False, default=TaskStatus.TODO, server_default=TaskStatus.TODO.value)
     priority: Mapped[TaskPriority] = mapped_column(enum_column(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.NORMAL, server_default=TaskPriority.NORMAL.value)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    focus_state: Mapped[FocusState | None] = mapped_column(enum_column(FocusState, "focus_state"), nullable=True, default=FocusState.INBOX)
+    first_step: Mapped[str | None] = mapped_column(Text)
+    why: Mapped[str | None] = mapped_column(String(500))
+    energy_level: Mapped[EnergyLevel | None] = mapped_column(enum_column(EnergyLevel, "task_energy_level"), nullable=True)
+    estimated_minutes: Mapped[int | None] = mapped_column(Integer)
+    is_anchor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    trigger: Mapped[str | None] = mapped_column(String(240))
+    last_touched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decay_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    skip_count_today: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    skip_day_key: Mapped[str | None] = mapped_column(String(10))
+    today_day_key: Mapped[str | None] = mapped_column(String(10))
+    today_position: Mapped[int | None] = mapped_column(Integer)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     owner: Mapped[User] = relationship(back_populates="tasks", foreign_keys=[owner_id])
     project: Mapped[Project | None] = relationship(back_populates="tasks")
@@ -564,13 +604,84 @@ class FocusSession(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
     objective: Mapped[str] = mapped_column(String(500), nullable=False)
     duration_minutes: Mapped[int] = mapped_column(nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
     context_snapshot: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+
+
+class DriftEvent(CreatedAtMixin, Base):
+    __tablename__ = "drift_events"
+    __table_args__ = (Index("ix_drift_events_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    focus_session_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("focus_sessions.id", ondelete="SET NULL"))
+    day_key: Mapped[str] = mapped_column(String(10), nullable=False)
+    trigger_type: Mapped[DriftTrigger] = mapped_column(enum_column(DriftTrigger, "drift_trigger"), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class DailyClose(TimestampMixin, Base):
+    __tablename__ = "daily_closes"
+    __table_args__ = (UniqueConstraint("user_id", "day_key", name="uq_daily_closes_user_day"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_key: Mapped[str] = mapped_column(String(10), nullable=False)
+    done_list: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    drift_summary: Mapped[str | None] = mapped_column(Text)
+    tomorrow_task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    reflection: Mapped[str | None] = mapped_column(Text)
+
+
+class DailyPlan(TimestampMixin, Base):
+    __tablename__ = "daily_plans"
+    __table_args__ = (UniqueConstraint("user_id", "day_key", name="uq_daily_plans_user_day"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    day_key: Mapped[str] = mapped_column(String(10), nullable=False)
+    energy_level: Mapped[EnergyLevel | None] = mapped_column(enum_column(EnergyLevel, "daily_energy_level"))
+    swapped_task_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+
+
+class DailyPlanTask(Base):
+    __tablename__ = "daily_plan_tasks"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "task_id", name="uq_daily_plan_task"),
+        UniqueConstraint("plan_id", "position", name="uq_daily_plan_position"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    plan_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("daily_plans.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_anchor: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class UserSettings(TimestampMixin, Base):
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
+    day_key: Mapped[str | None] = mapped_column(String(10))
+    energy_today: Mapped[EnergyLevel | None] = mapped_column(enum_column(EnergyLevel, "user_energy_level"))
+    preferred_anchor_time: Mapped[str | None] = mapped_column(String(5))
+    quiet_hours: Mapped[dict[str, str] | None] = mapped_column(JSON)
+    reduced_motion: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    hide_timer_numbers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    sound_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    haptics_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    theme: Mapped[str] = mapped_column(String(8), nullable=False, default="auto", server_default="auto")
+    body_doubling_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    accountability_contact: Mapped[str | None] = mapped_column(String(240))
 
 
 class IntegrationConnection(TimestampMixin, Base):

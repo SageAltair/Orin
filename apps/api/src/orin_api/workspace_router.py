@@ -64,7 +64,8 @@ class EnvironmentUpdate(BaseModel):
 
 class FocusCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    project_id: uuid.UUID
+    project_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
     objective: str = Field(min_length=1, max_length=500)
     duration_minutes: int = Field(ge=5, le=480)
 
@@ -89,7 +90,7 @@ def _focus_view(row: FocusSession) -> dict[str, object]:
     status = row.status
     if status == "active" and ends_at <= datetime.now(timezone.utc):
         status = "expired"
-    return {"id": row.id, "project_id": row.project_id, "objective": row.objective,
+    return {"id": row.id, "project_id": row.project_id, "task_id": row.task_id, "objective": row.objective,
             "duration_minutes": row.duration_minutes, "started_at": started_at,
             "ends_at": ends_at, "ended_at": row.ended_at, "status": status,
             "context_snapshot": row.context_snapshot}
@@ -240,18 +241,34 @@ def list_focus_sessions(user: User = Depends(get_current_user), session: Session
 
 @router.post("/focus-sessions", status_code=201)
 def start_focus(data: FocusCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
-    project = _own_project(session, data.project_id, user.id)
+    task = None
+    if data.task_id is not None:
+        task = session.scalar(select(Task).where(Task.id == data.task_id, Task.owner_id == user.id))
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+    project_id = data.project_id if data.project_id is not None else (task.project_id if task else None)
+    if task is not None and data.project_id is not None and task.project_id != data.project_id:
+        raise HTTPException(status_code=422, detail="Task and project do not match")
+    project = _own_project(session, project_id, user.id) if project_id is not None else None
     now = datetime.now(timezone.utc)
     active = session.scalar(select(FocusSession).where(FocusSession.user_id == user.id, FocusSession.status == "active").with_for_update())
     if active:
         _expire_focus(active, now)
+        if active.status == "active" and active.task_id == data.task_id:
+            active.objective = data.objective.strip()
+            active.duration_minutes = data.duration_minutes
+            session.commit()
+            session.refresh(active)
+            return _focus_view(active)
         if active.status == "active":
             active.status, active.ended_at = "completed", now
-    context = {"project_name": project.name, "objective": project.objective}
-    row = FocusSession(user_id=user.id, project_id=project.id, objective=data.objective.strip(), duration_minutes=data.duration_minutes, context_snapshot=context)
+    context = {"project_name": project.name if project else None, "objective": project.objective if project else None}
+    row = FocusSession(user_id=user.id, project_id=project.id if project else None, task_id=task.id if task else None,
+                       objective=data.objective.strip(), duration_minutes=data.duration_minutes, context_snapshot=context)
     session.add(row)
     session.flush()
-    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project.id, activity_type=ActivityType.FOCUS_UPDATED, summary=f"Started focus: {row.objective}")
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project.id if project else None,
+                 task_id=task.id if task else None, activity_type=ActivityType.FOCUS_UPDATED, summary=f"Started focus: {row.objective}")
     session.commit()
     session.refresh(row)
     return _focus_view(row)

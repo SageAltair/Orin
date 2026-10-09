@@ -20,6 +20,7 @@ from orin_api.models import (
     ProjectRole, Task, TaskPriority, TaskStatus, User, UserCapability, WorkerDevice, Capability,
 )
 from orin_api.schemas import TaskUpdate
+from orin_api.focus_domain import complete_task, reopen_task, touch_task, transition_task_status
 from orin_api.services import add_activity, ensure_user_preferences
 from orin_api.worker_service import queue_user_job
 
@@ -301,6 +302,7 @@ def _create_task(context: ActionContext, raw: CreateTaskInput) -> dict[str, Any]
         assignee_id=raw.assignee_id,
         priority=TaskPriority(raw.priority),
     )
+    touch_task(task)
     context.session.add(task)
     context.session.flush()
     context.session.commit()
@@ -356,6 +358,7 @@ def _create_tasks_batch(context: ActionContext, raw: BatchTaskInput) -> list[dic
                 assignee_id=assignee_id,
                 priority=priority,
             )
+            touch_task(task)
             context.session.add(task)
             context.session.flush()
             created.append({"index": index, "id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"})
@@ -383,8 +386,16 @@ def _update_task(context: ActionContext, raw: UpdateTaskInput) -> dict[str, Any]
     project_id = changes.get("project_id", task.project_id)
     if project_id is not None and context.session.scalar(select(Project.id).where(Project.id == project_id, Project.owner_id == context.user_id)) is None:
         raise ActionExecutionError("Project not found in your workspace.")
+    requested_status = changes.pop("status", None)
     for field, value in changes.items():
         setattr(task, field, value)
+    if requested_status is not None:
+        if task.status == TaskStatus.DONE and requested_status != TaskStatus.DONE:
+            reopen_task(task)
+        else:
+            transition_task_status(task, requested_status)
+    else:
+        touch_task(task)
     context.session.flush()
     add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Updated task: {task.title}", command_id=context.command_id, intent="UPDATE_TASK")
     return {"id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"}
@@ -392,7 +403,7 @@ def _update_task(context: ActionContext, raw: UpdateTaskInput) -> dict[str, Any]
 
 def _complete_task(context: ActionContext, raw: CompleteTaskInput) -> dict[str, Any]:
     task = _resolve_task(context, raw.task_id, raw.task_reference)
-    task.status = TaskStatus.DONE
+    complete_task(task)
     context.session.flush()
     add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Completed task: {task.title}", command_id=context.command_id, intent="COMPLETE_TASK")
     return {"id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"}

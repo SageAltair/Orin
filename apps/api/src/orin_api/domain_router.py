@@ -78,6 +78,7 @@ from orin_api.planner import plan_intent
 from orin_api.project_context import ProjectContextService
 from orin_api.execution import ActionContext, ActionRequest, ActionStatus, ExecutionEngine, ExecutionResult
 from orin_api.execution_actions import build_action_registry
+from orin_api.focus_domain import reopen_task, touch_task, transition_task_status
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
 logger = logging.getLogger(__name__)
@@ -935,7 +936,12 @@ def create_task(
     session: Session = Depends(get_session),
 ) -> Task:
     validate_task_links(session, user.id, data.project_id, data.assignee_id)
-    task = Task(owner_id=user.id, **data.model_dump())
+    values = data.model_dump()
+    requested_status = values.pop("status")
+    task = Task(owner_id=user.id, **values)
+    if requested_status != TaskStatus.TODO:
+        transition_task_status(task, requested_status)
+    touch_task(task)
     session.add(task)
     session.flush()
     add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_CREATED, summary=f"Created task: {task.title}")
@@ -958,8 +964,16 @@ def update_task(
     validate_task_links(session, user.id, changes.get("project_id", task.project_id), changes.get("assignee_id", task.assignee_id))
     if "title" in changes and changes["title"] is not None:
         changes["title"] = changes["title"].strip()
+    requested_status = changes.pop("status", None)
     for field, value in changes.items():
         setattr(task, field, value)
+    if requested_status is not None:
+        if task.status == TaskStatus.DONE and requested_status != TaskStatus.DONE:
+            reopen_task(task)
+        else:
+            transition_task_status(task, requested_status)
+    else:
+        touch_task(task)
     add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Updated task: {task.title}")
     session.commit()
     session.refresh(task)

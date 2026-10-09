@@ -1,0 +1,237 @@
+from __future__ import annotations
+
+import importlib.util
+import ast
+import logging
+import sqlite3
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from collections.abc import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event, select, text
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from orin_api.auth import get_current_user
+from orin_api.database import Base, get_session
+from orin_api.focus_domain import complete_task, local_day_key, release_task, reopen_task
+from orin_api.main import app
+from orin_api.models import DailyClose, DailyPlan, DailyPlanTask, DriftEvent, DriftTrigger, EnergyLevel, FocusSession, Task, TaskStatus, User, UserSettings
+
+
+@pytest.fixture
+def client() -> Generator[TestClient, None, None]:
+    engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection: sqlite3.Connection, _: object) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    test_sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with test_sessions.begin() as session:
+        primary = User(email="focus-primary@example.test", password_hash="test-hash", display_name="Primary")
+        second = User(email="focus-second@example.test", password_hash="test-hash", display_name="Second")
+        session.add_all([primary, second])
+        session.flush()
+        other_task = Task(owner_id=second.id, title="Second user's task")
+        session.add(other_task)
+        session.flush()
+
+    active_user = [primary]
+
+    def override_session() -> Generator[Session, None, None]:
+        with test_sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = lambda: active_user[0]
+    app.state.focus_test_users = (primary, second, other_task, active_user)
+    app.state.focus_test_session_factory = test_sessions
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+        del app.state.focus_test_users
+        del app.state.focus_test_session_factory
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_local_day_key_uses_four_am_boundary_and_iana_dst_rules() -> None:
+    assert local_day_key(datetime(2026, 10, 10, 0, 0, tzinfo=timezone.utc), "UTC") == "2026-10-09"
+    assert local_day_key(datetime(2026, 10, 10, 3, 59, tzinfo=timezone.utc), "UTC") == "2026-10-09"
+    assert local_day_key(datetime(2026, 10, 10, 4, 0, tzinfo=timezone.utc), "UTC") == "2026-10-10"
+    # On the spring-forward day New York jumps over 02:00; 04:00 local still rolls the day.
+    assert local_day_key(datetime(2026, 3, 8, 7, 59, tzinfo=timezone.utc), "America/New_York") == "2026-03-07"
+    assert local_day_key(datetime(2026, 3, 8, 8, 0, tzinfo=timezone.utc), "America/New_York") == "2026-03-08"
+    # The autumn repeated hour remains on the previous local day until 04:00.
+    assert local_day_key(datetime(2026, 11, 1, 8, 59, tzinfo=timezone.utc), "America/New_York") == "2026-10-31"
+    assert local_day_key(datetime(2026, 11, 1, 9, 0, tzinfo=timezone.utc), "America/New_York") == "2026-11-01"
+
+
+def test_task_lifecycle_transitions_keep_legacy_status_and_focus_state_consistent() -> None:
+    task = Task(owner_id=uuid.uuid4(), title="Draft outline")
+    complete_task(task, now=datetime(2026, 10, 10, tzinfo=timezone.utc))
+    assert task.status == TaskStatus.DONE
+    assert task.focus_state is None
+    assert task.completed_at == datetime(2026, 10, 10, tzinfo=timezone.utc)
+
+    reopen_task(task, now=datetime(2026, 10, 11, tzinfo=timezone.utc))
+    assert task.status == TaskStatus.TODO
+    assert task.focus_state.value == "later"
+    assert task.completed_at is None
+
+    release_task(task, now=datetime(2026, 10, 12, tzinfo=timezone.utc))
+    assert task.status == TaskStatus.CANCELLED
+    assert task.focus_state.value == "released"
+    assert task.released_at == datetime(2026, 10, 12, tzinfo=timezone.utc)
+
+
+def test_migration_backfills_legacy_task_states_without_changing_status() -> None:
+    migration_path = Path(__file__).parents[1] / "migrations" / "versions" / "20261010_focus_foundation.py"
+    spec = importlib.util.spec_from_file_location("focus_foundation_migration", migration_path)
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE tasks (status VARCHAR(20), created_at DATETIME, updated_at DATETIME, focus_state VARCHAR(20), last_touched_at DATETIME, decay_review_at DATETIME, completed_at DATETIME, released_at DATETIME)"))
+        created = "2026-01-01 08:00:00"
+        rows = [("todo", created, "2026-01-02 08:00:00"), ("in_progress", created, created),
+                ("blocked", created, created), ("done", created, "2026-01-03 08:00:00"),
+                ("cancelled", created, "2026-01-04 08:00:00")]
+        connection.execute(text("INSERT INTO tasks(status, created_at, updated_at) VALUES (:s, :c, :u)"),
+                           [{"s": s, "c": c, "u": u} for s, c, u in rows])
+        migration.backfill_task_focus_state(connection)
+        mapped = connection.execute(text("SELECT status, focus_state, last_touched_at, completed_at, released_at FROM tasks ORDER BY rowid")).all()
+        assert [row.status for row in mapped] == ["todo", "in_progress", "blocked", "done", "cancelled"]
+        assert [row.focus_state for row in mapped] == ["later", "active", "later", None, "released"]
+        assert mapped[3].completed_at == "2026-01-03 08:00:00"
+        assert mapped[4].released_at == "2026-01-04 08:00:00"
+        assert mapped[0].last_touched_at == "2026-01-02 08:00:00"
+    engine.dispose()
+
+
+def test_focus_records_are_owner_scoped_and_privacy_delete_is_scoped(client: TestClient) -> None:
+    primary, second, other_task, active_user = app.state.focus_test_users
+    own_task = client.post("/api/v1/tasks", json={"title": "Primary task"}).json()
+    assert client.post("/api/v1/focus-sessions", json={"task_id": str(other_task.id), "objective": "Focus", "duration_minutes": 25}).status_code == 404
+    active_user[0] = second
+    second_focus = client.post("/api/v1/focus-sessions", json={"task_id": str(other_task.id), "objective": "Focus", "duration_minutes": 25})
+    assert second_focus.status_code == 201
+    active_user[0] = primary
+    assert client.post("/api/v1/focus/drift", json={"focus_session_id": second_focus.json()["id"], "trigger_type": "tired"}).status_code == 404
+    own_drift = client.post("/api/v1/focus/drift", json={"task_id": own_task["id"], "trigger_type": "thought", "note": "Private reflection"})
+    assert own_drift.status_code == 201
+    own_close = client.put("/api/v1/focus/daily-closes/today", json={"reflection": "A private daily note"})
+    assert own_close.status_code == 200
+
+    active_user[0] = second
+    settings = client.put("/api/v1/focus/settings", json={"timezone": "Africa/Dar_es_Salaam", "energy_today": "low"})
+    assert settings.status_code == 200
+    assert client.post("/api/v1/focus/drift", json={"task_id": own_task["id"], "trigger_type": "tired"}).status_code == 404
+    assert client.put("/api/v1/focus/daily-closes/today", json={"tomorrow_task_id": own_task["id"]}).status_code == 404
+    other_drift = client.post("/api/v1/focus/drift", json={"task_id": str(other_task.id), "trigger_type": "app"})
+    assert other_drift.status_code == 201
+    other_close = client.put("/api/v1/focus/daily-closes/today", json={"reflection": "Second user's private note"})
+    assert other_close.status_code == 200
+
+    active_user[0] = primary
+    assert len(client.get("/api/v1/focus/drift").json()) == 1
+    assert len(client.get("/api/v1/focus/daily-closes").json()) == 1
+    export = client.get("/api/v1/focus/privacy/export").json()
+    assert len(export["drift_events"]) == 1
+    assert len(export["daily_closes"]) == 1
+    assert client.delete("/api/v1/focus/privacy/data").status_code == 204
+    assert client.get("/api/v1/focus/drift").json() == []
+    active_user[0] = second
+    assert len(client.get("/api/v1/focus/drift").json()) == 1
+    assert len(client.get("/api/v1/focus/daily-closes").json()) == 1
+    assert client.get("/api/v1/focus/settings").json()["timezone"] == "Africa/Dar_es_Salaam"
+
+
+def test_every_focus_table_is_scoped_by_user_id(client: TestClient) -> None:
+    primary, second, _, _ = app.state.focus_test_users
+    factory = app.state.focus_test_session_factory
+    with factory() as session:
+        for owner, suffix in ((primary, "one"), (second, "two")):
+            task = Task(owner_id=owner.id, title=f"Task {suffix}")
+            session.add(task)
+            session.flush()
+            session.add_all([
+                UserSettings(user_id=owner.id, timezone="UTC"),
+                DailyPlan(id=uuid.uuid4(), user_id=owner.id, day_key=f"2026-10-0{1 if suffix == 'one' else 2}", energy_level=EnergyLevel.LOW),
+                DriftEvent(user_id=owner.id, task_id=task.id, day_key="2026-10-10", trigger_type=DriftTrigger.OTHER, note="private"),
+                DailyClose(user_id=owner.id, day_key=f"2026-10-0{1 if suffix == 'one' else 2}", reflection="private"),
+            ])
+            session.flush()
+            plan = session.scalar(select(DailyPlan).where(DailyPlan.user_id == owner.id))
+            session.add(DailyPlanTask(user_id=owner.id, plan_id=plan.id, task_id=task.id, position=0))
+            session.add(FocusSession(user_id=owner.id, task_id=task.id, project_id=None, objective="Focus", duration_minutes=25, status="completed"))
+        session.flush()
+        for model in (UserSettings, DailyPlan, DailyPlanTask, DriftEvent, DailyClose, FocusSession):
+            rows = session.scalars(select(model).where(model.user_id == primary.id)).all()
+            assert rows and all(row.user_id == primary.id for row in rows)
+            assert len(session.scalars(select(model).where(model.user_id == second.id)).all()) >= 1
+
+
+def test_task_status_and_focus_state_writes_are_confined_to_domain_service() -> None:
+    source_root = Path(__file__).parents[1] / "src" / "orin_api"
+    findings: list[str] = []
+    for source_path in source_root.glob("*.py"):
+        if source_path.name == "focus_domain.py":
+            continue
+        tree = ast.parse(source_path.read_text(encoding="utf-8-sig"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Attribute) and target.attr in {"status", "focus_state"} and isinstance(target.value, ast.Name) and target.value.id == "task":
+                    findings.append(f"{source_path.name}:{node.lineno} writes task.{target.attr}")
+    assert findings == []
+
+
+def test_drift_and_reflection_validation_never_echoes_sensitive_text(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    sentinel = "PRIVATE-DRIFT-AND-REFLECTION-SENTINEL"
+    oversized = sentinel + ("x" * 4100)
+    with caplog.at_level(logging.INFO, logger="orin_api.request"):
+        drift = client.post("/api/v1/focus/drift", json={"trigger_type": "other", "note": oversized})
+        close = client.put("/api/v1/focus/daily-closes/today", json={"reflection": oversized})
+    assert drift.status_code == close.status_code == 422
+    assert sentinel not in caplog.text
+    assert sentinel not in drift.text
+    assert sentinel not in close.text
+
+
+def test_legacy_task_status_api_uses_shared_focus_transitions(client: TestClient) -> None:
+    created = client.post("/api/v1/tasks", json={"title": "Transition task"})
+    assert created.status_code == 201
+    task_id = created.json()["id"]
+    assert created.json()["status"] == "todo"
+    assert created.json()["focus_state"] == "inbox"
+
+    completed = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "done"}).json()
+    assert completed["status"] == "done"
+    assert completed["focus_state"] is None
+    assert completed["completed_at"] is not None
+
+    reopened = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "todo"}).json()
+    assert reopened["status"] == "todo"
+    assert reopened["focus_state"] == "later"
+    assert reopened["completed_at"] is None
+
+    released = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "cancelled"}).json()
+    assert released["status"] == "cancelled"
+    assert released["focus_state"] == "released"
+    assert released["released_at"] is not None
+
+
+def test_first_settings_read_uses_browser_timezone_only_when_unset(client: TestClient) -> None:
+    assert client.get("/api/v1/focus/settings", headers={"X-Timezone": "Africa/Dar_es_Salaam"}).json()["timezone"] == "Africa/Dar_es_Salaam"
+    assert client.get("/api/v1/focus/settings", headers={"X-Timezone": "America/Los_Angeles"}).json()["timezone"] == "Africa/Dar_es_Salaam"

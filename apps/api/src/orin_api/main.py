@@ -15,6 +15,7 @@ from orin_api.worker_router import router as worker_router
 from orin_api.workspace_router import router as workspace_router
 from orin_api.integration_router import router as integration_router
 from orin_api.attachment_router import router as attachment_router
+from orin_api.focus_router import router as focus_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
@@ -24,7 +25,7 @@ app.add_middleware(
     allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Timezone"],
 )
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -33,6 +34,7 @@ app.include_router(worker_router)
 app.include_router(workspace_router)
 app.include_router(integration_router)
 app.include_router(attachment_router)
+app.include_router(focus_router)
 
 
 @app.middleware("http")
