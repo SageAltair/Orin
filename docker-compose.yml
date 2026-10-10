@@ -51,7 +51,7 @@ services:
     volumes:
       - ./apps/api/src:/app/src
       - orin_attachments:/app/data/attachments
-    command: ["uvicorn", "orin_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["sh", "-lc", "alembic upgrade head && uvicorn orin_api.main:app --host 0.0.0.0 --port 8000 --reload"]
     ports:
       - "${API_PORT:-8100}:8000"
     restart: unless-stopped
