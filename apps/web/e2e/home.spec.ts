@@ -165,6 +165,13 @@ test("day and week time slices place items in clock time and create from a selec
   await page.getByRole("button", { name: "Week", exact: true }).click();
   await expect(page.getByRole("region", { name: "Week time schedule" })).toBeVisible();
   await expect(page.locator(".calendar-time-heading > button:first-child")).toHaveCount(7);
+  const hourSpacing = page.getByLabel("Hour spacing");
+  await expect(hourSpacing).toHaveValue("fit");
+  const timeline = page.locator(".calendar-time-body");
+  expect(await timeline.evaluate(element => element.getBoundingClientRect().height)).toBeLessThan(600);
+  await hourSpacing.selectOption("roomy");
+  expect(await timeline.evaluate(element => element.getBoundingClientRect().height)).toBe(960);
+  await hourSpacing.selectOption("fit");
   await page.getByRole("button", { name: "Day", exact: true }).click();
   await expect(page.getByRole("region", { name: /Time schedule for/ })).toBeVisible();
   await page.getByRole("button", { name: /Create event on .* at 14:00/ }).click({ position: { x: 4, y: 4 } });
@@ -205,7 +212,7 @@ test("calendar search and filters find project tasks and open the original task"
   const taskAfterClear = page.getByRole("button", { name: "Write project brief" }).first();
   await taskAfterClear.scrollIntoViewIfNeeded();
   await expect(taskAfterClear).toBeVisible();
-  await taskAfterClear.click({ position: { x: 4, y: 35 } });
+  await taskAfterClear.click({ position: { x: 4, y: 5 } });
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Write project brief").first()).toBeVisible();
 });
