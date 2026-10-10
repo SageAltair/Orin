@@ -121,6 +121,7 @@ test("Calendar supports Month and Agenda plus event create, edit, and delete on 
   await expect(page.getByText("No events").first()).toBeVisible();
   await page.getByRole("button", { name: "New event" }).click();
   await page.getByLabel("Title").fill("Planning workshop");
+  await page.getByLabel("Description").fill("Review the roadmap and agree next steps.");
   await page.getByLabel("All-day").check();
   await page.getByRole("button", { name: "Save event" }).click();
   const eventRow = page.getByRole("button", { name: /Planning workshop/ }).first();
@@ -129,6 +130,17 @@ test("Calendar supports Month and Agenda plus event create, edit, and delete on 
   await page.getByLabel("Title").fill("Planning workshop updated");
   await page.getByRole("button", { name: "Save event" }).click();
   await expect(page.getByRole("button", { name: /Planning workshop updated/ }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Month", exact: true }).click();
+  const monthEvent = page.getByRole("button", { name: "Edit Planning workshop updated" });
+  await expect(monthEvent).toBeVisible();
+  await expect(monthEvent.locator(".calendar-event-chip-label")).toHaveText("Planning workshop updated");
+  expect(await monthEvent.evaluate(element => getComputedStyle(element).fontSize)).not.toBe("0px");
+  await monthEvent.hover();
+  const eventTooltip = page.getByRole("tooltip");
+  await expect(eventTooltip).toBeVisible();
+  await expect(eventTooltip).toContainText("All day");
+  await expect(eventTooltip).toContainText("Review the roadmap and agree next steps.");
+  await page.getByRole("button", { name: "Agenda", exact: true }).click();
   page.on("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: /Planning workshop updated/ }).first().click();
   await page.getByRole("button", { name: "Delete" }).click();
