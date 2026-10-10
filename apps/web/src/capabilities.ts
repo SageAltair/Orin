@@ -1,4 +1,4 @@
-export type CapabilityId = "home" | "projects" | "tasks" | "activity" | "settings";
+export type CapabilityId = "home" | "projects" | "tasks" | "activity" | "memories" | "focus" | "settings";
 export type Density = "comfortable" | "compact";
 export type Theme = "light" | "dark" | "system";
 
@@ -26,11 +26,13 @@ export const capabilities: Capability[] = [
   { id: "projects", label: "Projects", description: "Organize work by outcome", icon: "▦" },
   { id: "tasks", label: "Tasks", description: "Keep track of next steps", icon: "☑" },
   { id: "activity", label: "Activity", description: "A record of recent changes", icon: "◷" },
-  { id: "settings", label: "Settings", description: "Shape your Orin workspace", icon: "⚙" },
+  { id: "memories", label: "Personal memories", description: "Manage facts you choose to keep", icon: "M" },
+  { id: "focus", label: "Focus sessions", description: "Start and review focused work", icon: "F" },
+  { id: "settings", label: "Settings", description: "Shape your Orin workspace", icon: "\u2699" },
 ];
 
 export const defaultPreferences: UserPreferences = {
-  visibleCapabilities: ["home", "tasks", "projects", "activity"],
+  visibleCapabilities: ["home", "tasks", "projects", "activity", "memories", "focus"],
   hiddenCapabilities: ["settings"],
   minimizedCapabilities: [],
   pinnedCapabilities: ["home", "tasks"],

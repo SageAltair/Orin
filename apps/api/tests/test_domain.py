@@ -59,7 +59,7 @@ def test_preferences_and_capabilities_use_relational_assignments(client: TestCli
     assert all(item["granted"] for item in test_client.get("/api/v1/capabilities").json())
     response = test_client.get("/api/v1/users/me/preferences")
     assert response.status_code == 200
-    assert response.json()["visible_capabilities"] == ["activity", "home", "projects", "tasks"]
+    assert response.json()["visible_capabilities"] == ["activity", "focus", "home", "memories", "projects", "tasks"]
     assert response.json()["hidden_capabilities"] == ["settings"]
 
 

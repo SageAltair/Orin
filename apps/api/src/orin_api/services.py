@@ -43,6 +43,8 @@ CAPABILITY_CATALOG = (
     ("projects", "Projects", "Organize work by outcome"),
     ("tasks", "Tasks", "Keep track of next steps"),
     ("activity", "Activity", "A record of recent changes"),
+    ("memories", "Personal memories", "Manage facts you choose to keep"),
+    ("focus", "Focus sessions", "Start and review focused work"),
     ("settings", "Settings", "Shape your Orin workspace"),
 )
 
@@ -82,7 +84,7 @@ def ensure_user_preferences(session: Session, user: User) -> UserPreferences:
     }
     for capability in catalog:
         if capability.id not in assigned:
-            visible = capability.is_enabled and capability.code in {"home", "tasks", "projects", "activity"}
+            visible = capability.is_enabled and capability.code in {"home", "tasks", "projects", "activity", "memories", "focus"}
             session.add(UserCapability(
                 user_id=user.id,
                 capability_id=capability.id,

@@ -562,7 +562,7 @@ class AIIntent(BaseModel):
             raise ValueError("Drift trigger is invalid")
         if self.intent == IntentName.RUN_DAILY_CLOSE and any(item not in {"app", "thought", "emotion", "person", "tired", "other"} for item in self.parameters.drift_triggers or []):
             raise ValueError("Daily close drift triggers are invalid")
-        if self.intent == IntentName.SET_TOOL_VISIBILITY and (self.parameters.tool not in {"home", "projects", "tasks", "activity"} or self.parameters.visibility not in {"visible", "hidden", "minimized", "prioritized"}):
+        if self.intent == IntentName.SET_TOOL_VISIBILITY and (self.parameters.tool not in {"home", "projects", "tasks", "activity", "memories", "focus"} or self.parameters.visibility not in {"visible", "hidden", "minimized", "prioritized"}):
             raise ValueError("Tool visibility is invalid")
         if self.intent == IntentName.UPDATE_TASK:
             allowed = {"title", "description", "due_at", "project_id", "status", "priority",

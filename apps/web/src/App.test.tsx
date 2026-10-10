@@ -5,7 +5,7 @@ import { capabilities, defaultPreferences, getNavigationCapabilities, type UserP
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
-    expect(getNavigationCapabilities(capabilities, defaultPreferences).map(({ id }) => id)).toEqual(["home", "tasks", "projects", "activity"]);
+    expect(getNavigationCapabilities(capabilities, defaultPreferences).map(({ id }) => id)).toEqual(["home", "tasks", "projects", "activity", "memories", "focus"]);
   });
 
   it("orders pinned capabilities first and never exposes ungranted capabilities", () => {
