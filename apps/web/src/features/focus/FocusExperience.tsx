@@ -7,7 +7,7 @@ import { Later } from "./Later";
 import { Now } from "./Now";
 import { TodaysThree } from "./TodaysThree";
 import { useFocusWorkspace } from "./useFocusWorkspace";
-import type { FocusTask } from "./types";
+import type { CaptureSuggestion, FocusTask } from "./types";
 
 type Surface = "now" | "today" | "capture" | "close" | "later" | "settings";
 type Theme = "light" | "dark" | "auto";
@@ -73,13 +73,13 @@ export function FocusExperience({ name, onSignOut, embedded = false }: { name: s
   const setSoundValue = (value: boolean) => { setSoundEnabled(value); void saveSettings({ sound_enabled: value }); };
   const setHapticsValue = (value: boolean) => { setHapticsEnabled(value); void saveSettings({ haptics_enabled: value }); };
 
-  const capture = async (title: string) => {
+  const capture = async (title: string, details: { first_step?: string; energy_level?: "low" | "medium" | "high" }) => {
     setCaptureMessage("");
-    const noTasksYet = !focus.today?.tasks.length;
-    const task = await focus.capture(title);
-    if (task) setCaptureMessage(noTasksYet ? "Saved to Inbox and ready on Now." : "Saved to Inbox.");
+    const task = await focus.capture(title, details);
+    if (task) setCaptureMessage("Saved to Inbox.");
     return task;
   };
+  const suggestCapture = (title: string) => request<CaptureSuggestion>("/focus/capture/suggest", { method: "POST", body: JSON.stringify({ title }) });
   const addLaterToToday = (task: FocusTask) => {
     const current = focus.today?.tasks ?? [];
     if (current.length >= 3) { setLaterOverride(task); setSurface("today"); return; }
@@ -94,10 +94,10 @@ export function FocusExperience({ name, onSignOut, embedded = false }: { name: s
     {!embedded && <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><Command size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><X size={18} /></button></header>}
     <main id="focus-main" className="focus-main" tabIndex={-1}>
       {focus.error && <p className="focus-error" role="alert">{focus.error}</p>}
-      {surface === "now" && <Now state={focus.now} busy={focus.busy} onStart={() => void focus.start()} onComplete={() => void focus.complete()} onSmaller={async step => { if (focus.now?.task) await focus.saveFirstStep(focus.now.task, step); }} onSwap={focus.swap} onCapture={() => navClick("capture")} onChooseEnergy={() => navClick("today")} reducedMotion={reduce} hideNumbers={hideTimerNumbers} />}
+      {surface === "now" && <Now state={focus.now} busy={focus.busy} onStart={() => void focus.start()} onComplete={() => void focus.complete()} onSmaller={async step => { if (focus.now?.task) await focus.saveFirstStep(focus.now.task, step); }} onSuggestSmaller={() => focus.now?.task ? focus.suggestSmallerStep(focus.now.task) : Promise.resolve(null)} onSwap={focus.swap} onCapture={() => navClick("capture")} onChooseEnergy={() => navClick("today")} reducedMotion={reduce} hideNumbers={hideTimerNumbers} />}
       {surface === "today" && !laterOverride && <TodaysThree plan={focus.today} later={focus.later} onEnergy={energy => void focus.chooseEnergy(energy)} onReplace={items => void focus.replaceToday(items)} onOpenLater={() => navClick("later")} onSettings={() => navClick("settings")} onSkipEnergy={() => navClick("now")} />}
       {surface === "today" && laterOverride && <section className="focus-card"><button className="focus-text-button" onClick={() => setLaterOverride(null)}>Back to Today</button><h1>Choose where it fits.</h1>{(focus.today?.tasks ?? []).map(task => <button key={task.id} className="focus-choose-row" onClick={() => { const items = (focus.today?.tasks ?? []).map(item => ({ task_id: item.id === task.id ? laterOverride.id : item.id, is_anchor: item.is_anchor ?? false })); void focus.replaceToday(items); setLaterOverride(null); }}>{task.is_anchor ? "Replace anchor" : `Replace ${task.title}`}</button>)}</section>}
-      {surface === "capture" && <><Capture onSave={capture} busy={focus.busy} onDone={() => { window.setTimeout(() => navClick("now"), 500); }} />{captureMessage && <p className="focus-quiet-message" role="status">{captureMessage}</p>}</>}
+      {surface === "capture" && <><Capture onSave={capture} onSuggest={suggestCapture} busy={focus.busy} onDone={() => { window.setTimeout(() => navClick("now"), 500); }} />{captureMessage && <p className="focus-quiet-message" role="status">{captureMessage}</p>}</>}
       {surface === "close" && <>{closeMessage ? <section className="focus-card"><span className="focus-eyebrow">CLOSED</span><h1>That was enough for today.</h1><p>You can begin again whenever you return.</p><button className="focus-primary" onClick={() => navClick("now")}>Back to Now</button></section> : <Close value={focus.close} later={focus.later} busy={focus.busy} onSave={async input => { if (await focus.saveClose(input)) setCloseMessage("saved"); }} onSkip={() => navClick("now")} />}</>}
       {surface === "later" && <Later tasks={focus.later} onBack={() => navClick("today")} onChoose={addLaterToToday} />}
       {surface === "settings" && <section className="focus-card focus-settings-page"><button className="focus-text-button" onClick={() => navClick("today")}>Back to Today</button><span className="focus-eyebrow">PREFERENCES</span><h1>Make it comfortable.</h1><label>Theme<select value={theme} onChange={event => setThemeValue(event.target.value as Theme)}><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="focus-toggle"><input type="checkbox" checked={reducedMotion} onChange={event => setMotionValue(event.target.checked)} /> Reduce motion</label><label className="focus-toggle"><input type="checkbox" checked={hideTimerNumbers} onChange={event => setTimerNumbersValue(event.target.checked)} /> Hide timer numbers</label><label className="focus-toggle"><input type="checkbox" checked={soundEnabled} onChange={event => setSoundValue(event.target.checked)} /> Sound (off by default)</label><label className="focus-toggle"><input type="checkbox" checked={hapticsEnabled} onChange={event => setHapticsValue(event.target.checked)} /> Light haptics</label><p className="focus-quiet-message">Reminders cannot be delivered yet. They are not being sent.</p><p className="focus-quiet-message">Orin supports focus and is not a medical treatment.</p></section>}

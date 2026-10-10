@@ -15,10 +15,11 @@ def _touch_time(task: Task) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def task_rank(task: Task) -> tuple[int, datetime]:
-    """Prefer tasks with context, then momentum; stale tasks remain available."""
+def task_rank(task: Task) -> tuple[int, datetime, int]:
+    """Prefer tasks with context and momentum, then shorter estimates; stale work stays available."""
     context = int(bool(task.first_step)) + int(bool(task.why))
-    return context, _touch_time(task)
+    estimated_minutes = task.estimated_minutes if task.estimated_minutes is not None else 25
+    return context, _touch_time(task), -estimated_minutes
 
 
 def select_todays_three(

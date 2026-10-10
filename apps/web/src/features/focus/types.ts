@@ -2,6 +2,7 @@ import type { Task } from "../../api";
 
 export type Energy = "low" | "medium" | "high";
 export type DriftTrigger = "app" | "thought" | "emotion" | "person" | "tired" | "other";
+export interface CaptureSuggestion { title: string; first_step: string; energy_level: Energy }
 
 export interface FocusTask extends Pick<Task, "id" | "title" | "status" | "focus_state" | "first_step" | "why" | "energy_level" | "estimated_minutes" | "project_id"> {
   is_anchor?: boolean;

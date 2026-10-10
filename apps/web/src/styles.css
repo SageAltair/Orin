@@ -490,7 +490,7 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .focus-shell button:disabled { opacity: .58; cursor: not-allowed; }
 .focus-smaller { display: grid; grid-template-columns: 1fr auto; gap: .75rem; margin-top: 1rem; align-items: end; }
 .focus-smaller label { grid-column: 1 / -1; }
-.focus-smaller input, .focus-capture textarea, .focus-settings-page select, .focus-close select { min-height: 48px; width: 100%; padding: .7rem .85rem; color: var(--focus-text); border: 1px solid var(--focus-line); border-radius: .75rem; background: var(--focus-bg); }
+.focus-smaller input, .focus-capture textarea, .focus-capture-details input, .focus-capture-details select, .focus-settings-page select, .focus-close select { min-height: 48px; width: 100%; padding: .7rem .85rem; color: var(--focus-text); border: 1px solid var(--focus-line); border-radius: .75rem; background: var(--focus-bg); }
 .focus-quiet-message, .focus-calm-empty { color: var(--focus-secondary); }
 .focus-inline, .focus-text-button { min-height: 48px; padding: .5rem .7rem; color: var(--focus-accent); background: transparent; border: 0; font-weight: 600; text-decoration: underline; text-underline-offset: .18em; cursor: pointer; }
 .focus-energy-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; margin: 1.35rem 0 .3rem; }
@@ -522,6 +522,10 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .focus-capture textarea { min-height: 150px; resize: vertical; font-size: 1.05rem; }
 .focus-capture textarea::placeholder { color: var(--focus-secondary); opacity: 1; }
 .focus-capture .focus-action-row { justify-content: space-between; }
+.focus-suggestion { margin-top: 1rem; padding: 1rem; border: 1px solid var(--focus-line); border-radius: 1rem; background: var(--focus-bg); }
+.focus-suggestion p { margin: 0; color: var(--focus-secondary); }
+.focus-capture-details { display: grid; gap: .55rem; margin-top: 1rem; }
+.focus-capture-details .focus-field-label { margin-top: .35rem; }
 .focus-fab { position: fixed; z-index: 4; right: max(1.2rem, env(safe-area-inset-right)); bottom: calc(5.7rem + env(safe-area-inset-bottom)); min-width: 58px; min-height: 58px; display: inline-flex; align-items: center; justify-content: center; gap: .4rem; padding: 0 1rem; color: #fff !important; background: #365d50; border: 0; border-radius: 999px; box-shadow: 0 8px 24px rgb(20 36 28 / 18%); font-weight: 650; cursor: pointer; }
 .focus-dark .focus-fab { color: #17231b !important; background: #9ac5a9; }
 .focus-bottom-nav { position: fixed; z-index: 3; inset: auto 0 0; min-height: calc(64px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, 1fr); padding: .35rem .45rem calc(.35rem + env(safe-area-inset-bottom)); background: var(--focus-surface); border-top: 1px solid var(--focus-line); }

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+import os
 from collections.abc import Generator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +15,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from orin_api.auth import get_current_user
+from orin_api import focus_router
+from orin_api.config import Settings, get_settings
 from orin_api.database import Base, get_session
 from orin_api.focus_planning import select_now_task, select_todays_three
 from orin_api.main import app
@@ -20,11 +25,15 @@ from orin_api.models import DailyPlan, EnergyLevel, FocusSession, FocusState, Ta
 
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
-    engine = create_engine("sqlite+pysqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    database_url = os.getenv("ORIN_FOCUS_TEST_DATABASE_URL")
+    engine = create_engine(database_url or "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False} if not database_url else {},
+        poolclass=StaticPool if not database_url else None)
 
-    @event.listens_for(engine, "connect")
-    def enable_foreign_keys(connection: sqlite3.Connection, _: object) -> None:
-        connection.execute("PRAGMA foreign_keys=ON")
+    if engine.dialect.name == "sqlite":
+        @event.listens_for(engine, "connect")
+        def enable_foreign_keys(connection: sqlite3.Connection, _: object) -> None:
+            connection.execute("PRAGMA foreign_keys=ON")
 
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -97,6 +106,15 @@ def test_low_energy_anchor_is_kept_when_outside_top_three() -> None:
     assert anchor_id == short_anchor.id
 
 
+def test_task_estimates_break_ties_after_context_and_recent_activity() -> None:
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+    tasks = [make_task(EnergyLevel.MEDIUM, title=f"Estimate {minutes}", minutes=minutes) for minutes in (10, 20, 30, 60)]
+    for task in tasks:
+        task.last_touched_at = now
+    selected, _ = select_todays_three(tasks, EnergyLevel.MEDIUM)
+    assert [task.estimated_minutes for task in selected] == [10, 20, 30]
+
+
 def test_now_selection_obeys_active_anchor_and_position_order() -> None:
     first, anchor, active = (make_task(EnergyLevel.MEDIUM, title=name) for name in ("First", "Anchor", "Active"))
     no_active = select_now_task(None, [(first, False, 0), (anchor, True, 1), (active, False, 2)])
@@ -113,6 +131,66 @@ def test_capture_is_optional_and_creates_inbox_task(client: TestClient) -> None:
     assert response.json()["title"] == "Untitled task"
     assert response.json()["status"] == "todo"
     assert response.json()["focus_state"] == "inbox"
+
+
+def test_manual_today_selection_is_not_replaced_by_later_recommendations(client: TestClient) -> None:
+    manual = client.post("/api/v1/tasks", json={"title": "Keep this choice", "energy_level": "low"}).json()
+    recommended = client.post("/api/v1/tasks", json={"title": "Higher energy option", "energy_level": "high"}).json()
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": manual["id"], "is_anchor": True}]}).status_code == 200
+    assert client.put("/api/v1/focus/energy", json={"energy_level": "high"}).status_code == 200
+    proposed = client.post("/api/v1/focus/today/propose")
+    assert proposed.status_code == 200
+    assert [task["id"] for task in proposed.json()["tasks"]] == [manual["id"]]
+    assert recommended["id"] not in {task["id"] for task in proposed.json()["tasks"]}
+
+
+def test_capture_suggestions_are_optional_and_do_not_persist_tasks(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Provider:
+        def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, object], images: list[dict[str, str]] | None = None) -> str:
+            assert "untrusted task data" in system
+            assert '"captured_text": "Write the report"' in user
+            return '{"title":"Draft the report","first_step":"Open a blank document","energy_level":"low"}'
+
+    monkeypatch.setattr(focus_router, "create_provider", lambda _: Provider())
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, ai_provider="openai", ai_model="test-model")
+    suggestion = client.post("/api/v1/focus/capture/suggest", json={"title": "Write the report"})
+    assert suggestion.status_code == 200
+    assert suggestion.json() == {"title": "Draft the report", "first_step": "Open a blank document", "energy_level": "low"}
+    assert client.get("/api/v1/focus/later").json() == []
+    captured = client.post("/api/v1/focus/capture", json={"title": suggestion.json()["title"],
+        "first_step": suggestion.json()["first_step"], "energy_level": suggestion.json()["energy_level"]})
+    assert captured.status_code == 201
+    assert captured.json()["first_step"] == "Open a blank document"
+    assert captured.json()["energy_level"] == "low"
+
+
+def test_smaller_step_suggestion_and_unavailable_ai_leave_manual_path_open(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Provider:
+        def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, object], images: list[dict[str, str]] | None = None) -> str:
+            return '{"first_step":"Open the file"}'
+
+    monkeypatch.setattr(focus_router, "create_provider", lambda _: Provider())
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, ai_provider="openai", ai_model="test-model")
+    result = client.post("/api/v1/focus/suggest-smaller", json={"title": "Plan the proposal", "first_step": "Write the whole draft"})
+    assert result.status_code == 200
+    assert result.json() == {"first_step": "Open the file"}
+
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
+    unavailable = client.post("/api/v1/focus/capture/suggest", json={"title": "Plan the proposal"})
+    assert unavailable.status_code == 503
+    assert "continue manually" in unavailable.json()["detail"]
+    assert client.post("/api/v1/focus/capture", json={"title": "Plan the proposal"}).status_code == 201
+
+    class MalformedProvider:
+        def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, object], images: list[dict[str, str]] | None = None) -> str:
+            return '{"title":"No first step"}'
+
+    monkeypatch.setattr(focus_router, "create_provider", lambda _: MalformedProvider())
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, ai_provider="openai", ai_model="test-model")
+    malformed = client.post("/api/v1/focus/capture/suggest", json={"title": "Plan another proposal"})
+    assert malformed.status_code == 503
+    assert "invalid suggestion" in malformed.json()["detail"]
+    assert client.post("/api/v1/focus/capture", json={"title": "Plan another proposal"}).status_code == 201
 
 
 def test_now_starts_task_linked_focus_and_advances_after_completion(client: TestClient) -> None:
@@ -150,3 +228,53 @@ def test_two_swaps_are_allowed_then_rest_is_offered_and_day_key_resets(client: T
     assert limited["limit_reached"] is True
     assert limited["rest_available"] is True
     assert limited["message"] == "Let's stay with this one, or rest."
+
+
+def test_retrying_a_swap_request_does_not_swap_the_replacement_again(client: TestClient) -> None:
+    anchor = client.post("/api/v1/tasks", json={"title": "Anchor", "energy_level": "low", "estimated_minutes": 10}).json()
+    candidates = []
+    for title in ("First replacement", "Second replacement", "Third replacement"):
+        task = client.post("/api/v1/tasks", json={"title": title, "energy_level": "low", "status": "in_progress"}).json()
+        client.patch(f"/api/v1/tasks/{task['id']}", json={"status": "todo"})
+        candidates.append(task["id"])
+    client.put("/api/v1/focus/energy", json={"energy_level": "low"})
+    client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": anchor["id"], "is_anchor": True}]})
+
+    first = client.post("/api/v1/focus/today/swap", json={"task_id": anchor["id"]}).json()
+    assert first["swapped"] is True
+    replacement_id = first["task"]["id"]
+    retry = client.post("/api/v1/focus/today/swap", json={"task_id": anchor["id"]}).json()
+    assert retry["swapped"] is False
+    assert retry["already_swapped"] is True
+    assert client.get("/api/v1/focus/now").json()["task"]["id"] == replacement_id
+
+    second = client.post("/api/v1/focus/today/swap", json={"task_id": replacement_id}).json()
+    assert second["swapped"] is True
+    limited = client.post("/api/v1/focus/today/swap", json={"task_id": second["task"]["id"]}).json()
+    assert limited["limit_reached"] is True
+
+
+@pytest.mark.skipif(not os.getenv("ORIN_FOCUS_TEST_DATABASE_URL"), reason="requires an isolated PostgreSQL test database")
+def test_concurrent_swap_requests_obey_daily_limit(client: TestClient) -> None:
+    anchor = client.post("/api/v1/tasks", json={"title": "Anchor", "energy_level": "low", "estimated_minutes": 10}).json()
+    for title in ("Replacement one", "Replacement two", "Replacement three"):
+        task = client.post("/api/v1/tasks", json={"title": title, "energy_level": "low", "status": "in_progress"}).json()
+        client.patch(f"/api/v1/tasks/{task['id']}", json={"status": "todo"})
+    client.put("/api/v1/focus/energy", json={"energy_level": "low"})
+    client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": anchor["id"], "is_anchor": True}]})
+
+    def concurrent_posts(payload: dict[str, str] | None) -> list[dict[str, object]]:
+        barrier = Barrier(2)
+        def send() -> dict[str, object]:
+            barrier.wait(timeout=5)
+            return client.post("/api/v1/focus/today/swap", json=payload or {}).json()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            return list(pool.map(lambda _: send(), range(2)))
+
+    duplicate_requests = concurrent_posts({"task_id": anchor["id"]})
+    assert sum(result["swapped"] is True for result in duplicate_requests) == 1
+    assert sum(result.get("already_swapped") is True for result in duplicate_requests) == 1
+
+    final_allowance = concurrent_posts(None)
+    assert sum(result["swapped"] is True for result in final_allowance) == 1
+    assert sum(result["limit_reached"] is True for result in final_allowance) == 1

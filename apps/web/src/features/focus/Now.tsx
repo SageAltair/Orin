@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { ArrowDown, Check, Play, SkipForward } from "lucide-react";
 import type { NowState } from "./types";
 
-export function Now({ state, busy, onStart, onSmaller, onSwap, onCapture, onChooseEnergy, onComplete, reducedMotion, hideNumbers }: {
+export function Now({ state, busy, onStart, onSmaller, onSuggestSmaller, onSwap, onCapture, onChooseEnergy, onComplete, reducedMotion, hideNumbers }: {
   state: NowState | null; busy: boolean; onStart: () => void; onSmaller: (step: string) => Promise<void>;
+  onSuggestSmaller: () => Promise<string | null>;
   onSwap: () => Promise<{ swapped: boolean; limit_reached: boolean; message?: string } | null>;
   onCapture: () => void; onChooseEnergy: () => void; onComplete: () => void; reducedMotion: boolean; hideNumbers: boolean;
 }) {
@@ -26,6 +27,11 @@ export function Now({ state, busy, onStart, onSmaller, onSwap, onCapture, onChoo
   if (!task) return <section className="focus-card focus-now-empty" aria-labelledby="now-heading"><span className="focus-eyebrow">NOW</span><h1 id="now-heading">Nothing needs you right now.</h1><p>You can capture a thought or choose your energy when you’re ready.</p><div className="focus-action-row"><button className="focus-primary" onClick={onCapture}>Capture</button><button className="focus-secondary" onClick={onChooseEnergy}>Choose energy</button></div></section>;
 
   const swap = async () => { const result = await onSwap(); setMessage(result?.message ?? ""); };
+  const suggestSmaller = async () => {
+    const suggestion = await onSuggestSmaller();
+    if (suggestion) { setStep(suggestion); setMessage("Suggestion ready to edit. You can also write your own step."); }
+    else setMessage("A suggestion is unavailable. You can still write a smaller step yourself.");
+  };
   return <section className="focus-card focus-now" aria-labelledby="now-heading">
     <span className="focus-eyebrow">ONE SMALL STEP</span><h1 id="now-heading">{task.title}</h1>
     <div className="focus-first-step"><span>Smallest first step</span><p>{task.first_step || "Choose one small way to begin."}</p></div>
@@ -39,7 +45,7 @@ export function Now({ state, busy, onStart, onSmaller, onSwap, onCapture, onChoo
       {!active && <button className="focus-secondary" onClick={() => { setStep(task.first_step ?? ""); setSmallerOpen(value => !value); setMessage(""); }}><ArrowDown size={18} /> Smaller</button>}
       <button className="focus-secondary" onClick={() => void swap()} disabled={busy}><SkipForward size={18} /> Not now</button>
     </div>
-    {smallerOpen && <form className="focus-smaller" onSubmit={async event => { event.preventDefault(); if (!step.trim()) return; await onSmaller(step.trim()); setSmallerOpen(false); }}><label htmlFor="smaller-step">What is a smaller first step?</label><input id="smaller-step" value={step} onChange={event => setStep(event.target.value)} /><button type="submit" className="focus-secondary">Save step</button></form>}
+    {smallerOpen && <form className="focus-smaller" onSubmit={async event => { event.preventDefault(); if (!step.trim()) return; await onSmaller(step.trim()); setSmallerOpen(false); }}><label htmlFor="smaller-step">What is a smaller first step?</label><input id="smaller-step" value={step} onChange={event => setStep(event.target.value)} /><div className="focus-action-row"><button type="button" className="focus-text-button" onClick={() => void suggestSmaller()}>Suggest a smaller step</button><button type="submit" className="focus-secondary" disabled={!step.trim()}>Save step</button></div></form>}
     {message && <p className="focus-quiet-message" role="status" aria-live="polite">{message}{message.includes("stay with") && <button type="button" className="focus-inline" onClick={() => setMessage("Rest is okay. Come back whenever you like.")}>Rest</button>}</p>}
   </section>;
 }

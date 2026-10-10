@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from orin_api.ai import AIProvider, AITaskType, AIProviderError, ModelSelector, create_provider, suggest_capture, suggest_smaller_step
 from orin_api.auth import get_current_user
+from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
 from orin_api.focus_domain import complete_task, keep_task_in_review, local_day_key, release_task, set_focus_state, shrink_task_step, touch_task
 from orin_api.focus_behavior import is_quiet_time, missed_days_since, prompt_form, rolling_completed_days
@@ -82,6 +84,20 @@ class DailyCloseCreate(BaseModel):
 class CaptureCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, max_length=240)
+    first_step: str | None = Field(default=None, max_length=500)
+    energy_level: EnergyLevel | None = None
+
+
+class CaptureSuggestionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=240)
+
+
+class SmallerStepInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=240)
+    first_step: str | None = Field(default=None, max_length=500)
+    why: str | None = Field(default=None, max_length=500)
 
 
 class EnergyUpdate(BaseModel):
@@ -256,12 +272,46 @@ def _now_view(task: Task | None, focus: FocusSession | None, day_key: str,
 def capture_task(data: CaptureCreate = CaptureCreate(), user: User = Depends(get_current_user),
                  session: Session = Depends(get_session)) -> dict[str, object]:
     title = (data.title or "").strip() or "Untitled task"
-    task = Task(owner_id=user.id, title=title, status=TaskStatus.TODO, focus_state=FocusState.INBOX)
+    task = Task(owner_id=user.id, title=title, first_step=(data.first_step or "").strip() or None,
+                energy_level=data.energy_level, status=TaskStatus.TODO, focus_state=FocusState.INBOX)
     touch_task(task)
     session.add(task)
     session.commit()
     session.refresh(task)
     return _task_view(task)
+
+
+def _focus_ai_provider(settings: Settings) -> tuple[AIProvider, str]:
+    if not settings.ai_provider or not settings.ai_model:
+        raise AIProviderError("AI suggestions are unavailable. You can continue manually.", category="not_configured")
+    model = ModelSelector(settings.ai_model).select(AITaskType.STRUCTURED_PLANNING)
+    return create_provider(settings), model
+
+
+@router.post("/capture/suggest")
+def suggest_capture_task(data: CaptureSuggestionInput, user: User = Depends(get_current_user),
+                        settings: Settings = Depends(get_settings)) -> dict[str, str]:
+    _ = user  # Authentication is required; suggestions are stateless and do not read workspace records.
+    try:
+        provider, model = _focus_ai_provider(settings)
+        result = suggest_capture(provider, model, data.title)
+    except AIProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"title": result.title.strip(), "first_step": result.first_step.strip(),
+            "energy_level": result.energy_level}
+
+
+@router.post("/suggest-smaller")
+def suggest_smaller_task(data: SmallerStepInput, user: User = Depends(get_current_user),
+                         settings: Settings = Depends(get_settings)) -> dict[str, str]:
+    _ = user
+    try:
+        provider, model = _focus_ai_provider(settings)
+        result = suggest_smaller_step(provider, model, title=data.title,
+                                      first_step=data.first_step, why=data.why)
+    except AIProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"first_step": result.first_step.strip()}
 
 
 @router.put("/energy")
@@ -421,9 +471,21 @@ def review_task(task_id: uuid.UUID, data: ReviewInput, user: User = Depends(get_
 def swap_today(data: SwapInput = SwapInput(), user: User = Depends(get_current_user),
                session: Session = Depends(get_session)) -> dict[str, object]:
     settings_row, day_key, plan = _today_context(session, user)
+    if plan is not None:
+        # Serialize swaps on the daily plan so concurrent clients cannot both consume
+        # the same remaining allowance. populate_existing refreshes the JSON counter
+        # after a concurrent transaction releases the row lock.
+        plan = session.scalar(select(DailyPlan).where(DailyPlan.id == plan.id,
+            DailyPlan.user_id == user.id).with_for_update().execution_options(populate_existing=True))
     assignments = _assignments(session, user, plan) if plan else []
     current = next((item for item in assignments if item[0].id == data.task_id), None) if data.task_id else None
-    if current is None:
+    if data.task_id is not None and current is None:
+        if plan and str(data.task_id) in plan.swapped_task_ids:
+            return {"swapped": False, "already_swapped": True, "limit_reached": False,
+                    "rest_available": False, "message": "That task was already swapped. The current choice is still here.",
+                    "day_key": day_key}
+        raise HTTPException(status_code=409, detail="That task is no longer in Today's Three")
+    if data.task_id is None:
         now_task, _, _, _, _ = _current_now(session, user)
         current = next((item for item in assignments if now_task and item[0].id == now_task.id), None)
     if current is None:

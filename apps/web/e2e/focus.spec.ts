@@ -22,9 +22,15 @@ async function setupFocus(page: Page) {
     if (pathname === "/api/v1/focus/later") return route.fulfill({ json: [] });
     if (pathname === "/api/v1/focus/close/today") return route.fulfill({ json: { day_key: "2026-10-10", done_list: [], drift_triggers: [], drift_summary: null, tomorrow_task_id: null, reflection: null } });
     if (pathname === "/api/v1/focus/capture" && method === "POST") {
-      const input = await route.request().postDataJSON() as { title: string };
-      task = { id: "task-1", title: input.title, status: "todo", focus_state: "inbox", first_step: null, why: null, energy_level: null, estimated_minutes: 25, project_id: null };
+      const input = await route.request().postDataJSON() as { title: string; first_step?: string; energy_level?: string };
+      task = { id: "task-1", title: input.title, status: "todo", focus_state: "inbox", first_step: input.first_step ?? null, why: null, energy_level: input.energy_level ?? null, estimated_minutes: 25, project_id: null };
       return route.fulfill({ status: 201, json: task });
+    }
+    if (pathname === "/api/v1/focus/capture/suggest" && method === "POST") return route.fulfill({ json: { title: "Draft the update", first_step: "Open a blank document", energy_level: "low" } });
+    if (pathname === "/api/v1/focus/suggest-smaller" && method === "POST") return route.fulfill({ json: { first_step: "Open the file" } });
+    if (pathname === "/api/v1/tasks/task-1" && method === "PATCH") {
+      task = { ...task, ...await route.request().postDataJSON() as Record<string, unknown> };
+      return route.fulfill({ json: task });
     }
     if (pathname === "/api/v1/focus/today/tasks" && method === "PUT") return route.fulfill({ json: plan() });
     if (pathname === "/api/v1/focus/now/start" && method === "POST") {
@@ -63,6 +69,35 @@ test("capture appears on Now and starts a timer within three taps", async ({ pag
   await expect(page.getByRole("heading", { name: "Write the first paragraph" })).toBeVisible();
   await page.getByRole("button", { name: "Start", exact: true }).click();
   await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible();
+});
+
+test("capture suggestions are optional, editable, and saved with the task", async ({ page }) => {
+  await setupFocus(page);
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("button", { name: "Capture", exact: true }).last().click();
+  await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Write my update");
+  await page.getByRole("button", { name: "Suggest", exact: true }).click();
+  await expect(page.getByRole("group", { name: "Optional task suggestions" })).toBeVisible();
+  await page.getByRole("button", { name: "Use suggestions" }).click();
+  await expect(page.getByRole("textbox", { name: "What would you like to remember?" })).toHaveValue("Draft the update");
+  await expect(page.getByLabel("First step (optional)")).toHaveValue("Open a blank document");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Draft the update" })).toBeVisible();
+  await expect(page.getByText("Open a blank document")).toBeVisible();
+});
+
+test("Smaller offers a suggestion and keeps the step editable", async ({ page }) => {
+  await setupFocus(page);
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("button", { name: "Capture", exact: true }).last().click();
+  await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Prepare the proposal");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Smaller", exact: true }).click();
+  await page.getByRole("button", { name: "Suggest a smaller step" }).click();
+  await expect(page.getByRole("textbox", { name: "What is a smaller first step?" })).toHaveValue("Open the file");
+  await page.getByRole("textbox", { name: "What is a smaller first step?" }).fill("Open the proposal file");
+  await page.getByRole("button", { name: "Save step" }).click();
+  await expect(page.getByText("Open the proposal file")).toBeVisible();
 });
 
 test("focus surfaces respect dark mode, reduced motion, and control sizing and contrast", async ({ page }) => {

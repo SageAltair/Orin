@@ -50,6 +50,22 @@ export interface FocusTaskFields {
   released_at?: string | null;
 }
 
+export interface FocusCaptureRequest {
+  title?: string | null;
+  first_step?: string | null;
+  energy_level?: EnergyLevel | null;
+}
+
+export interface FocusCaptureSuggestion {
+  title: string;
+  first_step: string;
+  energy_level: EnergyLevel;
+}
+
+export interface FocusSmallerStepSuggestion {
+  first_step: string;
+}
+
 export interface TaskRecord extends FocusTaskFields {
   id: string;
   owner_id: string;
