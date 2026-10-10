@@ -494,6 +494,11 @@ def get_close_today(user: User = Depends(get_current_user), session: Session = D
 
 @router.get("/privacy/export")
 def export_focus_data(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    settings_row = session.scalar(select(UserSettings).where(UserSettings.user_id == user.id))
+    plans = session.scalars(select(DailyPlan).where(DailyPlan.user_id == user.id).order_by(DailyPlan.day_key)).all()
+    plan_ids = [row.id for row in plans]
+    assignments = session.scalars(select(DailyPlanTask).where(DailyPlanTask.user_id == user.id,
+        DailyPlanTask.plan_id.in_(plan_ids))).all() if plan_ids else []
     drifts = session.scalars(select(DriftEvent).where(DriftEvent.user_id == user.id).order_by(DriftEvent.created_at)).all()
     closes = session.scalars(select(DailyClose).where(DailyClose.user_id == user.id).order_by(DailyClose.day_key)).all()
     return {"drift_events": [{"id": str(row.id), "task_id": str(row.task_id) if row.task_id else None,
@@ -501,7 +506,14 @@ def export_focus_data(user: User = Depends(get_current_user), session: Session =
              "trigger_type": row.trigger_type.value, "note": row.note, "created_at": row.created_at.isoformat()} for row in drifts],
             "daily_closes": [{"id": str(row.id), "day_key": row.day_key, "done_list": row.done_list,
              "drift_summary": row.drift_summary, "tomorrow_task_id": str(row.tomorrow_task_id) if row.tomorrow_task_id else None,
-             "reflection": row.reflection, "created_at": row.created_at.isoformat()} for row in closes]}
+             "reflection": row.reflection, "created_at": row.created_at.isoformat()} for row in closes],
+            "user_settings": _settings_view(settings_row) if settings_row else None,
+            "daily_plans": [{"id": str(row.id), "day_key": row.day_key,
+             "energy_level": row.energy_level.value if row.energy_level else None,
+             "swapped_task_ids": row.swapped_task_ids, "created_at": row.created_at.isoformat(),
+             "updated_at": row.updated_at.isoformat()} for row in plans],
+            "daily_plan_tasks": [{"plan_id": str(row.plan_id), "task_id": str(row.task_id),
+             "position": row.position, "is_anchor": row.is_anchor} for row in assignments]}
 
 
 @router.delete("/privacy/data", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)

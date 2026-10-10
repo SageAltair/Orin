@@ -48,6 +48,7 @@ async function signIn(page: Page) {
   await expect(workspaceNav.getByRole("button", { name: "Projects" })).toBeVisible();
   await expect(workspaceNav.getByRole("button", { name: "Activity" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ask Orin" }).first()).toBeVisible();
+  if ((await page.evaluate(() => window.innerWidth)) < 600) await page.getByRole("button", { name: "Open navigation" }).click();
   await workspaceNav.getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
 }
@@ -96,4 +97,47 @@ test("focus surfaces respect dark mode, reduced motion, and control sizing and c
   });
   expect(audit.contrast.every(value => value >= 4.5), JSON.stringify(audit.contrast)).toBeTruthy();
   expect(audit.small.filter(item => item.width < 48 || item.height < 48), JSON.stringify(audit.small)).toEqual([]);
+});
+
+test("Later load errors remain visible and the surface recovers on retry", async ({ page }) => {
+  await setupFocus(page);
+  let fail = true;
+  await page.route("**/api/v1/focus/later", route => fail
+    ? route.fulfill({ status: 503, json: { detail: "Unavailable" } })
+    : route.fulfill({ json: [] }));
+  await page.goto("/"); await signIn(page);
+  await expect(page.getByRole("alert").filter({ hasText: "Could not load focus" })).toBeVisible();
+  fail = false;
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await page.getByRole("button", { name: "Browse Later" }).click();
+  await expect(page.getByText("Nothing waiting here.")).toBeVisible();
+});
+
+test("Close save failure keeps the answers available for recovery", async ({ page }) => {
+  await setupFocus(page);
+  await page.route("**/api/v1/focus/daily-closes/today", route => route.fulfill({ status: 503, json: { detail: "Unavailable" } }));
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Tired", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Save and close" }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not save the close");
+  await expect(page.getByRole("heading", { name: "One thing for tomorrow?" })).toBeVisible();
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Tired", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("focus remains reachable by keyboard and fits narrow and wide viewports", async ({ page }) => {
+  await setupFocus(page);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/"); await signIn(page);
+  await page.keyboard.press("Tab");
+  await expect(page.locator(":focus")).toBeVisible();
+  await expect(page.getByRole("main", { name: "" }).last()).toBeVisible();
+  const narrow = await page.locator(".focus-shell").evaluate(element => ({ scroll: element.scrollWidth, client: element.clientWidth }));
+  expect(narrow.scroll).toBeLessThanOrEqual(narrow.client + 1);
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const wide = await page.locator(".focus-shell").evaluate(element => ({ scroll: element.scrollWidth, client: element.clientWidth }));
+  expect(wide.scroll).toBeLessThanOrEqual(wide.client + 1);
 });

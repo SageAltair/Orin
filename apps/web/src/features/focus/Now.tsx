@@ -32,7 +32,7 @@ export function Now({ state, busy, onStart, onSmaller, onSwap, onCapture, onChoo
     {task.why && <p className="focus-why">{task.why}</p>}
     <div className="focus-timer" aria-label={active ? "Focus timer running" : "Focus timer ready"}>
       <div className="focus-timer-track" role="progressbar" aria-label="Focus time remaining" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(remaining * 100)}><span style={{ width: `${remaining * 100}%`, transition: reducedMotion ? "none" : "width 1s ease" }} /></div>
-      {!hideNumbers && <span className="focus-timer-label">{active ? `${Math.ceil((state!.focus_session!.duration_minutes * remaining))} min left` : `${task.estimated_minutes ?? 25} min, at your pace`}</span>}
+      {!hideNumbers && <span className="focus-timer-label" role="status" aria-live="polite">{active ? `${Math.ceil((state!.focus_session!.duration_minutes * remaining))} min left` : `${task.estimated_minutes ?? 25} min, at your pace`}</span>}
     </div>
     <div className="focus-action-row focus-now-actions">
       <button className="focus-primary" onClick={active ? onComplete : onStart} disabled={busy}>{active ? <Check size={18} /> : <Play size={18} />}{active ? "Done" : "Start"}</button>
@@ -40,6 +40,6 @@ export function Now({ state, busy, onStart, onSmaller, onSwap, onCapture, onChoo
       <button className="focus-secondary" onClick={() => void swap()} disabled={busy}><SkipForward size={18} /> Not now</button>
     </div>
     {smallerOpen && <form className="focus-smaller" onSubmit={async event => { event.preventDefault(); if (!step.trim()) return; await onSmaller(step.trim()); setSmallerOpen(false); }}><label htmlFor="smaller-step">What is a smaller first step?</label><input id="smaller-step" value={step} onChange={event => setStep(event.target.value)} /><button type="submit" className="focus-secondary">Save step</button></form>}
-    {message && <p className="focus-quiet-message" role="status">{message}{message.includes("stay with") && <button type="button" className="focus-inline" onClick={() => setMessage("Rest is okay. Come back whenever you like.")}>Rest</button>}</p>}
+    {message && <p className="focus-quiet-message" role="status" aria-live="polite">{message}{message.includes("stay with") && <button type="button" className="focus-inline" onClick={() => setMessage("Rest is okay. Come back whenever you like.")}>Rest</button>}</p>}
   </section>;
 }

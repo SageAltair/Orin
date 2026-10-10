@@ -19,8 +19,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
-        op.execute(
-            sa.text(
-                "DROP TYPE IF EXISTS activity_type WHERE 'tasks_created_batch' = ANY(enum_range('activity_type'))"
-            )
-        )
+        downgrade_batch_activity_types(op.get_bind())
+
+
+def downgrade_batch_activity_types(connection: sa.Connection) -> None:
+    """Map batch events to a legacy type; PostgreSQL enum labels are retained on downgrade."""
+    connection.execute(sa.text(
+        "UPDATE activity SET activity_type = 'task_created' "
+        "WHERE activity_type = 'tasks_created_batch'"
+    ))

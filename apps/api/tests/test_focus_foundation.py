@@ -130,6 +130,12 @@ def test_focus_records_are_owner_scoped_and_privacy_delete_is_scoped(client: Tes
     assert own_drift.status_code == 201
     own_close = client.put("/api/v1/focus/daily-closes/today", json={"reflection": "A private daily note"})
     assert own_close.status_code == 200
+    factory = app.state.focus_test_session_factory
+    with factory.begin() as session:
+        plan = DailyPlan(user_id=primary.id, day_key="2026-10-10", energy_level=EnergyLevel.LOW)
+        session.add(plan)
+        session.flush()
+        session.add(DailyPlanTask(user_id=primary.id, plan_id=plan.id, task_id=uuid.UUID(own_task["id"]), position=0, is_anchor=True))
 
     active_user[0] = second
     settings = client.put("/api/v1/focus/settings", json={"timezone": "Africa/Dar_es_Salaam", "energy_today": "low"})
@@ -147,12 +153,38 @@ def test_focus_records_are_owner_scoped_and_privacy_delete_is_scoped(client: Tes
     export = client.get("/api/v1/focus/privacy/export").json()
     assert len(export["drift_events"]) == 1
     assert len(export["daily_closes"]) == 1
+    assert export["user_settings"]["timezone"] == "UTC"
+    assert len(export["daily_plans"]) == 1
+    assert export["daily_plans"][0]["energy_level"] == "low"
+    assert export["daily_plan_tasks"] == [{"plan_id": export["daily_plans"][0]["id"], "task_id": own_task["id"], "position": 0, "is_anchor": True}]
     assert client.delete("/api/v1/focus/privacy/data").status_code == 204
+    assert client.get("/api/v1/focus/privacy/export").json()["daily_plans"] == []
     assert client.get("/api/v1/focus/drift").json() == []
     active_user[0] = second
     assert len(client.get("/api/v1/focus/drift").json()) == 1
     assert len(client.get("/api/v1/focus/daily-closes").json()) == 1
     assert client.get("/api/v1/focus/settings").json()["timezone"] == "Africa/Dar_es_Salaam"
+
+
+def test_focus_read_routes_and_plan_writes_are_scoped_to_active_user(client: TestClient) -> None:
+    primary, second, other_task, active_user = app.state.focus_test_users
+    primary_task = client.post("/api/v1/focus/capture", json={"title": "Primary plan task"}).json()
+    assert client.put("/api/v1/focus/energy", json={"energy_level": "low"}).status_code == 200
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": primary_task["id"], "is_anchor": True}]}).status_code == 200
+    active_user[0] = second
+    assert client.get("/api/v1/focus/today").json()["tasks"] == []
+    assert client.get("/api/v1/focus/now").json()["task"] is None
+    assert client.get("/api/v1/focus/later").json()[0]["id"] == str(other_task.id)
+    assert client.get("/api/v1/focus/drift").json() == []
+    assert client.get("/api/v1/focus/daily-closes").json() == []
+    assert client.get("/api/v1/focus/close/today").json()["done_list"] == []
+    assert client.get("/api/v1/focus/privacy/export").json()["daily_plan_tasks"] == []
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": primary_task["id"]}]}).status_code == 404
+    assert client.put("/api/v1/focus/daily-closes/today", json={"tomorrow_task_id": primary_task["id"]}).status_code == 404
+    active_user[0] = primary
+    assert client.delete("/api/v1/focus/privacy/data").status_code == 204
+    with app.state.focus_test_session_factory() as session:
+        assert session.scalar(select(DailyPlanTask).where(DailyPlanTask.user_id == second.id)) is None
 
 
 def test_every_focus_table_is_scoped_by_user_id(client: TestClient) -> None:
@@ -207,6 +239,23 @@ def test_drift_and_reflection_validation_never_echoes_sensitive_text(client: Tes
     assert sentinel not in caplog.text
     assert sentinel not in drift.text
     assert sentinel not in close.text
+
+
+def test_focus_write_routes_reject_invalid_and_unknown_inputs(client: TestClient) -> None:
+    task = client.post("/api/v1/focus/capture", json={"title": "Validated task"}).json()
+    assert client.post("/api/v1/focus/capture", json={"title": "x" * 241}).status_code == 422
+    assert client.post("/api/v1/focus/capture", json={"title": "valid", "surprise": True}).status_code == 422
+    assert client.put("/api/v1/focus/energy", json={"energy_level": "unknown"}).status_code == 422
+    assert client.put("/api/v1/focus/energy", json={"energy_level": "low", "extra": 1}).status_code == 422
+    assert client.put("/api/v1/focus/settings", json={"timezone": "Mars/Olympus"}).status_code == 422
+    assert client.put("/api/v1/focus/settings", json={"unexpected": True}).status_code == 422
+    too_many = [{"task_id": task["id"]} for _ in range(4)]
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": too_many}).status_code == 422
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": task["id"], "unknown": 1}]}).status_code == 422
+    assert client.post("/api/v1/focus/drift", json={"trigger_type": "unknown"}).status_code == 422
+    assert client.post("/api/v1/focus/drift", json={"trigger_type": "other", "unknown": 1}).status_code == 422
+    assert client.put("/api/v1/focus/daily-closes/today", json={"drift_triggers": ["unknown"]}).status_code == 422
+    assert client.put("/api/v1/focus/daily-closes/today", json={"unknown": 1}).status_code == 422
 
 
 def test_legacy_task_status_api_uses_shared_focus_transitions(client: TestClient) -> None:
