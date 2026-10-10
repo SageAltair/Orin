@@ -26,6 +26,7 @@ def select_todays_three(
     energy: EnergyLevel,
     *,
     excluded_ids: set[uuid.UUID] | None = None,
+    routines: Sequence[str] = (),
 ) -> tuple[list[Task], uuid.UUID | None]:
     """Select up to three energy-matched open tasks and an eligible anchor."""
     excluded = excluded_ids or set()
@@ -35,7 +36,8 @@ def select_todays_three(
         and task.status not in {TaskStatus.DONE, TaskStatus.CANCELLED}
         and task.energy_level == energy
     ]
-    eligible.sort(key=task_rank, reverse=True)
+    routine_names = tuple(name.casefold() for name in routines)
+    eligible.sort(key=lambda task: (int(bool(task.trigger and any(name in task.trigger.casefold() for name in routine_names))), *task_rank(task)), reverse=True)
     anchor_pool = eligible
     if energy == EnergyLevel.LOW:
         anchor_pool = [task for task in eligible if task.estimated_minutes is not None and task.estimated_minutes <= 15]

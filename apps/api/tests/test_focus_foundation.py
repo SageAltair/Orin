@@ -5,7 +5,7 @@ import ast
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from collections.abc import Generator
 
@@ -256,6 +256,93 @@ def test_focus_write_routes_reject_invalid_and_unknown_inputs(client: TestClient
     assert client.post("/api/v1/focus/drift", json={"trigger_type": "other", "unknown": 1}).status_code == 422
     assert client.put("/api/v1/focus/daily-closes/today", json={"drift_triggers": ["unknown"]}).status_code == 422
     assert client.put("/api/v1/focus/daily-closes/today", json={"unknown": 1}).status_code == 422
+
+
+def test_progress_reentry_is_shown_once_and_rest_day_is_neutral(client: TestClient) -> None:
+    primary, _, _, _ = app.state.focus_test_users
+    today = datetime.now(timezone.utc).date()
+    old_day = (today - timedelta(days=4)).isoformat()
+    with app.state.focus_test_session_factory.begin() as session:
+        session.add(UserSettings(user_id=primary.id, timezone="UTC", last_seen_day_key=old_day))
+    first = client.get("/api/v1/focus/progress").json()
+    assert first["reentry"]["show"] is True
+    assert first["completed_days"] == 0
+    assert client.get("/api/v1/focus/progress").json()["reentry"]["show"] is True
+    assert client.post("/api/v1/focus/reentry/dismiss").status_code == 204
+    assert client.get("/api/v1/focus/progress").json()["reentry"]["show"] is False
+
+    today_weekday = today.weekday()
+    assert client.put("/api/v1/focus/settings", json={"weekly_rest_day": today_weekday}).status_code == 200
+    rested = client.get("/api/v1/focus/now").json()
+    assert rested["rest_day"] is True
+    assert rested["task"] is None
+    assert client.post("/api/v1/focus/capture", json={"title": "A rest-day thought"}).status_code == 201
+
+
+def test_decay_review_lists_only_owned_tasks_and_applies_all_outcomes(client: TestClient) -> None:
+    primary, second, _, _ = app.state.focus_test_users
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    tasks = [Task(owner_id=primary.id, title=f"Review {name}", focus_state="later", decay_review_at=past)
+             for name in ("keep", "shrink", "release")]
+    hidden = Task(owner_id=second.id, title="Other review", focus_state="later", decay_review_at=past)
+    with app.state.focus_test_session_factory.begin() as session:
+        session.add_all([*tasks, hidden])
+    candidates = client.get("/api/v1/focus/review").json()
+    ids = {row["id"] for row in candidates}
+    assert str(hidden.id) not in ids
+    by_title = {row["title"]: row["id"] for row in candidates}
+    for title, payload in (("Review keep", {"outcome": "keep"}),
+                           ("Review shrink", {"outcome": "shrink", "first_step": "One small line"}),
+                           ("Review release", {"outcome": "release"})):
+        result = client.post(f"/api/v1/focus/review/{by_title[title]}", json=payload)
+        assert result.status_code == 200
+        if payload["outcome"] == "release":
+            assert result.json()["task"]["status"] == "cancelled"
+        elif payload["outcome"] == "shrink":
+            assert result.json()["task"]["first_step"] == "One small line"
+        else:
+            assert datetime.fromisoformat(result.json()["task"]["decay_review_at"]) > datetime.now(timezone.utc)
+    assert client.post(f"/api/v1/focus/review/{hidden.id}", json={"outcome": "keep"}).status_code == 404
+
+
+def test_focus_mode_drift_links_active_task_and_session(client: TestClient) -> None:
+    task = client.post("/api/v1/focus/capture", json={"title": "Focus drift linkage"}).json()
+    assert client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": task["id"], "is_anchor": True}]}).status_code == 200
+    started = client.post("/api/v1/focus/now/start", json={})
+    assert started.status_code == 200
+    focus_id = started.json()["focus_session"]["id"]
+    drift = client.post("/api/v1/focus/now/drift", json={"task_id": task["id"], "focus_session_id": focus_id})
+    assert drift.status_code == 201
+    assert drift.json()["task_id"] == task["id"]
+    assert drift.json()["focus_session_id"] == focus_id
+    assert len(client.get("/api/v1/focus/drift").json()) == 1
+
+
+def test_settings_routines_and_prompt_caps_are_validated_and_persisted(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.focus_router as focus_router
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            instant = datetime(2026, 10, 10, 8, 10, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(focus_router, "datetime", FixedDateTime)
+    settings = client.put("/api/v1/focus/settings", json={
+        "timezone": "UTC", "default_energy": "low", "weekly_rest_day": 6,
+        "check_in_interval": 25, "quiet_hours": {"start": "22:00", "end": "07:00"},
+        "routines": [{"name": "coffee", "time": "08:00"}], "body_doubling_enabled": True,
+        "accountability_contact": "morgan@example.test"})
+    assert settings.status_code == 200
+    assert client.get("/api/v1/focus/settings").json()["routines"] == [{"name": "coffee", "time": "08:00"}]
+    assert client.put("/api/v1/focus/settings", json={"quiet_hours": {"start": "22:88", "end": "07:00"}}).status_code == 422
+    assert client.put("/api/v1/focus/settings", json={"check_in_interval": 2}).status_code == 422
+    task = Task(owner_id=app.state.focus_test_users[0].id, title="Routine task", focus_state="later", trigger="after coffee")
+    with app.state.focus_test_session_factory.begin() as session:
+        session.add(task)
+    forms = [client.get("/api/v1/focus/prompts").json()["items"][0]["form"] for _ in range(3)]
+    assert forms == ["gentle", "softer", "visual_on_open"]
+    assert client.get("/api/v1/focus/prompts").json()["items"] == []
 
 
 def test_legacy_task_status_api_uses_shared_focus_transitions(client: TestClient) -> None:

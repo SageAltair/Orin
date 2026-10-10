@@ -284,6 +284,7 @@ class Task(TimestampMixin, Base):
     __tablename__ = "tasks"
     __table_args__ = (
         Index("ix_tasks_owner_status_due", "owner_id", "status", "due_at"),
+        Index("ix_tasks_owner_decay_review", "owner_id", "decay_review_at"),
         Index("ix_tasks_project_status", "project_id", "status"),
         Index("ix_tasks_assignee_status", "assignee_id", "status"),
         CheckConstraint("length(trim(title)) > 0", name="ck_tasks_title_nonempty"),
@@ -682,6 +683,14 @@ class UserSettings(TimestampMixin, Base):
     theme: Mapped[str] = mapped_column(String(8), nullable=False, default="auto", server_default="auto")
     body_doubling_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     accountability_contact: Mapped[str | None] = mapped_column(String(240))
+    default_energy: Mapped[EnergyLevel | None] = mapped_column(enum_column(EnergyLevel, "default_energy_level"))
+    weekly_rest_day: Mapped[int | None] = mapped_column(Integer)
+    check_in_interval: Mapped[int | None] = mapped_column(Integer)
+    routines: Mapped[list[dict[str, str]]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    last_seen_day_key: Mapped[str | None] = mapped_column(String(10))
+    active_absence_key: Mapped[str | None] = mapped_column(String(10))
+    dismissed_absence_key: Mapped[str | None] = mapped_column(String(10))
+    prompt_state: Mapped[dict[str, int]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
 
 class IntegrationConnection(TimestampMixin, Base):

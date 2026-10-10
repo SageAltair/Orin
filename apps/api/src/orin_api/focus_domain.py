@@ -31,6 +31,17 @@ def touch_task(task: Task, *, now: datetime | None = None) -> None:
         task.decay_review_at = instant + timedelta(days=30)
 
 
+def keep_task_in_review(task: Task, *, now: datetime | None = None) -> None:
+    instant = now or datetime.now(timezone.utc)
+    task.last_touched_at = instant
+    task.decay_review_at = instant + timedelta(days=30)
+
+
+def shrink_task_step(task: Task, first_step: str, *, now: datetime | None = None) -> None:
+    task.first_step = first_step
+    keep_task_in_review(task, now=now)
+
+
 def set_focus_state(task: Task, state: FocusState, *, now: datetime | None = None) -> None:
     """Move an open task between focus states without changing legacy status."""
     if task.status in {TaskStatus.DONE, TaskStatus.CANCELLED}:
