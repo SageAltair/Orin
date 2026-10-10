@@ -82,13 +82,13 @@ def ensure_user_preferences(session: Session, user: User) -> UserPreferences:
     }
     for capability in catalog:
         if capability.id not in assigned:
-            visible = capability.is_enabled and capability.code in {"home", "tasks"}
+            visible = capability.is_enabled and capability.code in {"home", "tasks", "projects", "activity"}
             session.add(UserCapability(
                 user_id=user.id,
                 capability_id=capability.id,
                 granted=capability.is_enabled,
                 visible=visible,
-                pinned=visible,
+                pinned=visible and capability.code in {"home", "tasks"},
             ))
     session.flush()
     return preferences

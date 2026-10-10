@@ -86,7 +86,7 @@ def test_environment_preferences_are_explicit_and_resettable(client: TestClient)
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["pinned_capabilities"]
     assert client.delete("/api/v1/environment/preferences").status_code == 204
     assert client.get("/api/v1/environment/preferences").json() == []
-    assert client.get("/api/v1/users/me/preferences").json()["visible_capabilities"] == ["home", "tasks"]
+    assert client.get("/api/v1/users/me/preferences").json()["visible_capabilities"] == ["activity", "home", "projects", "tasks"]
 
 
 def test_focus_session_is_server_owned_pauseable_and_audited(client: TestClient) -> None:

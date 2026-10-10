@@ -18,7 +18,7 @@ function readStored<T>(key: string, fallback: T): T {
   catch { return fallback; }
 }
 
-export function FocusExperience({ name, onSignOut }: { name: string; onSignOut: () => void }) {
+export function FocusExperience({ name, onSignOut, embedded = false }: { name: string; onSignOut: () => void; embedded?: boolean }) {
   const focus = useFocusWorkspace();
   const [surface, setSurface] = useState<Surface>("now");
   const [captureMessage, setCaptureMessage] = useState("");
@@ -89,9 +89,9 @@ export function FocusExperience({ name, onSignOut }: { name: string; onSignOut: 
   };
   const navClick = (next: Surface) => { setSurface(next); setCaptureMessage(""); setCloseMessage(""); setLaterOverride(null); };
 
-  return <div className={`focus-shell ${dark ? "focus-dark" : "focus-light"} ${reduce ? "focus-reduced-motion" : ""}`}>
+  return <div className={`focus-shell ${embedded ? "focus-embedded" : ""} ${dark ? "focus-dark" : "focus-light"} ${reduce ? "focus-reduced-motion" : ""}`}>
     <a className="focus-skip" href="#focus-main">Skip to content</a>
-    <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><Command size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><X size={18} /></button></header>
+    {!embedded && <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><Command size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><X size={18} /></button></header>}
     <main id="focus-main" className="focus-main" tabIndex={-1}>
       {focus.error && <p className="focus-error" role="alert">{focus.error}</p>}
       {surface === "now" && <Now state={focus.now} busy={focus.busy} onStart={() => void focus.start()} onComplete={() => void focus.complete()} onSmaller={async step => { if (focus.now?.task) await focus.saveFirstStep(focus.now.task, step); }} onSwap={focus.swap} onCapture={() => navClick("capture")} onChooseEnergy={() => navClick("today")} reducedMotion={reduce} hideNumbers={hideTimerNumbers} />}

@@ -441,6 +441,9 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
   font: 400 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: .005em;
 }
+.focus-shell.focus-embedded { min-height: calc(100dvh - 130px); padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
+.focus-embedded .focus-main { padding-top: 1rem; }
+.focus-embedded .focus-bottom-nav { left: 248px; }
 .focus-shell.focus-dark {
   --focus-bg: #171c19;
   --focus-surface: #222a25;
@@ -533,4 +536,5 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .focus-reduced-motion *, .focus-reduced-motion *::before, .focus-reduced-motion *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 @media (prefers-reduced-motion: reduce) { .focus-shell *, .focus-shell *::before, .focus-shell *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 @media (min-width: 760px) { .focus-main { padding-top: 5vh; } .focus-fab { right: max(2rem, calc((100vw - 1000px) / 2)); } }
+@media (max-width: 760px) { .focus-embedded .focus-bottom-nav { left: 0; } }
 @media (max-width: 520px) { .focus-header { min-height: 60px; padding-inline: .9rem; } .focus-greeting { font-size: .9rem; } .focus-card { border-radius: 1.2rem; } .focus-plan-item { grid-template-columns: minmax(0, 1fr) auto; } .focus-replace { grid-column: 1 / -1; } .focus-replace select { max-width: none; width: 100%; } .focus-energy small { font-size: .74rem; } }

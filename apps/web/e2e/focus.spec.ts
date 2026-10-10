@@ -1,6 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const enabled = process.env.VITE_FOCUS_SURFACES_ENABLED === "true";
 const timestamp = "2026-10-10T08:00:00Z";
 
 async function setupFocus(page: Page) {
@@ -8,7 +7,6 @@ async function setupFocus(page: Page) {
   let session: Record<string, unknown> | null = null;
   let settings: Record<string, unknown> = { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false };
   const plan = () => ({ day_key: "2026-10-10", energy_level: null, tasks: task ? [{ ...task, is_anchor: true, today_position: 0 }] : [] });
-  await page.addInitScript(() => localStorage.setItem("orin.focus.preview.v1", "true"));
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
@@ -33,7 +31,7 @@ async function setupFocus(page: Page) {
       session = { id: "focus-1", task_id: "task-1", duration_minutes: 25, started_at: timestamp, status: "active" };
       return route.fulfill({ json: { task, focus_session: session } });
     }
-    if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
+    if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
     if (pathname.endsWith("/tasks") || pathname.endsWith("/projects") || pathname.endsWith("/commands") || pathname.endsWith("/conversations")) return route.fulfill({ json: [] });
     if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname === "/api/v1/memories" || pathname === "/api/v1/approvals" || pathname === "/api/v1/devices") return route.fulfill({ json: [] });
@@ -45,11 +43,16 @@ async function signIn(page: Page) {
   await page.getByLabel("Email").fill("morgan@example.com");
   await page.getByLabel("Password").fill("a-secure-test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const workspaceNav = page.getByRole("navigation").first();
+  await expect(workspaceNav.getByRole("button", { name: "Home" })).toBeVisible();
+  await expect(workspaceNav.getByRole("button", { name: "Projects" })).toBeVisible();
+  await expect(workspaceNav.getByRole("button", { name: "Activity" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Orin" }).first()).toBeVisible();
+  await workspaceNav.getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
 }
 
 test("capture appears on Now and starts a timer within three taps", async ({ page }) => {
-  test.skip(!enabled, "Set VITE_FOCUS_SURFACES_ENABLED=true to exercise the approved preview surfaces.");
   await setupFocus(page);
   await page.goto("/");
   await signIn(page);
@@ -62,14 +65,13 @@ test("capture appears on Now and starts a timer within three taps", async ({ pag
 });
 
 test("focus surfaces respect dark mode, reduced motion, and control sizing and contrast", async ({ page }) => {
-  test.skip(!enabled, "Set VITE_FOCUS_SURFACES_ENABLED=true to exercise the approved preview surfaces.");
   await setupFocus(page);
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Today", exact: true }).click();
   await page.getByText("Settings", { exact: true }).click();
   await page.getByText("Appearance and focus options").click();
-  await page.getByLabel("Theme").selectOption("dark");
+  await page.locator(".focus-settings-page select").selectOption("dark");
   await page.getByLabel("Reduce motion").check();
   const shell = page.locator(".focus-shell");
   await expect(shell).toHaveClass(/focus-dark/);

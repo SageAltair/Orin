@@ -30,8 +30,8 @@ export const capabilities: Capability[] = [
 ];
 
 export const defaultPreferences: UserPreferences = {
-  visibleCapabilities: ["home", "tasks"],
-  hiddenCapabilities: ["projects", "activity", "settings"],
+  visibleCapabilities: ["home", "tasks", "projects", "activity"],
+  hiddenCapabilities: ["settings"],
   minimizedCapabilities: [],
   pinnedCapabilities: ["home", "tasks"],
   density: "comfortable",

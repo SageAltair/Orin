@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function mockApi(page: Page) {
-  let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
+  let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
   const tasks: Record<string, unknown>[] = [];
   const projects: Record<string, unknown>[] = [];
   const memories: Record<string, unknown>[] = [];
@@ -10,6 +10,8 @@ async function mockApi(page: Page) {
   const devices: Record<string, unknown>[] = [];
   const workerJobs: Record<string, Record<string, unknown>[]> = {};
   const approvals: Record<string, unknown>[] = [];
+  const focusTasks: Record<string, unknown>[] = [];
+  const focusPlan = () => ({ day_key: "2026-10-10", energy_level: "medium", tasks: focusTasks.map((task, index) => ({ ...task, is_anchor: index === 0, today_position: index })) });
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
     if (pathname.endsWith("/auth/refresh")) return route.fulfill({ status: 401, json: { detail: "Not authenticated" } });
@@ -18,6 +20,13 @@ async function mockApi(page: Page) {
     if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     if (pathname.endsWith("/auth/email") && route.request().method() === "POST") return route.fulfill({ json: { id: "user-1", email: "updated@example.com", display_name: "Morgan", created_at: "2026-10-08T00:00:00Z" } });
     if (pathname.endsWith("/auth/password") || pathname.includes("/auth/sessions/")) return route.fulfill({ status: 204 });
+    if (pathname === "/api/v1/focus/settings") return route.fulfill({ json: { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false } });
+    if (pathname === "/api/v1/focus/now") return route.fulfill({ json: { task: focusTasks[0] ? { ...focusTasks[0], is_anchor: true, today_position: 0 } : null, focus_session: null, day_key: "2026-10-10", energy_level: "medium", empty_state: !focusTasks.length } });
+    if (pathname === "/api/v1/focus/today") return route.fulfill({ json: focusPlan() });
+    if (pathname === "/api/v1/focus/later") return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/focus/close/today") return route.fulfill({ json: { day_key: "2026-10-10", done_list: [], drift_triggers: [], drift_summary: null, tomorrow_task_id: null, reflection: null } });
+    if (pathname === "/api/v1/focus/capture" && route.request().method() === "POST") { const input = await route.request().postDataJSON() as { title: string }; const item = { id: `focus-task-${focusTasks.length + 1}`, title: input.title, status: "todo", focus_state: "inbox", first_step: null, why: null, energy_level: null, estimated_minutes: 25, project_id: null }; focusTasks.unshift(item); return route.fulfill({ status: 201, json: item }); }
+    if (pathname === "/api/v1/focus/today/tasks" && route.request().method() === "PUT") return route.fulfill({ json: focusPlan() });
     if (pathname === "/api/v1/environment/preferences" && route.request().method() === "GET") return route.fulfill({ json: environment });
     if (pathname === "/api/v1/environment/preferences" && route.request().method() === "DELETE") { environment.splice(0); return route.fulfill({ status: 204 }); }
     if (pathname === "/api/v1/environment/preferences" && route.request().method() === "PUT") { const item = await route.request().postDataJSON() as Record<string, unknown>; const existing = environment.findIndex(value => value.item === item.item && value.surface === item.surface); if (existing >= 0) environment.splice(existing, 1); environment.push(item); return route.fulfill({ json: item }); }
@@ -167,7 +176,7 @@ test("GitHub settings show the connected account and accessible repositories", a
   await expect(page.getByText("Private")).toBeVisible();
 });
 
-test("Ask Orin answers greetings and creates tasks; manual task creation also works", async ({ page }) => {
+test("Ask Orin works alongside the focus task workspace and capture", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
   await signIn(page);
@@ -185,13 +194,12 @@ test("Ask Orin answers greetings and creates tasks; manual task creation also wo
   await page.getByRole("button", { name: "Send message" }).click();
   await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
   await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
-  await expect(page.getByRole("textbox", { name: "Edit Call John" })).toBeVisible();
-
-  await page.getByLabel("Task title").fill("Manual task");
-  const addTaskButton = page.getByRole("button", { name: "Add task" });
-  await expect(addTaskButton).toHaveText("");
-  await addTaskButton.click();
-  await expect(page.getByRole("textbox", { name: "Edit Manual task" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Orin" }).first()).toBeVisible();
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Capture" }).click();
+  await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Manual task");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Manual task" })).toBeVisible();
 });
 
 test("project intelligence stores knowledge and starts a persistent focus session", async ({ page }) => {
@@ -229,7 +237,7 @@ test("adaptive navigation can minimize, hide, recover, and reset tools", async (
   await projects.selectOption("prioritized");
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
   await page.getByRole("button", { name: "Reset layout" }).click();
-  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveCount(0);
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
 });
 
 test("activity links open related workspace records and exposes lifecycle event filters", async ({ page }) => {
@@ -262,7 +270,7 @@ test("activity links open related workspace records and exposes lifecycle event 
   await expect(page.getByRole("combobox", { name: "Select project" })).toHaveValue(project.id);
   await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
   await page.getByRole("button", { name: "Task task-1" }).click();
-  await expect(page.locator(`#task-${task.id}`)).toBeInViewport();
+  await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
   await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
   await page.getByRole("button", { name: "Execution executio" }).click();
   await expect(page.getByRole("button", { name: "Clear execution filter" })).toBeVisible();

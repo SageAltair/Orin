@@ -48,6 +48,8 @@ The PostgreSQL path creates native enum types (`focus_state`, task/daily/user en
 
 The follow-up `20261010_focus_timer_preference` revision adds the timer-number visibility setting with a `false` default. Roll it back before `20261010_focus_foundation` when downgrading across both revisions.
 
-## Focus surfaces preview (Phase 2)
+## Focus surfaces
 
-The existing Tasks workspace remains the default. To preview the new focus screens in a development build, set `VITE_FOCUS_SURFACES_ENABLED=true` when starting the web app and set `localStorage.setItem("orin.focus.preview.v1", "true")` in that browser, then reload. Turning off the environment flag hides the preview while preserving the existing Tasks screen. Capture always creates an inbox task through the API; when Today is empty, the preview also places that new task into today's anchor slot so it can be started immediately. Voice capture uses the browser Web Speech API where available and falls back to text. Reminder controls are preferences only; the UI states that no reminders are delivered.
+The existing authenticated workspace retains its Home, Tasks, Projects, Activity, Settings, and Ask Orin surfaces. Home, Tasks, Projects, and Activity are visible by default. The new focus experience replaces only the Tasks page and keeps the shared workspace navigation available. Capture creates an inbox task through the API; when Today is empty, the interface also places that new task into today's anchor slot so it can be started immediately. Voice capture uses the browser Web Speech API where available and falls back to text. Reminder controls are preferences only; the UI states that no reminders are delivered.
+
+`20261011_nav_defaults` makes Projects and Activity visible for existing granted users, matching new-account defaults. Its downgrade intentionally leaves these user navigation preferences in place so it cannot erase later user choices.

@@ -7,7 +7,7 @@ import sqlalchemy as sa
 
 
 revision = "20261010_task_batch_activity"
-down_revision = "20261009_unified_activity"
+down_revision = "20261009_activity"
 branch_labels = None
 depends_on = None
 
