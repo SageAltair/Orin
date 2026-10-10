@@ -3,6 +3,7 @@ import sqlite3
 import json
 from pathlib import Path
 from collections.abc import Generator
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -558,7 +559,18 @@ def test_command_pipeline_never_interprets_without_ai_configuration(client: Test
     assert command["status"] == "failed"
 
 
-def test_command_submission_has_a_shared_per_user_rate_limit(client: TestClient) -> None:
+def test_command_submission_has_a_shared_per_user_rate_limit(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep all requests in one fixed window; wall-clock boundary crossings make this
+    # integration test nondeterministic when the rest of the suite runs slowly.
+    import orin_api.rate_limit as rate_limit
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            instant = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(rate_limit, "datetime", FixedDateTime)
     app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="", ai_model="")
     for _ in range(20):
         assert client.post("/api/v1/commands", json={"text": "hello"}).status_code == 503
