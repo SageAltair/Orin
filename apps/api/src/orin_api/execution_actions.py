@@ -6,8 +6,9 @@ import re
 import json
 from enum import Enum
 from collections.abc import Mapping
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal, Protocol
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import HTTPException
 from pydantic import Field, model_validator
@@ -18,7 +19,7 @@ from orin_api.execution import (
     RiskLevel, StrictActionInput,
 )
 from orin_api.models import (
-    Activity, ActivityType, Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit,
+    Activity, ActivityType, Approval, ApprovalStatus, CalendarEvent, Command, CommandStatus, ExecutionAudit,
     DeviceStatus, EnvironmentPreference, FocusSession, Memory, Project, ProjectStatus, ProjectMember,
     ProjectRole, Task, TaskPriority, TaskStatus, User, UserCapability, WorkerDevice, Capability,
     EnergyLevel, FocusState,
@@ -41,6 +42,24 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
     return value
+
+
+def _raise_route_error(exc: HTTPException) -> None:
+    detail = exc.detail
+    if isinstance(detail, dict):
+        message = str(detail.get("message") or "The requested operation could not be completed.")
+        conflicts = detail.get("conflicts")
+        if isinstance(conflicts, list):
+            titles = [str(item.get("title")) for item in conflicts if isinstance(item, dict) and item.get("title")]
+            if titles:
+                message += " Conflicts: " + ", ".join(titles)
+    elif isinstance(detail, str):
+        message = detail
+    else:
+        message = "The requested operation could not be completed."
+    action_status = ActionStatus.DENIED if exc.status_code in {403, 404} else (
+        ActionStatus.INVALID if exc.status_code == 422 else ActionStatus.FAILED)
+    raise ActionExecutionError(message[:500], status=action_status) from exc
 
 
 class CreateTaskInput(StrictActionInput):
@@ -167,6 +186,119 @@ class ListTasksInput(StrictActionInput):
 
 class GetActivityInput(StrictActionInput):
     limit: int = Field(default=50, ge=1, le=100)
+
+
+class CalendarRangeInput(StrictActionInput):
+    start_date: date
+    end_date: date
+    timezone: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> CalendarRangeInput:
+        if self.end_date < self.start_date or (self.end_date - self.start_date).days > 30:
+            raise ValueError("Choose a calendar range of at most 31 days.")
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Timezone must be a valid IANA timezone.") from exc
+        return self
+
+
+class FindFreeTimeInput(CalendarRangeInput):
+    duration_minutes: int = Field(ge=5, le=480)
+
+
+class ScheduleTaskInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    start_at: str = Field(min_length=20, max_length=40)
+    end_at: str = Field(min_length=20, max_length=40)
+    estimated_minutes: int = Field(ge=1, le=1440)
+    timezone: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> ScheduleTaskInput:
+        if self.task_id is None and self.task_reference is None:
+            raise ValueError("A task identifier or reference is required")
+        try:
+            start = datetime.fromisoformat(self.start_at.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(self.end_at.replace("Z", "+00:00"))
+            ZoneInfo(self.timezone)
+        except (ValueError, ZoneInfoNotFoundError) as exc:
+            raise ValueError("Schedule times and timezone are invalid") from exc
+        if start.tzinfo is None or end.tzinfo is None or end <= start:
+            raise ValueError("Schedule times must be timezone-aware and in order")
+        if abs((end - start).total_seconds() / 60 - self.estimated_minutes) > 1:
+            raise ValueError("Duration must match estimated_minutes")
+        return self
+
+
+class UnscheduleTaskInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+
+    @model_validator(mode="after")
+    def require_task(self) -> UnscheduleTaskInput:
+        if self.task_id is None and self.task_reference is None:
+            raise ValueError("A task identifier or reference is required")
+        return self
+
+
+class CreateCalendarEventInput(StrictActionInput):
+    title: str = Field(min_length=1, max_length=240)
+    description: str | None = Field(default=None, max_length=10000)
+    project_id: uuid.UUID | None = None
+    project_reference: str | None = Field(default=None, max_length=160)
+    is_all_day: bool
+    start_at: str | None = None
+    end_at: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    timezone: str = Field(min_length=1, max_length=64)
+    reminder_minutes: Literal[5, 10, 15, 30, 60] | None = None
+
+    @model_validator(mode="after")
+    def validate_event(self) -> CreateCalendarEventInput:
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("Timezone must be a valid IANA timezone.") from exc
+        if self.is_all_day:
+            if self.start_date is None or self.end_date is None or self.end_date < self.start_date or self.start_at or self.end_at:
+                raise ValueError("All-day events require an ordered date range")
+        else:
+            try:
+                start = datetime.fromisoformat((self.start_at or "").replace("Z", "+00:00"))
+                end = datetime.fromisoformat((self.end_at or "").replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("Timed events require valid ISO timestamps") from exc
+            if start.tzinfo is None or end.tzinfo is None or end < start or self.start_date or self.end_date:
+                raise ValueError("Timed events require ordered timezone-aware timestamps")
+        return self
+
+
+class UpdateCalendarEventInput(StrictActionInput):
+    event_id: uuid.UUID | None = None
+    event_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    fields_to_update: dict[str, Any]
+
+    @model_validator(mode="after")
+    def validate_update(self) -> UpdateCalendarEventInput:
+        allowed = {"title", "description", "project_id", "project_reference", "is_all_day", "start_at", "end_at", "start_date", "end_date", "timezone", "reminder_minutes"}
+        if (self.event_id is None and self.event_reference is None) or not self.fields_to_update or set(self.fields_to_update) - allowed:
+            raise ValueError("An event reference and valid fields are required")
+        return self
+
+
+class DeleteCalendarEventInput(StrictActionInput):
+    event_id: uuid.UUID | None = None
+    event_reference: str | None = Field(default=None, min_length=1, max_length=240)
+
+    @model_validator(mode="after")
+    def require_event(self) -> DeleteCalendarEventInput:
+        if self.event_id is None and self.event_reference is None:
+            raise ValueError("An event identifier or reference is required")
+        return self
 
 
 class WorkerActionInput(StrictActionInput):
@@ -615,6 +747,165 @@ def _list_tasks(context: ActionContext, raw: ListTasksInput) -> list[dict[str, A
     return [{"id": str(row.id), "title": row.title, "status": row.status.value} for row in rows]
 
 
+def _calendar_user(context: ActionContext) -> User:
+    user = context.session.get(User, context.user_id)
+    if user is None:
+        raise ActionExecutionError("Calendar user context is unavailable.", status=ActionStatus.DENIED)
+    return user
+
+
+def _calendar_event_by_reference(context: ActionContext, event_id: uuid.UUID | None, reference: str | None) -> CalendarEvent:
+    if event_id is not None:
+        event = context.session.scalar(select(CalendarEvent).where(
+            CalendarEvent.id == event_id, CalendarEvent.user_id == context.user_id))
+    elif reference:
+        rows = context.session.scalars(select(CalendarEvent).where(
+            CalendarEvent.user_id == context.user_id)).all()
+        matches = [row for row in rows if row.title.casefold() == reference.strip().casefold()]
+        if len(matches) > 1:
+            raise ActionExecutionError("More than one event has that title. Please include its date or time.", status=ActionStatus.INVALID)
+        event = matches[0] if matches else None
+    else:
+        event = None
+    if event is None:
+        raise ActionExecutionError("Calendar event not found in your calendar.", status=ActionStatus.DENIED)
+    return event
+
+
+def _calendar_query(context: ActionContext, raw: CalendarRangeInput) -> tuple[list[Any], list[Any]]:
+    from orin_api import calendar_router
+    user = _calendar_user(context)
+    events = calendar_router.list_events(raw.start_date, raw.end_date, raw.timezone, user, context.session)
+    blocks = calendar_router.list_schedule(raw.start_date, raw.end_date, raw.timezone, user, context.session)
+    return events, blocks
+
+
+def _list_calendar(context: ActionContext, raw: CalendarRangeInput) -> list[dict[str, Any]]:
+    events, blocks = _calendar_query(context, raw)
+    result = [{"kind": "event", **item.model_dump(mode="json")} for item in events]
+    result.extend({"kind": "task", **item.model_dump(mode="json")} for item in blocks)
+    return result
+
+
+def _find_free_time(context: ActionContext, raw: FindFreeTimeInput) -> dict[str, Any]:
+    events, blocks = _calendar_query(context, raw)
+    zone = ZoneInfo(raw.timezone)
+    available: list[dict[str, str]] = []
+    for offset in range((raw.end_date - raw.start_date).days + 1):
+        day = raw.start_date + timedelta(days=offset)
+        day_start = datetime.combine(day, time(8), zone).astimezone(timezone.utc)
+        day_end = datetime.combine(day, time(18), zone).astimezone(timezone.utc)
+        busy: list[tuple[datetime, datetime]] = []
+        if any(item.is_all_day and item.start_date <= day <= item.end_date for item in events):
+            continue
+        for item in events:
+            if not item.is_all_day and item.start_at and item.end_at:
+                start = max(item.start_at.astimezone(timezone.utc), day_start)
+                end = min(item.end_at.astimezone(timezone.utc), day_end)
+                if end > start:
+                    busy.append((start, end))
+        for item in blocks:
+            start = max(item.start_at.astimezone(timezone.utc), day_start)
+            end = min(item.end_at.astimezone(timezone.utc), day_end)
+            if end > start:
+                busy.append((start, end))
+        busy.sort(key=lambda item: item[0])
+        cursor = day_start
+        for start, end in busy:
+            if start > cursor and (start - cursor).total_seconds() >= raw.duration_minutes * 60:
+                available.append({"start_at": cursor.isoformat(), "end_at": start.isoformat(),
+                    "local_start": cursor.astimezone(zone).isoformat(), "local_end": start.astimezone(zone).isoformat()})
+            cursor = max(cursor, end)
+        if day_end > cursor and (day_end - cursor).total_seconds() >= raw.duration_minutes * 60:
+            available.append({"start_at": cursor.isoformat(), "end_at": day_end.isoformat(),
+                "local_start": cursor.astimezone(zone).isoformat(), "local_end": day_end.astimezone(zone).isoformat()})
+        if len(available) >= 12:
+            break
+    return {"entity_type": "calendar_read", "timezone": raw.timezone,
+        "duration_minutes": raw.duration_minutes, "suggested_working_window": "08:00–18:00",
+        "slots": available[:12]}
+
+
+def _schedule_task(context: ActionContext, raw: ScheduleTaskInput) -> dict[str, Any]:
+    from orin_api import calendar_router
+    task = _resolve_task(context, raw.task_id, raw.task_reference)
+    try:
+        user = _calendar_user(context)
+        data = calendar_router.TaskBlockWrite(start_at=datetime.fromisoformat(raw.start_at.replace("Z", "+00:00")),
+            end_at=datetime.fromisoformat(raw.end_at.replace("Z", "+00:00")),
+            estimated_minutes=raw.estimated_minutes, timezone=raw.timezone)
+        result = calendar_router.schedule_task(task.id, data, user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return {**result.model_dump(mode="json"), "entity_type": "task_schedule"}
+
+
+def _unschedule_task(context: ActionContext, raw: UnscheduleTaskInput) -> dict[str, Any]:
+    from orin_api import calendar_router
+    task = _resolve_task(context, raw.task_id, raw.task_reference)
+    user = _calendar_user(context)
+    try:
+        calendar_router.unschedule_task(task.id, user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return {"task_id": str(task.id), "title": task.title, "entity_type": "task_schedule_removed"}
+
+
+def _create_calendar_event(context: ActionContext, raw: CreateCalendarEventInput) -> dict[str, Any]:
+    from orin_api import calendar_router
+    user = _calendar_user(context)
+    project_id = raw.project_id
+    if raw.project_reference:
+        project_id = _owned_project_by_name(context, raw.project_reference).id
+    try:
+        data = calendar_router.EventCreate(title=raw.title.strip(), description=raw.description,
+            project_id=project_id, is_all_day=raw.is_all_day,
+            start_at=datetime.fromisoformat(raw.start_at.replace("Z", "+00:00")) if raw.start_at else None,
+            end_at=datetime.fromisoformat(raw.end_at.replace("Z", "+00:00")) if raw.end_at else None,
+            start_date=raw.start_date, end_date=raw.end_date, timezone=raw.timezone,
+            reminder_minutes=raw.reminder_minutes)
+        event = calendar_router.create_event(data, user, context.session)
+    except (HTTPException, ValueError) as exc:
+        if isinstance(exc, HTTPException):
+            _raise_route_error(exc)
+        raise ActionExecutionError("Calendar event details are invalid.", status=ActionStatus.INVALID) from exc
+    return {**event.model_dump(mode="json"), "entity_type": "calendar_event"}
+
+
+def _update_calendar_event(context: ActionContext, raw: UpdateCalendarEventInput) -> dict[str, Any]:
+    from orin_api import calendar_router
+    user = _calendar_user(context)
+    event = _calendar_event_by_reference(context, raw.event_id, raw.event_reference)
+    changes: dict[str, Any] = dict(raw.fields_to_update)
+    for field in ("start_at", "end_at"):
+        if isinstance(changes.get(field), str):
+            changes[field] = datetime.fromisoformat(changes[field].replace("Z", "+00:00"))
+    for field in ("start_date", "end_date"):
+        if isinstance(changes.get(field), str):
+            changes[field] = date.fromisoformat(changes[field])
+    if "project_reference" in changes:
+        changes["project_id"] = _owned_project_by_name(context, str(changes.pop("project_reference"))).id
+    try:
+        updated = calendar_router.update_event(event.id, calendar_router.EventPatch.model_validate(changes), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    except ValueError as exc:
+        raise ActionExecutionError("Calendar event details are invalid.", status=ActionStatus.INVALID) from exc
+    return {**updated.model_dump(mode="json"), "entity_type": "calendar_event"}
+
+
+def _delete_calendar_event(context: ActionContext, raw: DeleteCalendarEventInput) -> dict[str, Any]:
+    from orin_api import calendar_router
+    user = _calendar_user(context)
+    event = _calendar_event_by_reference(context, raw.event_id, raw.event_reference)
+    event_id = str(event.id)
+    try:
+        calendar_router.delete_event(event.id, user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return {"id": event_id, "title": event.title, "entity_type": "calendar_event_deleted"}
+
+
 def _get_activity(context: ActionContext, raw: GetActivityInput) -> list[dict[str, Any]]:
     rows = context.session.scalars(select(Activity).where(Activity.user_id == context.user_id).order_by(Activity.created_at.desc()).limit(raw.limit)).all()
     return [{"id": str(row.id), "activity_type": row.activity_type.value, "summary": row.summary, "created_at": row.created_at.isoformat()} for row in rows]
@@ -700,6 +991,13 @@ def build_action_registry(
         ActionDefinition("create_project", CreateProjectInput, "project.create", RiskLevel.LOW, _create_project, Reversibility.REVERSIBLE),
         ActionDefinition("list_projects", ListProjectsInput, "project.read", RiskLevel.LOW, _list_projects, Reversibility.REVERSIBLE),
         ActionDefinition("list_tasks", ListTasksInput, "task.read", RiskLevel.LOW, _list_tasks, Reversibility.REVERSIBLE),
+        ActionDefinition("list_calendar", CalendarRangeInput, "calendar.read", RiskLevel.LOW, _list_calendar, Reversibility.REVERSIBLE),
+        ActionDefinition("find_free_time", FindFreeTimeInput, "calendar.read", RiskLevel.LOW, _find_free_time, Reversibility.REVERSIBLE),
+        ActionDefinition("schedule_task", ScheduleTaskInput, "calendar.write", RiskLevel.LOW, _schedule_task, Reversibility.REVERSIBLE),
+        ActionDefinition("unschedule_task", UnscheduleTaskInput, "calendar.write", RiskLevel.LOW, _unschedule_task, Reversibility.REVERSIBLE),
+        ActionDefinition("create_calendar_event", CreateCalendarEventInput, "calendar.write", RiskLevel.LOW, _create_calendar_event, Reversibility.REVERSIBLE),
+        ActionDefinition("update_calendar_event", UpdateCalendarEventInput, "calendar.write", RiskLevel.LOW, _update_calendar_event, Reversibility.REVERSIBLE),
+        ActionDefinition("delete_calendar_event", DeleteCalendarEventInput, "calendar.delete", RiskLevel.MEDIUM, _delete_calendar_event, Reversibility.IRREVERSIBLE, requires_approval=True),
         ActionDefinition("get_activity", GetActivityInput, "activity.read", RiskLevel.LOW, _get_activity, Reversibility.REVERSIBLE),
         ActionDefinition("request_worker_action", WorkerActionInput, "worker.execute", RiskLevel.LOW, _request_worker_action, Reversibility.PARTIAL),
         ActionDefinition("save_memory", SaveMemoryInput, "memory.write", RiskLevel.LOW, _save_memory, Reversibility.REVERSIBLE),

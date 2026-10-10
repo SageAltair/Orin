@@ -7,10 +7,10 @@ const energies: Array<{ value: Energy; label: string; note: string }> = [
   { value: "high", label: "High", note: "More room today" },
 ];
 
-export function TodaysThree({ plan, later, onEnergy, onReplace, onOpenLater, onSettings, onSkipEnergy }: {
+export function TodaysThree({ plan, later, onEnergy, onReplace, onOpenLater, onSettings, onSkipEnergy, onScheduleTask }: {
   plan: TodayPlan | null; later: FocusTask[]; onEnergy: (energy: Energy) => void;
   onReplace: (tasks: Array<{ task_id: string; is_anchor: boolean }>) => void;
-  onOpenLater: () => void; onSettings: () => void; onSkipEnergy: () => void;
+  onOpenLater: () => void; onSettings: () => void; onSkipEnergy: () => void; onScheduleTask?: (taskId: string) => void;
 }) {
   const tasks = plan?.tasks ?? [];
   const move = (index: number, delta: number) => {
@@ -31,7 +31,7 @@ export function TodaysThree({ plan, later, onEnergy, onReplace, onOpenLater, onS
     </div>
     <button className="focus-text-button" type="button" onClick={onSkipEnergy}>Skip for now</button>
     <h2>Today's three</h2>
-    {tasks.length ? <ol className="focus-plan-list">{tasks.map((task, index) => <li key={task.id} className="focus-plan-item"><div><strong>{task.title}</strong>{task.is_anchor && <span className="focus-anchor">Anchor</span>}<small>{task.first_step || "One small step"}</small></div><div className="focus-order-actions"><button type="button" aria-label={`Move ${task.title} up`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={17} /></button><button type="button" aria-label={`Move ${task.title} down`} disabled={index === tasks.length - 1} onClick={() => move(index, 1)}><ArrowDown size={17} /></button></div><label className="focus-replace"><span className="sr-only">Replace {task.title} from Later</span><select value="" aria-label={`Replace ${task.title} from Later`} onChange={event => { const picked = later.find(item => item.id === event.target.value); if (picked) replace(index, picked); }}><option value="">Replace</option>{later.map(item => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label></li>)}</ol> : <p className="focus-calm-empty">Nothing selected yet. You can leave this empty.</p>}
+    {tasks.length ? <ol className="focus-plan-list">{tasks.map((task, index) => <li key={task.id} className="focus-plan-item"><div><strong>{task.title}</strong>{task.is_anchor && <span className="focus-anchor">Anchor</span>}<small>{task.first_step || "One small step"}</small></div><div className="focus-order-actions"><button type="button" aria-label={`Move ${task.title} up`} disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp size={17} /></button><button type="button" aria-label={`Move ${task.title} down`} disabled={index === tasks.length - 1} onClick={() => move(index, 1)}><ArrowDown size={17} /></button></div><label className="focus-replace"><span className="sr-only">Replace {task.title} from Later</span><select value="" aria-label={`Replace ${task.title} from Later`} onChange={event => { const picked = later.find(item => item.id === event.target.value); if (picked) replace(index, picked); }}><option value="">Replace</option>{later.map(item => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>{onScheduleTask && <button type="button" className="focus-text-button" onClick={() => onScheduleTask(task.id)}>Schedule</button>}</li>)}</ol> : <p className="focus-calm-empty">Nothing selected yet. You can leave this empty.</p>}
     <button className="focus-later-toggle" type="button" onClick={onOpenLater}><ChevronDown size={18} /> Browse Later</button>
     <details className="focus-settings"><summary>Settings</summary><p>Reminders are not delivered yet. No reminders are being sent.</p><button type="button" className="focus-text-button" onClick={onSettings}>Appearance and focus options</button></details>
   </section>;

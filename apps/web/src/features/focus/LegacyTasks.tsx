@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Check } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
 
-export function LegacyTasks({ tasks, projects, onChange }: { tasks: Task[]; projects: Project[]; onChange: (tasks: Task[]) => void }) {
+export function LegacyTasks({ tasks, projects, onChange, onScheduleTask }: { tasks: Task[]; projects: Project[]; onChange: (tasks: Task[]) => void; onScheduleTask?: (taskId: string) => void }) {
   const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -30,6 +30,7 @@ export function LegacyTasks({ tasks, projects, onChange }: { tasks: Task[]; proj
     {tasks.length === 0 ? <div className="empty-state"><h3>No tasks yet</h3><p>Add one above when you are ready.</p></div> : <div className="data-list">{tasks.map(task => <article id={`task-${task.id}`} className="data-row" key={task.id}>
       <button type="button" className={`complete-button ${task.status === "done" ? "done" : ""}`} aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`} onClick={() => void update(task, { status: task.status === "done" ? "todo" : "done" })}>{task.status === "done" ? <Check size={15} /> : null}</button>
       <div className="data-main"><input className={`task-title ${task.status === "done" ? "task-done" : ""}`} aria-label={`Edit ${task.title}`} defaultValue={task.title} onBlur={event => { const value = event.currentTarget.value.trim(); if (value && value !== task.title) void update(task, { title: value }); }} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} /><small>{task.status.replace("_", " ")} · {task.priority}</small></div>
+      {onScheduleTask && !["done", "cancelled"].includes(task.status) && <button type="button" className="secondary-button" onClick={() => onScheduleTask(task.id)}>Schedule</button>}
       <select aria-label={`Priority for ${task.title}`} value={task.priority} onChange={event => void update(task, { priority: event.target.value as Task["priority"] })}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select>
       <input aria-label={`Due date for ${task.title}`} type="date" value={task.due_at?.slice(0, 10) ?? ""} onChange={event => void update(task, { due_at: event.target.value ? new Date(`${event.target.value}T00:00:00`).toISOString() : null })} />
       <select aria-label={`Project for ${task.title}`} value={task.project_id ?? ""} onChange={event => void update(task, { project_id: event.target.value || null })}><option value="">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select>

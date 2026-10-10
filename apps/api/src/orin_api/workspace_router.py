@@ -223,7 +223,7 @@ def reset_environment_preferences(user: User = Depends(get_current_user), sessio
     assignments = session.scalars(select(UserCapability).where(UserCapability.user_id == user.id)).all()
     for assignment in assignments:
         capability = session.get(Capability, assignment.capability_id)
-        assignment.visible = bool(assignment.granted and capability and capability.code in {"home", "tasks", "projects", "activity", "memories", "focus"})
+        assignment.visible = bool(assignment.granted and capability and capability.code in {"home", "calendar", "tasks", "projects", "activity", "memories", "focus"})
         assignment.pinned = bool(assignment.visible and capability and capability.code in {"home", "tasks"})
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

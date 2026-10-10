@@ -6,6 +6,7 @@ import json
 import base64
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, status
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from orin_api.database import get_session
 from orin_api.models import (
     Activity,
     ActivityType,
+    CalendarEvent,
     Capability,
     Command,
     Conversation,
@@ -39,6 +41,7 @@ from orin_api.models import (
     Project,
     ProjectStatus,
     Task,
+    TaskSchedule,
     TaskStatus,
     TaskPriority,
     User,
@@ -323,6 +326,8 @@ def submit_command(
             "conversation_history": [{"user": row.text, "assistant": row.response_message}
                                     for row in prior_commands],
         }
+        if _needs_calendar_context(data.text):
+            active_context["calendar"] = _calendar_context(session, user, datetime.now(timezone.utc))
         recent_user_messages = [row.text for row in prior_commands]
         if needs_product_context(data.text, recent_user_messages):
             active_context["current_application"] = product_context_for_prompt()
@@ -457,6 +462,53 @@ def submit_command(
         raise HTTPException(status_code=503, detail="Orin could not save this command. Please retry shortly.") from exc
 
 
+def _needs_calendar_context(text: str) -> bool:
+    normalized = text.casefold()
+    return any(term in normalized for term in (
+        "calendar", "schedule", "scheduled", "time block", "free time", "free hour",
+        "availability", "commitment", "event", "what's planned", "what is planned",
+        "week look", "conflict", "tomorrow morning", "tomorrow afternoon", "next week",
+        "morning", "afternoon", "tonight", "today", "tomorrow", "monday", "tuesday",
+        "wednesday", "thursday", "friday", "saturday", "sunday",
+    ))
+
+
+def _calendar_context(session: Session, user: User, now: datetime) -> dict[str, object]:
+    from orin_api import calendar_router
+    settings = session.get(UserSettings, user.id)
+    timezone_name = settings.timezone if settings else "UTC"
+    try:
+        zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        timezone_name = "UTC"
+        zone = ZoneInfo(timezone_name)
+    local_now = now.astimezone(zone)
+    start, end = local_now.date(), local_now.date() + timedelta(days=13)
+    events = calendar_router.list_events(start, end, timezone_name, user, session)
+    blocks = calendar_router.list_schedule(start, end, timezone_name, user, session)
+    tasks = session.scalars(select(Task).where(
+        Task.owner_id == user.id, Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED])
+    ).order_by(Task.priority.desc(), Task.due_at.asc().nulls_last()).limit(30)).all()
+    return {
+        "timezone": timezone_name,
+        "current_local_datetime": local_now.isoformat(),
+        "range_start": start.isoformat(),
+        "range_end": end.isoformat(),
+        "events": [event.model_dump(mode="json") for event in events],
+        "scheduled_tasks": [block.model_dump(mode="json") for block in blocks],
+        "open_tasks": [{"title": task.title, "status": task.status.value,
+            "estimated_minutes": task.estimated_minutes,
+            "energy_level": task.energy_level.value if task.energy_level else None,
+            "due_at": task.due_at.isoformat() if task.due_at else None,
+            "project_id": str(task.project_id) if task.project_id else None} for task in tasks],
+        "energy_today": settings.energy_today.value if settings and settings.energy_today else None,
+        "preferred_anchor_time": settings.preferred_anchor_time if settings else None,
+        "quiet_hours": settings.quiet_hours if settings else None,
+        "free_time_assumption": "Availability suggestions use 08:00–18:00 local time because no working-hours preference is configured.",
+        "reminder_delivery": "Calendar reminder offsets may be saved, but no notification delivery provider is configured.",
+    }
+
+
 def _user_action_permissions(session: Session, user_id: uuid.UUID) -> frozenset[str]:
     grants = {
         row.code for row in session.execute(
@@ -473,6 +525,8 @@ def _user_action_permissions(session: Session, user_id: uuid.UUID) -> frozenset[
         permissions.add("focus.start")
     if "activity" in grants:
         permissions.add("activity.read")
+    if "calendar" in grants:
+        permissions.update({"calendar.read", "calendar.write", "calendar.delete"})
     if "settings" in grants:
         permissions.update({"approval.request", "notification.send", "memory.write", "settings.personalize"})
     if "projects" in grants:
@@ -557,7 +611,8 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
     else:
         message = result.error or ("Approval is required." if result.approval_required else "The action was not executed.")
         if result.success and isinstance(result.result, list):
-            message = f"Retrieved {len(result.result)} matching records from your workspace."
+            message = (_calendar_list_message(result.result) if result.action == "list_calendar"
+                else f"Retrieved {len(result.result)} matching records from your workspace.")
         if result.success and isinstance(result.result, dict):
             record = result.result
             entity_type = record.get("entity_type")
@@ -590,6 +645,18 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
                     message = f"Ended and verified the focus session for **{record.get('objective', 'your task')}**."
                 else:
                     message = f"Started and verified focus session **{record.get('objective', 'focus session')}** (ID: `{record_id}`)."
+            elif entity_type == "task_schedule":
+                message = f"Scheduled **{record.get('title', 'task')}** for {record.get('start_at')} ({record.get('timezone')}); the task remains open."
+            elif entity_type == "calendar_event":
+                message = f"Saved calendar event **{record.get('title', 'event')}** and verified it in your calendar."
+                if record.get("reminder_minutes"):
+                    message += " Its reminder preference is saved, but no notification provider is configured to deliver it."
+            elif entity_type == "calendar_event_deleted":
+                message = f"Deleted calendar event **{record.get('title', 'event')}**."
+            elif entity_type == "task_schedule_removed":
+                message = f"Removed the time block for **{record.get('title', 'task')}**; the task remains in Tasks."
+            elif entity_type == "calendar_read":
+                message = _availability_message(record)
             elif intent == "SET_ENERGY_TODAY":
                 message = f"Set today's energy to {record.get('energy_level')}."
             elif intent == "PROPOSE_TODAYS_THREE":
@@ -626,19 +693,26 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
         record = result.result
         entity_id = record.get("id")
         entity_type = record.get("entity_type")
-        if entity_id and entity_type in {"task", "project", "memory", "focus_session", "drift_event", "daily_close"}:
+        if entity_id and entity_type in {"task", "project", "memory", "focus_session", "drift_event", "daily_close", "calendar_event", "task_schedule"}:
             try:
                 parsed_id = uuid.UUID(str(entity_id))
                 model = {"task": Task, "project": Project, "memory": Memory, "focus_session": FocusSession,
-                    "drift_event": DriftEvent, "daily_close": DailyClose}[str(entity_type)]
+                    "drift_event": DriftEvent, "daily_close": DailyClose, "calendar_event": CalendarEvent,
+                    "task_schedule": TaskSchedule}[str(entity_type)]
                 owner_column = (Task.owner_id if entity_type == "task" else Project.owner_id if entity_type == "project"
                     else Memory.user_id if entity_type == "memory" else FocusSession.user_id if entity_type == "focus_session"
-                    else DriftEvent.user_id if entity_type == "drift_event" else DailyClose.user_id)
+                    else DriftEvent.user_id if entity_type == "drift_event" else DailyClose.user_id
+                    if entity_type == "daily_close" else CalendarEvent.user_id if entity_type == "calendar_event"
+                    else TaskSchedule.user_id)
                 saved = session.scalar(select(model).where(model.id == parsed_id, owner_column == command.user_id))
             except ValueError:
                 saved = None
             expected_title = record.get("title") or record.get("name") or record.get("objective")
             actual_title = getattr(saved, "title", getattr(saved, "name", getattr(saved, "objective", None))) if saved is not None else None
+            if saved is not None and entity_type == "task_schedule":
+                scheduled_task = session.scalar(select(Task).where(
+                    Task.id == saved.task_id, Task.owner_id == command.user_id))
+                actual_title = scheduled_task.title if scheduled_task else None
             valid = saved is not None and (not expected_title or actual_title == expected_title)
             if valid and entity_type in {"task", "focus_session"} and record.get("status"):
                 actual_status = saved.status.value if hasattr(saved.status, "value") else saved.status
@@ -646,7 +720,31 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
             if valid and entity_type == "memory":
                 valid = (saved.content == record.get("content") and saved.metadata_json == record.get("metadata")
                     and saved.memory_type == record.get("type"))
+            if valid and entity_type == "calendar_event":
+                valid = (saved.is_all_day == record.get("is_all_day")
+                    and saved.reminder_minutes == record.get("reminder_minutes"))
+            if valid and entity_type == "task_schedule":
+                valid = (str(saved.task_id) == record.get("task_id")
+                    and abs((saved.start_at.replace(tzinfo=timezone.utc) if saved.start_at.tzinfo is None else saved.start_at).timestamp()
+                        - datetime.fromisoformat(str(record.get("start_at")).replace("Z", "+00:00")).timestamp()) < 1)
             verification_succeeded = valid
+        elif entity_type == "calendar_event_deleted":
+            try:
+                verification_succeeded = session.scalar(select(CalendarEvent.id).where(
+                    CalendarEvent.id == uuid.UUID(str(entity_id)), CalendarEvent.user_id == command.user_id)) is None
+            except ValueError:
+                verification_succeeded = False
+        elif entity_type == "task_schedule_removed":
+            try:
+                task_id = uuid.UUID(str(record.get("task_id")))
+                task_exists = session.scalar(select(Task.id).where(Task.id == task_id, Task.owner_id == command.user_id)) is not None
+                schedule_exists = session.scalar(select(TaskSchedule.id).where(
+                    TaskSchedule.task_id == task_id, TaskSchedule.user_id == command.user_id)) is not None
+                verification_succeeded = task_exists and not schedule_exists
+            except ValueError:
+                verification_succeeded = False
+        elif entity_type == "calendar_read":
+            verification_succeeded = True
         elif entity_type == "focus_settings":
             saved = session.get(UserSettings, command.user_id)
             verification_succeeded = saved is not None and saved.day_key == record.get("day_key") and saved.energy_today is not None and saved.energy_today.value == record.get("energy_level")
@@ -878,6 +976,7 @@ def list_capabilities(
         row.capability_id: row
         for row in session.scalars(select(UserCapability).where(UserCapability.user_id == user.id)).all()
     }
+
     session.commit()
     return [
         {
@@ -890,6 +989,55 @@ def list_capabilities(
         }
         for item in capabilities
     ]
+
+
+def _calendar_list_message(rows: list[dict[str, object]]) -> str:
+    if not rows:
+        return "There are no calendar events or scheduled tasks in that date range."
+    def sort_key(item: dict[str, object]) -> str:
+        return str(item.get("start_at") or item.get("start_date") or "")
+    details: list[str] = []
+    for item in sorted(rows, key=sort_key)[:12]:
+        title = str(item.get("title") or "Calendar item")
+        project = f" ({item['project_name']})" if item.get("project_name") else ""
+        if item.get("is_all_day"):
+            when = "All day " + str(item.get("start_date"))
+            if item.get("end_date") != item.get("start_date"):
+                when += f" through {item.get('end_date')}"
+        else:
+            start = item.get("start_at")
+            end = item.get("end_at")
+            zone_name = str(item.get("timezone") or "UTC")
+            try:
+                zone = ZoneInfo(zone_name)
+                start_at = datetime.fromisoformat(str(start).replace("Z", "+00:00")).astimezone(zone)
+                end_at = datetime.fromisoformat(str(end).replace("Z", "+00:00")).astimezone(zone) if end else None
+                when = start_at.strftime("%a %b %d, %H:%M")
+                if end_at:
+                    when += f"–{end_at.strftime('%H:%M')}"
+            except (ValueError, ZoneInfoNotFoundError):
+                when = str(start or "Scheduled")
+        details.append(f"{when}: {title}{project}")
+    message = "Your calendar includes:\n" + "\n".join(f"• {item}" for item in details)
+    if len(rows) > len(details):
+        message += f"\nAnd {len(rows) - len(details)} more items."
+    return message
+
+
+def _availability_message(record: dict[str, object]) -> str:
+    slots = record.get("slots")
+    if not isinstance(slots, list) or not slots:
+        return (f"I found no open {record.get('duration_minutes')}-minute windows during the "
+            f"{record.get('suggested_working_window')} local-time search window.")
+    lines = []
+    for slot in slots[:8]:
+        if not isinstance(slot, dict):
+            continue
+        start = str(slot.get("local_start") or "")
+        end = str(slot.get("local_end") or "")
+        lines.append(f"{start[:10]} {start[11:16]}–{end[11:16]}")
+    return (f"Open windows for at least {record.get('duration_minutes')} minutes "
+        f"({record.get('suggested_working_window')} local time): " + "; ".join(lines))
 
 
 @router.get("/projects", response_model=list[ProjectRead])
@@ -1019,6 +1167,10 @@ def update_task(
             transition_task_status(task, requested_status)
     else:
         touch_task(task)
+    if task.status in {TaskStatus.DONE, TaskStatus.CANCELLED}:
+        scheduled = session.scalar(select(TaskSchedule).where(TaskSchedule.task_id == task.id))
+        if scheduled is not None:
+            session.delete(scheduled)
     summary = f"Completed task: {task.title}" if task.status == TaskStatus.DONE else f"Updated task: {task.title}"
     add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id,
         activity_type=ActivityType.TASK_UPDATED, summary=summary, command_id=command_id, intent=intent,

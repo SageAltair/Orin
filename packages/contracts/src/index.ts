@@ -27,6 +27,23 @@ export interface ProjectSummary {
   updated_at: string;
 }
 
+/** A user-owned calendar event; all-day events use local dates rather than UTC instants. */
+export interface CalendarEvent {
+  id: string;
+  user_id: string;
+  project_id: string | null;
+  title: string;
+  description: string | null;
+  is_all_day: boolean;
+  start_at: string | null;
+  end_at: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export type FocusState = "inbox" | "later" | "today" | "active" | "released";
 export type EnergyLevel = "low" | "medium" | "high";
 export type DriftTrigger = "app" | "thought" | "emotion" | "person" | "tired" | "other";

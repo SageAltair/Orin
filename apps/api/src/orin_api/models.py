@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import enum
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -320,6 +321,56 @@ class Task(TimestampMixin, Base):
     owner: Mapped[User] = relationship(back_populates="tasks", foreign_keys=[owner_id])
     project: Mapped[Project | None] = relationship(back_populates="tasks")
     dependencies: Mapped[list[TaskDependency]] = relationship(foreign_keys="TaskDependency.task_id", back_populates="task", cascade="all, delete-orphan")
+
+
+class CalendarEvent(TimestampMixin, Base):
+    """User-owned calendar commitment. All-day values are local dates, not instants."""
+    __tablename__ = "calendar_events"
+    __table_args__ = (
+        CheckConstraint("length(trim(title)) > 0", name="ck_calendar_events_title_nonempty"),
+        CheckConstraint(
+            "(is_all_day = true AND start_date IS NOT NULL AND end_date IS NOT NULL AND start_at IS NULL AND end_at IS NULL) OR "
+            "(is_all_day = false AND start_at IS NOT NULL AND end_at IS NOT NULL AND start_date IS NULL AND end_date IS NULL)",
+            name="ck_calendar_events_date_shape",
+        ),
+        CheckConstraint("end_date IS NULL OR end_date >= start_date", name="ck_calendar_events_date_order"),
+        CheckConstraint("end_at IS NULL OR end_at >= start_at", name="ck_calendar_events_time_order"),
+        CheckConstraint("reminder_minutes IS NULL OR reminder_minutes IN (5, 10, 15, 30, 60)", name="ck_calendar_events_reminder_minutes"),
+        Index("ix_calendar_events_user_start", "user_id", "start_at"),
+        Index("ix_calendar_events_user_date", "user_id", "start_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    is_all_day: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    start_date: Mapped[date | None] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
+    reminder_minutes: Mapped[int | None] = mapped_column(Integer)
+
+
+class TaskSchedule(TimestampMixin, Base):
+    """A single optional time block for an existing task."""
+    __tablename__ = "task_schedules"
+    __table_args__ = (
+        UniqueConstraint("task_id", name="uq_task_schedules_task"),
+        CheckConstraint("end_at > start_at", name="ck_task_schedules_time_order"),
+        CheckConstraint("estimated_minutes > 0", name="ck_task_schedules_estimated_positive"),
+        Index("ix_task_schedules_user_start", "user_id", "start_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    estimated_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC", server_default="UTC")
 
 
 class TaskDependency(CreatedAtMixin, Base):

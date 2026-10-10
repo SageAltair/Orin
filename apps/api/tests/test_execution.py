@@ -3,6 +3,7 @@ from dataclasses import FrozenInstanceError
 import uuid
 
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -297,3 +298,66 @@ def test_worker_intent_rejects_shell_injection_and_unknown_capability() -> None:
         AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_allowed_command","worker_parameters":{"command":"python_tests && whoami"}}}')
     with pytest.raises(Exception):
         AIIntent.model_validate_json('{"intent":"WORKER_ACTION","confidence":0.95,"parameters":{"worker_action":"run_shell","worker_parameters":{"command":"whoami"}}}')
+
+
+def test_calendar_actions_find_free_time_and_preserve_task_conflict_controls(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    task = client.post("/api/v1/tasks", json={"title": "Prepare roadmap", "estimated_minutes": 45}).json()
+    now = datetime.now(timezone.utc)
+    day = (now + timedelta(days=1)).date()
+    start = datetime.combine(day, datetime.min.time(), timezone.utc).replace(hour=10)
+    end = start + timedelta(minutes=45)
+    schedule = client.post("/api/v1/actions", json={
+        "action": "schedule_task", "inputs": {
+            "task_id": task["id"], "start_at": start.isoformat(), "end_at": end.isoformat(),
+            "estimated_minutes": 45, "timezone": "UTC",
+        },
+    })
+    assert schedule.status_code == 200 and schedule.json()["status"] == "completed", schedule.text
+    assert schedule.json()["result"]["task_id"] == task["id"]
+    second_task = client.post("/api/v1/tasks", json={"title": "Review dashboard", "estimated_minutes": 45}).json()
+    duplicate_slot = client.post("/api/v1/actions", json={
+        "action": "schedule_task", "inputs": {
+            "task_id": second_task["id"], "start_at": (start + timedelta(minutes=15)).isoformat(),
+            "end_at": (end + timedelta(minutes=15)).isoformat(), "estimated_minutes": 45, "timezone": "UTC",
+        },
+    })
+    assert duplicate_slot.json()["status"] == "failed"
+    assert "overlaps" in duplicate_slot.json()["execution"]["error"]
+    query = {"start_date": day.isoformat(), "end_date": day.isoformat(), "timezone": "UTC"}
+    listed = client.post("/api/v1/actions", json={"action": "list_calendar", "inputs": query})
+    assert listed.json()["status"] == "completed"
+    assert [item["title"] for item in listed.json()["result"]] == ["Prepare roadmap"]
+    free = client.post("/api/v1/actions", json={"action": "find_free_time", "inputs": {**query, "duration_minutes": 30}})
+    assert free.json()["status"] == "completed"
+    assert free.json()["result"]["slots"]
+    removed = client.post("/api/v1/actions", json={"action": "unschedule_task", "inputs": {"task_reference": "Prepare roadmap"}})
+    assert removed.json()["status"] == "completed"
+    assert client.get("/api/v1/calendar/schedule", params={"start": day, "end": day, "timezone": "UTC"}).json() == []
+
+
+def test_ai_calendar_event_lifecycle_requires_approval_for_delete(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    start = datetime.now(timezone.utc) + timedelta(days=1)
+    start = start.replace(hour=14, minute=0, second=0, microsecond=0)
+    end = start + timedelta(hours=1)
+    created = client.post("/api/v1/actions", json={"action": "create_calendar_event", "inputs": {
+        "title": "Review roadmap", "is_all_day": False, "start_at": start.isoformat(), "end_at": end.isoformat(),
+        "timezone": "UTC", "reminder_minutes": 15,
+    }})
+    assert created.json()["status"] == "completed", created.text
+    event_id = created.json()["result"]["id"]
+    updated = client.post("/api/v1/actions", json={"action": "update_calendar_event", "inputs": {
+        "event_reference": "Review roadmap", "fields_to_update": {"title": "Review roadmap with team"},
+    }})
+    assert updated.json()["status"] == "completed", updated.text
+    assert client.get("/api/v1/calendar/events", params={"start": start.date(), "end": start.date(), "timezone": "UTC"}).json()[0]["reminder_minutes"] == 15
+    deletion = client.post("/api/v1/actions", json={"action": "delete_calendar_event", "inputs": {
+        "event_reference": "Review roadmap with team",
+    }})
+    assert deletion.json()["status"] == "awaiting_approval"
+    approval_id = deletion.json()["execution"]["approval_id"]
+    decision = client.post(f"/api/v1/approvals/{approval_id}/decision", json={"approved": True})
+    assert decision.status_code == 200 and decision.json()["status"] == "completed"
+    remaining = client.get("/api/v1/calendar/events", params={"start": start.date(), "end": start.date(), "timezone": "UTC"})
+    assert remaining.status_code == 200 and all(item["id"] != event_id for item in remaining.json())

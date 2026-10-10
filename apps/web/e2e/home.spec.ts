@@ -1,16 +1,18 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function mockApi(page: Page) {
-  let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
-  const tasks: Record<string, unknown>[] = [];
-  const projects: Record<string, unknown>[] = [];
+async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject = false) {
+  let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "calendar", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
+  const tasks: Record<string, unknown>[] = seedCalendarTask ? [{ id: "calendar-task-1", owner_id: "user-1", project_id: seedCalendarProject ? "project-1" : null, assignee_id: null, title: "Write project brief", description: null, status: "todo", priority: "normal", due_at: null, estimated_minutes: 45, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }] : [];
+  const projects: Record<string, unknown>[] = seedCalendarProject ? [{ id: "project-1", name: "Orin planning", description: null, objective: null, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }] : [];
   const memories: Record<string, unknown>[] = [];
   const environment: Record<string, unknown>[] = [];
   const focusSessions: Record<string, unknown>[] = [];
   const devices: Record<string, unknown>[] = [];
   const workerJobs: Record<string, Record<string, unknown>[]> = {};
   const approvals: Record<string, unknown>[] = [];
-  const focusTasks: Record<string, unknown>[] = [];
+  const focusTasks: Record<string, unknown>[] = seedCalendarTask ? [{ id: "calendar-task-1", title: "Write project brief", status: "todo", focus_state: "today", first_step: null, why: null, energy_level: null, estimated_minutes: 45, project_id: null }] : [];
+  const calendarEvents: Record<string, unknown>[] = [];
+  const taskBlocks: Record<string, unknown>[] = [];
   const focusPlan = () => ({ day_key: "2026-10-10", energy_level: "medium", tasks: focusTasks.map((task, index) => ({ ...task, is_anchor: index === 0, today_position: index })) });
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
@@ -91,13 +93,145 @@ async function mockApi(page: Page) {
       tasks.push(task);
       return route.fulfill({ status: 201, json: task });
     }
+    if (/\/api\/v1\/tasks\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const task = tasks.find(item => item.id === pathname.split("/").at(-1)); if (!task) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); Object.assign(task, await route.request().postDataJSON()); if (["done", "cancelled"].includes(String(task.status))) { const index = taskBlocks.findIndex(block => block.task_id === task.id); if (index >= 0) taskBlocks.splice(index, 1); } return route.fulfill({ json: task }); }
     if (pathname === "/api/v1/projects" && route.request().method() === "GET") return route.fulfill({ json: projects });
     if (pathname === "/api/v1/projects" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const project = { ...item, id: `project-${projects.length + 1}`, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }; projects.push(project); return route.fulfill({ status: 201, json: project }); }
     if (/\/api\/v1\/projects\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const project = projects.find(item => item.id === pathname.split("/").at(-1)); if (project) Object.assign(project, await route.request().postDataJSON()); return route.fulfill({ json: project }); }
+    if (pathname === "/api/v1/calendar/events" && route.request().method() === "GET") return route.fulfill({ json: calendarEvents });
+    if (pathname === "/api/v1/calendar/events" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const saved = { ...item, id: `event-${calendarEvents.length + 1}`, user_id: "user-1", created_at: "2026-10-10T00:00:00Z", updated_at: "2026-10-10T00:00:00Z" }; calendarEvents.push(saved); return route.fulfill({ status: 201, json: saved }); }
+    if (/\/api\/v1\/calendar\/events\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const item = calendarEvents.find(event => event.id === pathname.split("/").at(-1)); if (item) Object.assign(item, await route.request().postDataJSON()); return route.fulfill({ json: item }); }
+    if (/\/api\/v1\/calendar\/events\/[^/]+$/.test(pathname) && route.request().method() === "DELETE") { const index = calendarEvents.findIndex(event => event.id === pathname.split("/").at(-1)); if (index >= 0) calendarEvents.splice(index, 1); return route.fulfill({ status: 204 }); }
+    if (pathname === "/api/v1/calendar/schedule" && route.request().method() === "GET") return route.fulfill({ json: taskBlocks });
+    if (/\/api\/v1\/calendar\/tasks\/[^/]+\/schedule$/.test(pathname) && route.request().method() === "PUT") { const taskId = pathname.split("/").at(-2); const task = tasks.find(item => item.id === taskId); if (!task) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); const body = await route.request().postDataJSON() as Record<string, unknown>; let block = taskBlocks.find(item => item.task_id === taskId); if (!block) { block = { id: `block-${taskBlocks.length + 1}`, task_id: taskId, title: task.title, description: task.description, status: task.status, project_id: task.project_id, project_name: null }; taskBlocks.push(block); } Object.assign(block, body, { start_at: body.start_at, end_at: body.end_at, estimated_minutes: body.estimated_minutes, timezone: body.timezone }); return route.fulfill({ json: block }); }
+    if (/\/api\/v1\/calendar\/tasks\/[^/]+\/schedule$/.test(pathname) && route.request().method() === "DELETE") { const taskId = pathname.split("/").at(-2); const index = taskBlocks.findIndex(item => item.task_id === taskId); if (index >= 0) taskBlocks.splice(index, 1); return route.fulfill({ status: 204 }); }
     if (pathname.endsWith("/activity")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 }
+
+test("Calendar supports Month and Agenda plus event create, edit, and delete on mobile", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+  await page.getByRole("button", { name: "Agenda", exact: true }).click();
+  await expect(page.getByText("No events").first()).toBeVisible();
+  await page.getByRole("button", { name: "New event" }).click();
+  await page.getByLabel("Title").fill("Planning workshop");
+  await page.getByLabel("All-day").check();
+  await page.getByRole("button", { name: "Save event" }).click();
+  const eventRow = page.getByRole("button", { name: /Planning workshop/ }).first();
+  await expect(eventRow).toBeVisible();
+  await eventRow.click();
+  await page.getByLabel("Title").fill("Planning workshop updated");
+  await page.getByRole("button", { name: "Save event" }).click();
+  await expect(page.getByRole("button", { name: /Planning workshop updated/ }).first()).toBeVisible();
+  page.on("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: /Planning workshop updated/ }).first().click();
+  await page.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByText("Event deleted.")).toBeVisible();
+});
+
+test("Week and Day schedule a task, start focus, and keep task completion separate", async ({ page }) => {
+  await mockApi(page, true);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Week time schedule" })).toBeVisible();
+  await page.getByRole("button", { name: "Schedule task" }).first().click();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("calendar-task-1");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  const scheduledTask = page.locator(".calendar-time-item-main").filter({ hasText: "Write project brief" }).first();
+  await scheduledTask.scrollIntoViewIfNeeded();
+  await expect(scheduledTask).toBeVisible();
+  await page.getByRole("button", { name: "Focus on Write project brief" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Focus session started" })).toBeVisible();
+  await page.getByRole("button", { name: "Day", exact: true }).click();
+  await page.getByLabel("More actions for Write project brief").scrollIntoViewIfNeeded();
+  await page.getByLabel("More actions for Write project brief").click();
+  await page.getByRole("button", { name: "Complete", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Task completed" })).toBeVisible();
+});
+
+test("day and week time slices place items in clock time and create from a selected slot", async ({ page }) => {
+  await mockApi(page, true);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Week time schedule" })).toBeVisible();
+  await expect(page.locator(".calendar-time-heading > button:first-child")).toHaveCount(7);
+  await page.getByRole("button", { name: "Day", exact: true }).click();
+  await expect(page.getByRole("region", { name: /Time schedule for/ })).toBeVisible();
+  await page.getByRole("button", { name: /Create event on .* at 14:00/ }).click({ position: { x: 4, y: 4 } });
+  await expect(page.getByLabel("Starts")).toHaveValue(/T14:00$/);
+  await page.keyboard.press("Escape");
+});
+
+test("an existing task can be scheduled directly from the Today task interface", async ({ page }) => {
+  await mockApi(page, true);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Today" }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Schedule a task" })).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("combobox")).toHaveValue("calendar-task-1");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Task scheduled." })).toBeVisible();
+});
+
+test("calendar search and filters find project tasks and open the original task", async ({ page }) => {
+  await mockApi(page, true, true);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule task" }).first().click();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("calendar-task-1");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  await page.getByText("Search and filters").click();
+  await page.getByRole("searchbox", { name: "Search calendar" }).fill("project brief");
+  await page.getByLabel("Filter calendar items").selectOption("tasks");
+  await page.getByLabel("Filter by project").selectOption("project-1");
+  const task = page.getByRole("button", { name: "Write project brief" }).first();
+  await task.scrollIntoViewIfNeeded();
+  await expect(task).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  const taskAfterClear = page.getByRole("button", { name: "Write project brief" }).first();
+  await taskAfterClear.scrollIntoViewIfNeeded();
+  await expect(taskAfterClear).toBeVisible();
+  await taskAfterClear.click({ position: { x: 4, y: 35 } });
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("Write project brief").first()).toBeVisible();
+});
+
+test("calendar dialogs support Escape and focus return at narrow width with dark and reduced-motion settings", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  const preferencesLoaded = page.waitForResponse(response => response.url().includes("/users/me/preferences") && response.request().method() === "GET");
+  await signIn(page);
+  await preferencesLoaded;
+  await page.getByRole("button", { name: "Toggle light or dark theme" }).click();
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  const workspace = page.locator(".calendar-workspace");
+  expect(await workspace.evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(await workspace.evaluate(element => element.clientWidth));
+  const newEvent = page.getByRole("button", { name: "New event" });
+  await newEvent.click();
+  await expect(page.getByRole("dialog", { name: "New event" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(newEvent).toBeFocused();
+  expect(await workspace.evaluate(element => Number.parseFloat(getComputedStyle(element.querySelector("button")!).transitionDuration))).toBeLessThanOrEqual(0.00001);
+});
 
 async function signIn(page: Page) {
   await page.getByLabel("Email").fill("morgan@example.com");

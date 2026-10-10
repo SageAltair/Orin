@@ -57,3 +57,7 @@ The existing authenticated workspace retains its Home, Tasks, Projects, Activity
 ## Focus rollout and user help
 
 Set `VITE_FOCUS_ENABLED=false` at web build time to restore the legacy Tasks page; rebuild/redeploy the web client to apply the change. The Tasks page can be restored without a database downgrade. If a database rollback is needed, stop writers, export focus-only data that must be retained, resolve focus sessions lacking a project as described above, then follow the Alembic downgrade sequence. The local Compose configuration currently enables Focus by default so it is visible on the development website. The short user guide is served at `/focus-help.html`. Repeatable local PostgreSQL route and query-plan measurements run with `scripts/benchmark-focus-postgres.ps1`; the harness uses temporary storage and synthetic records, and its latency results are a development baseline rather than a production service-level objective.
+
+## Calendar foundation
+
+The Calendar foundation adds user-owned events through `/api/v1/calendar/events`. Timed events are stored as timezone-aware UTC instants and all-day events use local `DATE` values, so timezone conversion cannot move an all-day event. Date-range reads require an IANA timezone and include overlapping timed and all-day events. The Calendar capability is enabled for existing users by an additive migration. Month and Agenda views are available in the workspace. Task deadlines remain separate from events; task scheduling, time blocks, reminder delivery, and AI scheduling are later work.

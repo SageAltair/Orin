@@ -5,7 +5,7 @@ import { defaultPreferences, type UserPreferences } from "./capabilities";
 const explain = (error: unknown) => error instanceof ApiError ? error.message : "Could not load workspace settings.";
 type Memory = { id: string; project_id: string | null; type: string; title: string; content: string; source: string; archived: boolean; updated_at: string };
 type EnvironmentRule = { surface: string; item: string; visibility: string; priority: number; source: string };
-const tools = ["home", "projects", "tasks", "activity", "memories", "focus"];
+const tools = ["home", "calendar", "projects", "tasks", "activity", "memories", "focus"];
 
 export function WorkspaceSettings({ projects, preferences, onPreferencesChange }: { projects: Project[]; preferences: UserPreferences; onPreferencesChange: (next: UserPreferences) => void }) {
   const [rules, setRules] = useState<EnvironmentRule[]>([]); const [memories, setMemories] = useState<Memory[]>([]); const [search, setSearch] = useState(""); const [includeArchived, setIncludeArchived] = useState(false);

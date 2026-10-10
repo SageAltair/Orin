@@ -16,6 +16,7 @@ from orin_api.workspace_router import router as workspace_router
 from orin_api.integration_router import router as integration_router
 from orin_api.attachment_router import router as attachment_router
 from orin_api.focus_router import router as focus_router
+from orin_api.calendar_router import router as calendar_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
@@ -35,6 +36,7 @@ app.include_router(workspace_router)
 app.include_router(integration_router)
 app.include_router(attachment_router)
 app.include_router(focus_router)
+app.include_router(calendar_router)
 
 
 @app.middleware("http")

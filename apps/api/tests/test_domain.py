@@ -3,7 +3,7 @@ import sqlite3
 import json
 from pathlib import Path
 from collections.abc import Generator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -59,7 +59,7 @@ def test_preferences_and_capabilities_use_relational_assignments(client: TestCli
     assert all(item["granted"] for item in test_client.get("/api/v1/capabilities").json())
     response = test_client.get("/api/v1/users/me/preferences")
     assert response.status_code == 200
-    assert response.json()["visible_capabilities"] == ["activity", "focus", "home", "memories", "projects", "tasks"]
+    assert response.json()["visible_capabilities"] == ["activity", "calendar", "focus", "home", "memories", "projects", "tasks"]
     assert response.json()["hidden_capabilities"] == ["settings"]
 
 
@@ -181,6 +181,45 @@ def test_command_pipeline_uses_validated_proposal_and_records_activity(client: T
     timeline = client.get("/api/v1/activity", params={"command_id": response.json()["command_id"]}).json()
     assert {item["activity_type"] for item in timeline} >= {
         "command_received", "intent_interpreted", "plan_created", "policy_decision", "command_completed"}
+
+
+def test_ask_orin_uses_timezone_calendar_context_and_shared_task_scheduler(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    due = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    task = client.post("/api/v1/tasks", json={
+        "title": "Prepare weekly report", "estimated_minutes": 45, "due_at": due,
+    }).json()
+    task_day = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    start = datetime.combine(task_day, datetime.min.time(), timezone.utc).replace(hour=10, minute=0)
+    captured: list[dict[str, object]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured.append(json.loads(context or "{}"))
+            proposal = {"intent": "SCHEDULE_TASK", "confidence": 0.95, "parameters": {
+                "task_reference": "Prepare weekly report", "start_at": start.isoformat(),
+                "end_at": (start + timedelta(minutes=45)).isoformat(),
+                "estimated_minutes": 45, "timezone": "UTC",
+            }}
+            return AIIntent.model_validate_json(json.dumps(proposal))
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Schedule Prepare weekly report tomorrow morning"})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    assert captured[0]["calendar"]["timezone"] == "UTC"
+    assert any(item["title"] == task["title"] for item in captured[0]["calendar"]["open_tasks"])
+    listed = client.get("/api/v1/calendar/schedule", params={
+        "start": task_day.isoformat(), "end": task_day.isoformat(), "timezone": "UTC",
+    }).json()
+    assert len(listed) == 1 and listed[0]["task_id"] == task["id"]
+    unchanged = client.get("/api/v1/tasks").json()[0]
+    assert unchanged["status"] == "todo" and unchanged["due_at"] == task["due_at"]
 
 
 def test_follow_up_clarifying_that_user_means_orin_receives_product_context(

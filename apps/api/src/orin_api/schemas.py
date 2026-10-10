@@ -24,7 +24,7 @@ class PreferencesUpdate(BaseModel):
     density: Density = Density.COMFORTABLE
     theme: Theme = Theme.LIGHT
     locale: str = Field(default="en", min_length=2, max_length=20)
-    visible_capabilities: list[str] = Field(default_factory=lambda: ["home", "tasks", "projects", "activity", "memories", "focus"])
+    visible_capabilities: list[str] = Field(default_factory=lambda: ["home", "calendar", "tasks", "projects", "activity", "memories", "focus"])
     pinned_capabilities: list[str] = Field(default_factory=lambda: ["home", "tasks"])
     autonomy_mode: str = Field(default="balanced", pattern="^(conservative|balanced|automatic|custom)$")
     custom_autonomy: dict[str, str] = Field(default_factory=dict)
