@@ -14,6 +14,14 @@ class ActionPlan:
 
 _INTENT_ACTIONS = {
     IntentName.CREATE_TASK: "create_task",
+    IntentName.BREAK_DOWN_TASK: "break_down_task",
+    IntentName.SET_ENERGY_TODAY: "set_energy_today",
+    IntentName.PROPOSE_TODAYS_THREE: "propose_todays_three",
+    IntentName.SWAP_TASK: "swap_task",
+    IntentName.LOG_DRIFT: "log_drift",
+    IntentName.RELEASE_TASK: "release_task",
+    IntentName.END_FOCUS_SESSION: "end_focus_session",
+    IntentName.RUN_DAILY_CLOSE: "run_daily_close",
     IntentName.UPDATE_TASK: "update_task",
     IntentName.COMPLETE_TASK: "complete_task",
     IntentName.CREATE_PROJECT: "create_project",

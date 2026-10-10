@@ -198,8 +198,23 @@ test("Ask Orin works alongside the focus task workspace and capture", async ({ p
   await expect(page.getByRole("button", { name: "Ask Orin" }).first()).toBeVisible();
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Capture" }).click();
   await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Manual task");
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page.getByRole("button", { name: "Save and continue" }).click();
   await expect(page.getByRole("heading", { name: "Manual task" })).toBeVisible();
+});
+
+test("Ask Orin guides first use with clickable action examples", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Ask Orin" }).first().click();
+  const input = page.getByRole("textbox", { name: "Ask Orin" });
+  await expect(page.getByRole("group", { name: "Try an Orin action" })).toBeVisible();
+  await page.getByRole("button", { name: "Set my energy" }).click();
+  await expect(input).toHaveValue("Set my energy to low");
+  await page.getByText("More things Orin can do").click();
+  await page.getByRole("button", { name: "Release a task" }).click();
+  await expect(input).toHaveValue("Release [task name]");
+  await expect(page.getByText("Releasing a task will ask you to approve the change.")).toBeVisible();
 });
 
 test("project intelligence stores knowledge and starts a persistent focus session", async ({ page }) => {

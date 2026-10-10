@@ -15,12 +15,21 @@ from orin_api.ai import AIProvider, AITaskType, AIProviderError, ModelSelector, 
 from orin_api.auth import get_current_user
 from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
-from orin_api.focus_domain import complete_task, keep_task_in_review, local_day_key, release_task, set_focus_state, shrink_task_step, touch_task
+from orin_api.focus_domain import complete_task, keep_task_in_review, local_day_key, release_task, reopen_task, set_focus_state, shrink_task_step, touch_task
 from orin_api.focus_behavior import is_quiet_time, missed_days_since, prompt_form, rolling_completed_days
 from orin_api.focus_planning import select_now_task, select_todays_three, task_rank
 from orin_api.models import DailyClose, DailyPlan, DailyPlanTask, DriftEvent, DriftTrigger, EnergyLevel, FocusSession, FocusState, Task, TaskStatus, User, UserSettings
 
 router = APIRouter(prefix="/api/v1/focus", tags=["focus"])
+
+
+def _enforce_focus_suggestion_limit(session: Session, user_id: uuid.UUID, route: str) -> None:
+    from orin_api.rate_limit import consume_user_window
+
+    limit = consume_user_window(session, user_id=user_id, route=f"focus.{route}", limit=10, window_seconds=60)
+    if not limit.allowed:
+        raise HTTPException(status_code=429, detail="Too many suggestions. Please wait a moment and try again.",
+                            headers={"Retry-After": str(limit.retry_after)})
 
 
 class RoutineInput(BaseModel):
@@ -238,6 +247,9 @@ def _replace_plan(session: Session, user: User, plan: DailyPlan, day_key: str,
         task.today_day_key, task.today_position, task.is_anchor = day_key, position, item.is_anchor
         session.add(DailyPlanTask(user_id=user.id, plan_id=plan.id, task_id=task.id,
                                   position=position, is_anchor=item.is_anchor))
+    # Callers build their response from a query immediately after replacement;
+    # the app session factory disables autoflush, so persist pending assignments first.
+    session.flush()
 
 
 def _current_now(session: Session, user: User) -> tuple[Task | None, FocusSession | None, str, EnergyLevel | None, DailyPlan | None]:
@@ -290,8 +302,9 @@ def _focus_ai_provider(settings: Settings) -> tuple[AIProvider, str]:
 
 @router.post("/capture/suggest")
 def suggest_capture_task(data: CaptureSuggestionInput, user: User = Depends(get_current_user),
-                        settings: Settings = Depends(get_settings)) -> dict[str, str]:
-    _ = user  # Authentication is required; suggestions are stateless and do not read workspace records.
+                        settings: Settings = Depends(get_settings),
+                        session: Session = Depends(get_session)) -> dict[str, str]:
+    _enforce_focus_suggestion_limit(session, user.id, "capture_suggest")
     try:
         provider, model = _focus_ai_provider(settings)
         result = suggest_capture(provider, model, data.title)
@@ -303,8 +316,9 @@ def suggest_capture_task(data: CaptureSuggestionInput, user: User = Depends(get_
 
 @router.post("/suggest-smaller")
 def suggest_smaller_task(data: SmallerStepInput, user: User = Depends(get_current_user),
-                         settings: Settings = Depends(get_settings)) -> dict[str, str]:
-    _ = user
+                         settings: Settings = Depends(get_settings),
+                         session: Session = Depends(get_session)) -> dict[str, str]:
+    _enforce_focus_suggestion_limit(session, user.id, "smaller_suggest")
     try:
         provider, model = _focus_ai_provider(settings)
         result = suggest_smaller_step(provider, model, title=data.title,
@@ -465,6 +479,18 @@ def review_task(task_id: uuid.UUID, data: ReviewInput, user: User = Depends(get_
     if data.outcome == "release":
         return {"task": _task_view(task), "released": True}
     return {"task": _task_view(task), "released": False}
+
+
+@router.post("/review/{task_id}/restore")
+def restore_released_task(task_id: uuid.UUID, user: User = Depends(get_current_user),
+                          session: Session = Depends(get_session)) -> dict[str, object]:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id,
+        Task.status == TaskStatus.CANCELLED, Task.focus_state == FocusState.RELEASED))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Released task not found")
+    reopen_task(task)
+    session.commit()
+    return {"task": _task_view(task), "restored": True}
 
 
 @router.post("/today/swap")
@@ -637,6 +663,8 @@ def dismiss_reentry(user: User = Depends(get_current_user), session: Session = D
 @router.get("/prompts")
 def get_routine_prompts(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
     settings_row, day_key, _ = _today_context(session, user)
+    settings_row = session.scalar(select(UserSettings).where(UserSettings.user_id == user.id)
+        .with_for_update().execution_options(populate_existing=True)) or settings_row
     zone = ZoneInfo(settings_row.timezone)
     local_now = datetime.now(timezone.utc).astimezone(zone)
     if is_quiet_time(local_now, settings_row.quiet_hours):
@@ -655,7 +683,7 @@ def get_routine_prompts(user: User = Depends(get_current_user), session: Session
         return {"items": [], "delivery": "in_app_only", "delivery_note": "Reminders appear only while Orin is open; no notifications are sent."}
     tasks = session.scalars(select(Task).where(Task.owner_id == user.id,
         Task.status.in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED]), Task.trigger.is_not(None))).all()
-    prompt_state = dict(settings_row.prompt_state)
+    prompt_state = {key: value for key, value in settings_row.prompt_state.items() if key.startswith(f"{day_key}:")}
     items = []
     for task in tasks:
         if not any(name in (task.trigger or "").casefold() for name in routine_matches):

@@ -62,6 +62,7 @@ services:
       dockerfile: infrastructure/docker/web.Dockerfile
     environment:
       VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8100}
+      VITE_FOCUS_ENABLED: ${VITE_FOCUS_ENABLED:-true}
       VITE_USE_POLLING: "true"
     depends_on:
       - api

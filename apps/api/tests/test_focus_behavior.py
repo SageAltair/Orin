@@ -26,8 +26,8 @@ def test_quiet_hours_cover_daytime_and_windows_crossing_midnight() -> None:
     assert not is_quiet_time(datetime(2026, 10, 10, 8, tzinfo=timezone.utc), overnight)
 
 
-def test_routine_prompt_escalation_stops_after_two_reminders_and_open_cue() -> None:
-    assert [prompt_form(count) for count in range(4)] == ["gentle", "softer", "visual_on_open", None]
+def test_routine_prompt_escalation_stops_after_two_reminders() -> None:
+    assert [prompt_form(count) for count in range(4)] == ["gentle", "softer", None, None]
 
 
 def test_decay_keep_shrink_and_release_use_consistent_task_transitions() -> None:

@@ -166,6 +166,17 @@ def test_focus_records_are_owner_scoped_and_privacy_delete_is_scoped(client: Tes
     assert client.get("/api/v1/focus/settings").json()["timezone"] == "Africa/Dar_es_Salaam"
 
 
+def test_sensitive_focus_notes_are_not_logged_or_echoed(client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
+    sentinel = "private-focus-log-sentinel-5a26e9"
+    caplog.set_level(logging.INFO, logger="orin_api.request")
+    created = client.post("/api/v1/focus/drift", json={"trigger_type": "thought", "note": sentinel})
+    assert created.status_code == 201
+    invalid = client.post("/api/v1/focus/drift", json={"trigger_type": "thought", "note": sentinel + "x" * 4000})
+    assert invalid.status_code == 422
+    assert sentinel not in invalid.text
+    assert sentinel not in caplog.text
+
+
 def test_focus_read_routes_and_plan_writes_are_scoped_to_active_user(client: TestClient) -> None:
     primary, second, other_task, active_user = app.state.focus_test_users
     primary_task = client.post("/api/v1/focus/capture", json={"title": "Primary plan task"}).json()
@@ -241,6 +252,32 @@ def test_drift_and_reflection_validation_never_echoes_sensitive_text(client: Tes
     assert sentinel not in close.text
 
 
+def test_ai_suggestion_routes_apply_separate_user_rate_limits(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    import orin_api.focus_router as focus_router
+    import orin_api.rate_limit as rate_limit
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            instant = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(rate_limit, "datetime", FixedDateTime)
+    monkeypatch.setattr(focus_router, "_focus_ai_provider", lambda _settings: (object(), "test"))
+    monkeypatch.setattr(focus_router, "suggest_capture", lambda *_args: SimpleNamespace(
+        title="Draft report", first_step="Open a document", energy_level="low"))
+    monkeypatch.setattr(focus_router, "suggest_smaller_step", lambda *_args, **_kwargs: SimpleNamespace(
+        first_step="Open the file"))
+
+    for path, payload in (("/api/v1/focus/capture/suggest", {"title": "Draft a report"}),
+                          ("/api/v1/focus/suggest-smaller", {"title": "Draft a report"})):
+        responses = [client.post(path, json=payload) for _ in range(11)]
+        assert [response.status_code for response in responses] == [200] * 10 + [429]
+        assert 1 <= int(responses[-1].headers["retry-after"]) <= 60
+        assert "Too many suggestions" in responses[-1].json()["detail"]
+
+
 def test_focus_write_routes_reject_invalid_and_unknown_inputs(client: TestClient) -> None:
     task = client.post("/api/v1/focus/capture", json={"title": "Validated task"}).json()
     assert client.post("/api/v1/focus/capture", json={"title": "x" * 241}).status_code == 422
@@ -298,6 +335,10 @@ def test_decay_review_lists_only_owned_tasks_and_applies_all_outcomes(client: Te
         assert result.status_code == 200
         if payload["outcome"] == "release":
             assert result.json()["task"]["status"] == "cancelled"
+            restored = client.post(f"/api/v1/focus/review/{by_title[title]}/restore")
+            assert restored.status_code == 200
+            assert restored.json()["task"]["status"] == "todo"
+            assert restored.json()["task"]["focus_state"] == "later"
         elif payload["outcome"] == "shrink":
             assert result.json()["task"]["first_step"] == "One small line"
         else:
@@ -340,8 +381,8 @@ def test_settings_routines_and_prompt_caps_are_validated_and_persisted(client: T
     task = Task(owner_id=app.state.focus_test_users[0].id, title="Routine task", focus_state="later", trigger="after coffee")
     with app.state.focus_test_session_factory.begin() as session:
         session.add(task)
-    forms = [client.get("/api/v1/focus/prompts").json()["items"][0]["form"] for _ in range(3)]
-    assert forms == ["gentle", "softer", "visual_on_open"]
+    forms = [client.get("/api/v1/focus/prompts").json()["items"][0]["form"] for _ in range(2)]
+    assert forms == ["gentle", "softer"]
     assert client.get("/api/v1/focus/prompts").json()["items"] == []
 
 

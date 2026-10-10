@@ -32,6 +32,10 @@ from orin_api.models import (
     EnvironmentPreference,
     ExecutionAudit,
     FocusSession,
+    DailyClose,
+    DailyPlan,
+    DailyPlanTask,
+    DriftEvent,
     Project,
     ProjectStatus,
     Task,
@@ -40,6 +44,7 @@ from orin_api.models import (
     User,
     UserCapability,
     UserPreferences,
+    UserSettings,
     DeviceStatus,
     WorkerJob,
     WorkerJobStatus,
@@ -462,8 +467,10 @@ def _user_action_permissions(session: Session, user_id: uuid.UUID) -> frozenset[
     permissions: set[str] = set()
     if "tasks" in grants:
         permissions.update({"task.create", "task.update", "task.complete", "task.read"})
+        permissions.add("focus.start")
     if "projects" in grants:
         permissions.update({"project.create", "project.read"})
+        permissions.add("focus.start")
     if "activity" in grants:
         permissions.add("activity.read")
     if "settings" in grants:
@@ -566,11 +573,31 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
                     f"or ask: ‘Show me my commitment about {record.get('title', 'this item')}, including its "
                     f"acceptance criteria and current status.’{details}")
             elif entity_type == "task":
-                message = f"Saved and verified task **{record.get('title', 'task')}** (ID: `{record_id}`) in Tasks."
+                if intent == "COMPLETE_TASK":
+                    message = f"Marked **{record.get('title', 'task')}** complete and verified it (ID: `{record_id}`)."
+                elif intent == "RELEASE_TASK":
+                    message = f"Released **{record.get('title', 'task')}** and verified it remains recoverable in Tasks (ID: `{record_id}`)."
+                elif intent == "BREAK_DOWN_TASK":
+                    message = f"Saved a smaller first step for **{record.get('title', 'task')}** (ID: `{record_id}`)."
+                elif intent == "SWAP_TASK":
+                    message = f"Switched Today to **{record.get('title', 'task')}** (ID: `{record_id}`)."
+                else:
+                    message = f"Saved and verified task **{record.get('title', 'task')}** (ID: `{record_id}`) in Tasks."
             elif entity_type == "project":
                 message = f"Created and verified project **{record.get('name', 'project')}** (ID: `{record_id}`)."
             elif entity_type == "focus_session":
-                message = f"Started and verified focus session **{record.get('objective', 'focus session')}** (ID: `{record_id}`)."
+                if intent == "END_FOCUS_SESSION":
+                    message = f"Ended and verified the focus session for **{record.get('objective', 'your task')}**."
+                else:
+                    message = f"Started and verified focus session **{record.get('objective', 'focus session')}** (ID: `{record_id}`)."
+            elif intent == "SET_ENERGY_TODAY":
+                message = f"Set today's energy to {record.get('energy_level')}."
+            elif intent == "PROPOSE_TODAYS_THREE":
+                message = "Proposed Today's Three using your current energy and plan."
+            elif intent == "LOG_DRIFT":
+                message = "Logged that focus drifted. You can return to your task when ready."
+            elif intent == "RUN_DAILY_CLOSE":
+                message = "Saved your daily close."
             elif intent == "SET_TOOL_VISIBILITY":
                 message = f"Updated and verified navigation visibility for **{record.get('tool')}** to {record.get('visibility')}."
             else:
@@ -599,22 +626,37 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
         record = result.result
         entity_id = record.get("id")
         entity_type = record.get("entity_type")
-        if entity_id and entity_type in {"task", "project", "memory", "focus_session"}:
+        if entity_id and entity_type in {"task", "project", "memory", "focus_session", "drift_event", "daily_close"}:
             try:
                 parsed_id = uuid.UUID(str(entity_id))
-                model = {"task": Task, "project": Project, "memory": Memory,
-                    "focus_session": FocusSession}[str(entity_type)]
+                model = {"task": Task, "project": Project, "memory": Memory, "focus_session": FocusSession,
+                    "drift_event": DriftEvent, "daily_close": DailyClose}[str(entity_type)]
                 owner_column = (Task.owner_id if entity_type == "task" else Project.owner_id if entity_type == "project"
-                    else Memory.user_id if entity_type == "memory" else FocusSession.user_id)
+                    else Memory.user_id if entity_type == "memory" else FocusSession.user_id if entity_type == "focus_session"
+                    else DriftEvent.user_id if entity_type == "drift_event" else DailyClose.user_id)
                 saved = session.scalar(select(model).where(model.id == parsed_id, owner_column == command.user_id))
             except ValueError:
                 saved = None
-            expected_title = record.get("title") or record.get("name")
-            valid = saved is not None and (not expected_title or getattr(saved, "title", getattr(saved, "name", None)) == expected_title)
+            expected_title = record.get("title") or record.get("name") or record.get("objective")
+            actual_title = getattr(saved, "title", getattr(saved, "name", getattr(saved, "objective", None))) if saved is not None else None
+            valid = saved is not None and (not expected_title or actual_title == expected_title)
+            if valid and entity_type in {"task", "focus_session"} and record.get("status"):
+                actual_status = saved.status.value if hasattr(saved.status, "value") else saved.status
+                valid = actual_status == record["status"]
             if valid and entity_type == "memory":
                 valid = (saved.content == record.get("content") and saved.metadata_json == record.get("metadata")
                     and saved.memory_type == record.get("type"))
             verification_succeeded = valid
+        elif entity_type == "focus_settings":
+            saved = session.get(UserSettings, command.user_id)
+            verification_succeeded = saved is not None and saved.day_key == record.get("day_key") and saved.energy_today is not None and saved.energy_today.value == record.get("energy_level")
+        elif entity_type == "daily_plan":
+            plan = session.scalar(select(DailyPlan).where(DailyPlan.user_id == command.user_id,
+                DailyPlan.day_key == record.get("day_key")))
+            expected_ids = {str(item.get("id")) for item in record.get("tasks", []) if isinstance(item, dict)}
+            saved_ids = set(session.scalars(select(DailyPlanTask.task_id).where(
+                DailyPlanTask.user_id == command.user_id, DailyPlanTask.plan_id == plan.id)).all()) if plan else set()
+            verification_succeeded = plan is not None and saved_ids == {uuid.UUID(item) for item in expected_ids}
         elif intent == "SET_TOOL_VISIBILITY":
             tool = record.get("tool")
             visibility = record.get("visibility")
@@ -956,6 +998,9 @@ def update_task(
     data: TaskUpdate,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
+    *,
+    command_id: uuid.UUID | None = None,
+    intent: str | None = None,
 ) -> Task:
     task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
     if task is None:
@@ -974,7 +1019,10 @@ def update_task(
             transition_task_status(task, requested_status)
     else:
         touch_task(task)
-    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Updated task: {task.title}")
+    summary = f"Completed task: {task.title}" if task.status == TaskStatus.DONE else f"Updated task: {task.title}"
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id,
+        activity_type=ActivityType.TASK_UPDATED, summary=summary, command_id=command_id, intent=intent,
+        source="ai" if command_id else "api")
     session.commit()
     session.refresh(task)
     return task

@@ -144,6 +144,22 @@ def test_manual_today_selection_is_not_replaced_by_later_recommendations(client:
     assert recommended["id"] not in {task["id"] for task in proposed.json()["tasks"]}
 
 
+def test_today_proposal_selects_up_to_three_energy_matched_open_tasks(client: TestClient) -> None:
+    created = [client.post("/api/v1/tasks", json={
+        "title": f"Proposal candidate {index}", "first_step": "Open the document",
+        "energy_level": "medium", "estimated_minutes": 10,
+    }).json() for index in range(5)]
+    assert client.put("/api/v1/focus/energy", json={"energy_level": "medium"}).status_code == 200
+
+    proposed = client.post("/api/v1/focus/today/propose")
+
+    assert proposed.status_code == 200
+    tasks = proposed.json()["tasks"]
+    assert len(tasks) == 3
+    assert {task["id"] for task in tasks}.issubset({task["id"] for task in created})
+    assert sum(task["is_anchor"] for task in tasks) == 1
+
+
 def test_capture_suggestions_are_optional_and_do_not_persist_tasks(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     class Provider:
         def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, object], images: list[dict[str, str]] | None = None) -> str:

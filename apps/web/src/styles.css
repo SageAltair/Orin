@@ -335,6 +335,12 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .chat-welcome { display: grid; justify-items: start; margin: 70px auto 0; max-width: 360px; }
 .chat-welcome h3 { margin: 18px 0 7px; font-size: 17px; font-weight: 550; }
 .chat-welcome p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.chat-starters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-top: 14px; }
+.chat-starters button { min-height: 44px; padding: 9px 11px; color: var(--text); text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.chat-starters button:hover { border-color: var(--accent); background: var(--hover); }
+.chat-starter-more { width: 100%; margin-top: 12px; color: var(--muted); font-size: 12px; }
+.chat-starter-more summary { min-height: 40px; display: flex; align-items: center; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.chat-starter-more > p { margin-top: 8px; }
 .chat-user-message { margin: 0 0 25px auto; max-width: 86%; padding: 12px 14px; background: var(--hover); border-radius: 9px; }
 .chat-user-message p { margin: 6px 0 0; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 .chat-answer { padding: 0 0 24px; }
@@ -473,13 +479,13 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .focus-card > p { max-width: 54ch; color: var(--focus-secondary); }
 .focus-eyebrow { color: var(--focus-secondary); font-size: .8rem; font-weight: 650; letter-spacing: .09em; }
 .focus-first-step { margin-top: 2rem; padding: 1rem 1.2rem; border-left: 4px solid var(--focus-accent); border-radius: .25rem .9rem .9rem .25rem; background: var(--focus-raised); }
-.focus-first-step span, .focus-plan-item small, .focus-later-list small { display: block; color: var(--focus-secondary); font-size: .95rem; }
+.focus-first-step span, .focus-plan-item small, .focus-later-list small { display: block; color: var(--focus-secondary); font-size: 1rem; }
 .focus-first-step p { margin: .35rem 0 0; font-size: 1.2rem; font-weight: 550; }
 .focus-why { margin: 1rem 0; color: var(--focus-secondary); }
 .focus-timer { margin: 2rem 0 1.4rem; }
 .focus-timer-track { height: 10px; overflow: hidden; border-radius: 99px; background: var(--focus-raised); }
 .focus-timer-track span { display: block; height: 100%; border-radius: inherit; background: var(--focus-accent); }
-.focus-timer-label { display: block; margin-top: .6rem; color: var(--focus-secondary); font-size: .95rem; }
+.focus-timer-label { display: block; margin-top: .6rem; color: var(--focus-secondary); font-size: 1rem; }
 .focus-action-row { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
 .focus-primary, .focus-secondary, .focus-energy, .focus-trigger-grid button, .focus-plan-item button, .focus-plan-item select, .focus-field-label + select, .focus-settings-page select { min-height: 48px; padding: .65rem 1.1rem; border: 1px solid var(--focus-line); border-radius: 999px; cursor: pointer; }
 .focus-primary { display: inline-flex; align-items: center; justify-content: center; gap: .55rem; color: #fff !important; background: #365d50; border-color: #365d50; font-weight: 650; }
@@ -492,6 +498,10 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .focus-smaller label { grid-column: 1 / -1; }
 .focus-smaller input, .focus-capture textarea, .focus-capture-details input, .focus-capture-details select, .focus-settings-page select, .focus-close select { min-height: 48px; width: 100%; padding: .7rem .85rem; color: var(--focus-text); border: 1px solid var(--focus-line); border-radius: .75rem; background: var(--focus-bg); }
 .focus-quiet-message, .focus-calm-empty { color: var(--focus-secondary); }
+.focus-guidance { margin: 1rem 0 0; color: var(--focus-secondary); line-height: 1.55; }
+.focus-text-link { display: inline-flex; min-height: 48px; align-items: center; padding: .5rem .7rem; color: var(--focus-accent); font-weight: 600; text-underline-offset: .18em; }
+.focus-capture-help { margin-top: 1rem; }
+.focus-now-empty > .focus-primary { min-height: 54px; margin-top: .5rem; padding-inline: 1.4rem; }
 .focus-inline, .focus-text-button { min-height: 48px; padding: .5rem .7rem; color: var(--focus-accent); background: transparent; border: 0; font-weight: 600; text-decoration: underline; text-underline-offset: .18em; cursor: pointer; }
 .focus-energy-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; margin: 1.35rem 0 .3rem; }
 .focus-energy { display: grid; align-content: center; justify-items: start; min-height: 76px; text-align: left; border-radius: 1rem !important; background: var(--focus-bg); }

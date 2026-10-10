@@ -36,11 +36,9 @@ def is_quiet_time(local_time: datetime, quiet_hours: dict[str, str] | None) -> b
 
 
 def prompt_form(count: int) -> str | None:
-    """Limit in-app prompts per task/day and use a softer second prompt."""
+    """Limit in-app reminders to two per task/day and soften the second."""
     if count <= 0:
         return "gentle"
     if count == 1:
         return "softer"
-    if count == 2:
-        return "visual_on_open"
     return None

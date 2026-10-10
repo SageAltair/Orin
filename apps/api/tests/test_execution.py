@@ -170,6 +170,30 @@ def test_routes_execute_registered_actions_and_approval_decisions(world: tuple[T
     assert malformed.json()["status"] == "failed"
 
 
+def test_ai_release_is_held_for_approval_and_changes_state_only_after_approval(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    task = client.post("/api/v1/tasks", json={"title": "Review old draft"}).json()
+    pending = client.post("/api/v1/actions", json={
+        "action": "release_task", "inputs": {"task_id": task["id"]},
+    })
+    assert pending.status_code == 200
+    assert pending.json()["status"] == "awaiting_approval"
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "todo"
+
+    approval_id = pending.json()["execution"]["approval_id"]
+    rejected = client.post(f"/api/v1/approvals/{approval_id}/decision", json={"approved": False})
+    assert rejected.status_code == 200
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "todo"
+
+    retry = client.post("/api/v1/actions", json={
+        "action": "release_task", "inputs": {"task_id": task["id"]},
+    }).json()
+    approval_id = retry["execution"]["approval_id"]
+    approved = client.post(f"/api/v1/approvals/{approval_id}/decision", json={"approved": True})
+    assert approved.status_code == 200
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "cancelled"
+
+
 def test_batch_action_reports_exact_partial_outcome(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
     client, _, _ = world
     response = client.post("/api/v1/actions", json={"action": "create_tasks_batch", "inputs": {"tasks": [

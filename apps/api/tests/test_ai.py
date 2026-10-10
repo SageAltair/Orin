@@ -1,9 +1,11 @@
 import pytest
+import json
 from pydantic import ValidationError
 from contextlib import contextmanager
 
 from orin_api.ai import AITaskType, AIIntent, AIInterpreter, AIProviderError, IntentName, IntentParameters, ModelSelector, OpenAIProvider, ProviderConfig, create_provider
 from orin_api.config import Settings
+from orin_api.planner import plan_intent
 
 
 class FakeProvider:
@@ -179,6 +181,52 @@ def test_intent_supports_name_reference_for_task_updates() -> None:
         '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'
     )
     assert proposal.parameters.task_reference == "Website"
+
+
+@pytest.mark.parametrize(("intent", "parameters"), [
+    ("BREAK_DOWN_TASK", {"task_reference": "Website", "first_step": "Open the project folder"}),
+    ("SET_ENERGY_TODAY", {"energy_level": "low"}),
+    ("PROPOSE_TODAYS_THREE", {}),
+    ("SWAP_TASK", {"task_id": "e0169673-0001-4b56-8000-000000000001"}),
+    ("LOG_DRIFT", {"trigger_type": "thought"}),
+    ("RELEASE_TASK", {"task_reference": "Website"}),
+    ("START_FOCUS", {"task_reference": "Website", "duration_minutes": 25}),
+    ("END_FOCUS_SESSION", {}),
+    ("RUN_DAILY_CLOSE", {"reflection": "Today was enough."}),
+])
+def test_phase_four_intents_validate(intent: str, parameters: dict[str, object]) -> None:
+    proposal = AIIntent.model_validate_json(json.dumps({"intent": intent, "confidence": 0.9, "parameters": parameters}))
+    assert proposal.intent.value == intent
+
+
+@pytest.mark.parametrize(("intent", "parameters"), [
+    ("BREAK_DOWN_TASK", {"task_reference": "Website", "first_step": 3}),
+    ("SET_ENERGY_TODAY", {"energy_level": "exhausted"}),
+    ("RELEASE_TASK", {"task_reference": "Website", "confirmed": True}),
+    ("END_FOCUS_SESSION", {"focus_session_id": "not-a-uuid"}),
+    ("RUN_DAILY_CLOSE", {"reflection": "x" * 4001}),
+])
+def test_phase_four_intents_reject_invalid_or_unrecognized_fields(intent: str, parameters: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        AIIntent.model_validate_json(json.dumps({"intent": intent, "confidence": 0.9, "parameters": parameters}))
+
+
+@pytest.mark.parametrize(("intent", "action", "parameters"), [
+    ("BREAK_DOWN_TASK", "break_down_task", {"task_reference": "Website", "first_step": "Open the folder"}),
+    ("SET_ENERGY_TODAY", "set_energy_today", {"energy_level": "low"}),
+    ("PROPOSE_TODAYS_THREE", "propose_todays_three", {}),
+    ("SWAP_TASK", "swap_task", {"task_id": "e0169673-0001-4b56-8000-000000000001"}),
+    ("LOG_DRIFT", "log_drift", {"trigger_type": "thought"}),
+    ("RELEASE_TASK", "release_task", {"task_reference": "Website"}),
+    ("START_FOCUS", "start_focus_session", {"task_reference": "Website"}),
+    ("END_FOCUS_SESSION", "end_focus_session", {}),
+    ("RUN_DAILY_CLOSE", "run_daily_close", {}),
+])
+def test_phase_four_intents_map_to_registered_actions(intent: str, action: str, parameters: dict[str, object]) -> None:
+    proposal = AIIntent.model_validate_json(json.dumps({"intent": intent, "confidence": 0.9, "parameters": parameters}))
+    plan = plan_intent(proposal)
+    assert plan is not None
+    assert plan.action == action
 
 
 def test_interpreter_rejects_json_with_trailing_model_text() -> None:

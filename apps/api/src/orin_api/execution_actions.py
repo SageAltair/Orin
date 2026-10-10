@@ -4,9 +4,12 @@ from __future__ import annotations
 import uuid
 import re
 import json
+from enum import Enum
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Protocol
 
+from fastapi import HTTPException
 from pydantic import Field, model_validator
 from sqlalchemy import func, select
 
@@ -18,11 +21,26 @@ from orin_api.models import (
     Activity, ActivityType, Approval, ApprovalStatus, Command, CommandStatus, ExecutionAudit,
     DeviceStatus, EnvironmentPreference, FocusSession, Memory, Project, ProjectStatus, ProjectMember,
     ProjectRole, Task, TaskPriority, TaskStatus, User, UserCapability, WorkerDevice, Capability,
+    EnergyLevel, FocusState,
 )
-from orin_api.schemas import TaskUpdate
-from orin_api.focus_domain import complete_task, reopen_task, touch_task, transition_task_status
+from orin_api.schemas import TaskCreate, TaskUpdate
+from orin_api.focus_domain import touch_task
 from orin_api.services import add_activity, ensure_user_preferences
 from orin_api.worker_service import queue_user_job
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 class CreateTaskInput(StrictActionInput):
@@ -32,6 +50,11 @@ class CreateTaskInput(StrictActionInput):
     project_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     priority: str = Field(default="normal", pattern=r"^(low|normal|high|urgent)$")
+    first_step: str | None = Field(default=None, max_length=500)
+    why: str | None = Field(default=None, max_length=500)
+    energy_level: Literal["low", "medium", "high"] | None = None
+    estimated_minutes: int | None = Field(default=None, ge=1, le=1440)
+    trigger: str | None = Field(default=None, max_length=240)
 
     @model_validator(mode="after")
     def validate_task_role_fields(self) -> CreateTaskInput:
@@ -76,6 +99,54 @@ class UpdateTaskInput(StrictActionInput):
 class CompleteTaskInput(StrictActionInput):
     task_id: uuid.UUID | None = None
     task_reference: str | None = None
+
+
+class BreakDownTaskInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    first_step: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def require_task_reference(self) -> BreakDownTaskInput:
+        if self.task_id is None and self.task_reference is None:
+            raise ValueError("A task identifier or reference is required")
+        return self
+
+
+class EnergyTodayInput(StrictActionInput):
+    energy_level: Literal["low", "medium", "high"]
+
+
+class SwapTaskInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+
+
+class DriftActionInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    focus_session_id: uuid.UUID | None = None
+    trigger_type: Literal["app", "thought", "emotion", "person", "tired", "other"] = "other"
+
+
+class ReleaseTaskInput(StrictActionInput):
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+
+    @model_validator(mode="after")
+    def require_task_reference(self) -> ReleaseTaskInput:
+        if self.task_id is None and self.task_reference is None:
+            raise ValueError("A task identifier or reference is required")
+        return self
+
+
+class EndFocusInput(StrictActionInput):
+    focus_session_id: uuid.UUID | None = None
+
+
+class DailyCloseActionInput(StrictActionInput):
+    drift_triggers: list[Literal["app", "thought", "emotion", "person", "tired", "other"]] = Field(default_factory=list, max_length=6)
+    tomorrow_task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    reflection: str | None = Field(default=None, max_length=4000)
 
 
 class CreateProjectInput(StrictActionInput):
@@ -131,9 +202,18 @@ class SaveMemoryInput(StrictActionInput):
 
 
 class StartFocusInput(StrictActionInput):
-    project_reference: str = Field(min_length=1, max_length=160)
-    objective: str = Field(min_length=1, max_length=500)
-    duration_minutes: int = Field(ge=5, le=480)
+    project_reference: str | None = Field(default=None, min_length=1, max_length=160)
+    task_id: uuid.UUID | None = None
+    task_reference: str | None = Field(default=None, min_length=1, max_length=240)
+    objective: str | None = Field(default=None, min_length=1, max_length=500)
+    duration_minutes: int = Field(default=25, ge=5, le=480)
+
+    @model_validator(mode="after")
+    def require_target(self) -> StartFocusInput:
+        has_task = self.task_id is not None or self.task_reference is not None
+        if bool(self.project_reference) == has_task:
+            raise ValueError("Choose exactly one task or project to focus on")
+        return self
 
 
 class SetToolVisibilityInput(StrictActionInput):
@@ -188,24 +268,32 @@ def _save_memory(context: ActionContext, raw: SaveMemoryInput) -> dict[str, Any]
 
 def _start_focus(context: ActionContext, raw: StartFocusInput) -> dict[str, Any]:
     data = StartFocusInput.model_validate(raw)
-    project = _owned_project_by_name(context, data.project_reference)
-    now = datetime.now(timezone.utc)
-    active = context.session.scalar(select(FocusSession).where(FocusSession.user_id == context.user_id,
-        FocusSession.status == "active").with_for_update())
-    if active:
-        started = active.started_at.replace(tzinfo=timezone.utc) if active.started_at.tzinfo is None else active.started_at
-        active.status = "expired" if started + timedelta(minutes=active.duration_minutes) <= now else "completed"
-        active.ended_at = now
-    focus = FocusSession(user_id=context.user_id, project_id=project.id, objective=data.objective.strip(),
-        duration_minutes=data.duration_minutes, started_at=now,
-        context_snapshot={"project_name": project.name, "project_objective": project.objective})
-    context.session.add(focus)
-    context.session.flush()
-    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id,
-        project_id=project.id, activity_type=ActivityType.FOCUS_UPDATED,
-        summary=f"Started focus: {focus.objective}", command_id=context.command_id)
-    return {"id": str(focus.id), "project_id": str(project.id), "objective": focus.objective,
-        "duration_minutes": focus.duration_minutes, "status": focus.status, "entity_type": "focus_session"}
+    user = context.session.get(User, context.user_id)
+    if user is None:
+        raise ActionExecutionError("User not found.", status=ActionStatus.DENIED)
+    try:
+        from orin_api import focus_router, workspace_router
+        if data.task_id is not None or data.task_reference is not None:
+            task = _resolve_task(context, data.task_id, data.task_reference)
+            current = focus_router.get_now(user, context.session).get("task")
+            if not isinstance(current, dict) or str(current.get("id")) != str(task.id):
+                raise ActionExecutionError("Choose that task in Today before starting its focus session.")
+            duration = data.duration_minutes if "duration_minutes" in data.model_fields_set else min(max(task.estimated_minutes or 25, 5), 480)
+            focus = workspace_router.start_focus(workspace_router.FocusCreate(
+                project_id=task.project_id, task_id=task.id,
+                objective=(data.objective or task.title).strip(), duration_minutes=duration), user, context.session)
+            from orin_api.focus_domain import set_focus_state
+            set_focus_state(task, FocusState.ACTIVE)
+            context.session.commit()
+            return _json_safe({**focus, "entity_type": "focus_session"})
+        project = _owned_project_by_name(context, data.project_reference or "")
+        if not data.objective:
+            raise ActionExecutionError("A focus objective is required for a project session.", status=ActionStatus.INVALID)
+        focus = workspace_router.start_focus(workspace_router.FocusCreate(
+            project_id=project.id, objective=data.objective.strip(), duration_minutes=data.duration_minutes), user, context.session)
+        return _json_safe({**focus, "entity_type": "focus_session"})
+    except HTTPException as exc:
+        _raise_route_error(exc)
 
 
 def _set_tool_visibility(context: ActionContext, raw: SetToolVisibilityInput) -> dict[str, Any]:
@@ -281,38 +369,29 @@ def _resolve_task(context: ActionContext, task_id: uuid.UUID | None, reference: 
 
 
 def _create_task(context: ActionContext, raw: CreateTaskInput) -> dict[str, Any]:
-    project_id = raw.project_id
-    if project_id is not None:
-        project = context.session.scalar(select(Project).where(Project.id == project_id, Project.owner_id == context.user_id))
-        if project is None:
-            raise ActionExecutionError("Project not found in your workspace.", status=ActionStatus.DENIED)
-    if raw.assignee_id is not None:
-        assignee = context.session.scalar(select(User).where(User.id == raw.assignee_id, User.owner_id == context.user_id))
-        if assignee is None:
-            raise ActionExecutionError("Assignee not found in your workspace.", status=ActionStatus.DENIED)
-    due_at = None
-    if raw.due_at:
-        due_at = datetime.fromisoformat(raw.due_at.replace("Z", "+00:00"))
-    task = Task(
-        owner_id=context.user_id,
-        title=raw.title.strip(),
-        description=raw.description,
-        due_at=due_at,
-        project_id=project_id,
-        assignee_id=raw.assignee_id,
-        priority=TaskPriority(raw.priority),
-    )
-    touch_task(task)
-    context.session.add(task)
-    context.session.flush()
-    context.session.commit()
+    user = context.session.get(User, context.user_id)
+    if user is None:
+        raise ActionExecutionError("User not found.", status=ActionStatus.DENIED)
+    try:
+        data = TaskCreate(title=raw.title, description=raw.description,
+            due_at=datetime.fromisoformat(raw.due_at.replace("Z", "+00:00")) if raw.due_at else None,
+            project_id=raw.project_id, assignee_id=raw.assignee_id,
+            priority=TaskPriority(raw.priority), first_step=raw.first_step, why=raw.why,
+            energy_level=EnergyLevel(raw.energy_level) if raw.energy_level else None,
+            estimated_minutes=raw.estimated_minutes, trigger=raw.trigger)
+        from orin_api.domain_router import create_task as create_task_route
+        task = create_task_route(data, user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    except (TypeError, ValueError) as exc:
+        raise ActionExecutionError("Task fields are invalid.", status=ActionStatus.INVALID) from exc
     return {
         "id": str(task.id),
         "entity_type": "task",
         "title": task.title,
         "description": task.description,
-        "status": str(task.status),
-        "priority": str(task.priority),
+        "status": task.status.value,
+        "priority": task.priority.value,
         "due_at": task.due_at.isoformat() if task.due_at else None,
         "project_id": str(task.project_id) if task.project_id else None,
         "assignee_id": str(task.assignee_id) if task.assignee_id else None,
@@ -380,33 +459,125 @@ def _create_tasks_batch(context: ActionContext, raw: BatchTaskInput) -> list[dic
 def _update_task(context: ActionContext, raw: UpdateTaskInput) -> dict[str, Any]:
     task = _resolve_task(context, raw.task_id, raw.task_reference)
     try:
-        changes = TaskUpdate.model_validate(raw.fields_to_update).model_dump(exclude_unset=True)
+        data = TaskUpdate.model_validate(raw.fields_to_update)
+        user = context.session.get(User, context.user_id)
+        from orin_api.domain_router import update_task as update_task_route
+        task = update_task_route(task.id, data, user, context.session,
+            command_id=context.command_id, intent="UPDATE_TASK")
+    except HTTPException as exc:
+        _raise_route_error(exc)
     except Exception as exc:
-        raise ActionExecutionError("Task update parameters are invalid.") from exc
-    project_id = changes.get("project_id", task.project_id)
-    if project_id is not None and context.session.scalar(select(Project.id).where(Project.id == project_id, Project.owner_id == context.user_id)) is None:
-        raise ActionExecutionError("Project not found in your workspace.")
-    requested_status = changes.pop("status", None)
-    for field, value in changes.items():
-        setattr(task, field, value)
-    if requested_status is not None:
-        if task.status == TaskStatus.DONE and requested_status != TaskStatus.DONE:
-            reopen_task(task)
-        else:
-            transition_task_status(task, requested_status)
-    else:
-        touch_task(task)
-    context.session.flush()
-    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Updated task: {task.title}", command_id=context.command_id, intent="UPDATE_TASK")
+        raise ActionExecutionError("Task update parameters are invalid.", status=ActionStatus.INVALID) from exc
     return {"id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"}
 
 
 def _complete_task(context: ActionContext, raw: CompleteTaskInput) -> dict[str, Any]:
     task = _resolve_task(context, raw.task_id, raw.task_reference)
-    complete_task(task)
-    context.session.flush()
-    add_activity(context.session, user_id=context.user_id, actor_user_id=context.user_id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Completed task: {task.title}", command_id=context.command_id, intent="COMPLETE_TASK")
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.domain_router import update_task as update_task_route
+        task = update_task_route(task.id, TaskUpdate(status=TaskStatus.DONE), user, context.session,
+            command_id=context.command_id, intent="COMPLETE_TASK")
+    except HTTPException as exc:
+        _raise_route_error(exc)
     return {"id": str(task.id), "title": task.title, "status": task.status.value, "entity_type": "task"}
+
+
+def _break_down_task(context: ActionContext, raw: BreakDownTaskInput) -> dict[str, Any]:
+    task = _resolve_task(context, raw.task_id, raw.task_reference)
+    return _update_task(context, UpdateTaskInput(task_id=task.id,
+        fields_to_update={"first_step": raw.first_step.strip()}))
+
+
+def _set_energy_today(context: ActionContext, raw: EnergyTodayInput) -> dict[str, Any]:
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.focus_router import EnergyUpdate, set_energy
+        result = set_energy(EnergyUpdate(energy_level=EnergyLevel(raw.energy_level)), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return {**result, "entity_type": "focus_settings"}
+
+
+def _propose_todays_three(context: ActionContext, _raw: StrictActionInput) -> dict[str, Any]:
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.focus_router import propose_today
+        result = propose_today(user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return _json_safe({**result, "entity_type": "daily_plan"})
+
+
+def _swap_task(context: ActionContext, raw: SwapTaskInput) -> dict[str, Any]:
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.focus_router import SwapInput, swap_today
+        result = swap_today(SwapInput(task_id=raw.task_id), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    if not result.get("swapped"):
+        raise ActionExecutionError(str(result.get("message") or "No suitable replacement is available."))
+    task = result.get("task")
+    if not isinstance(task, dict):
+        raise ActionExecutionError("The replacement task could not be verified.")
+    return _json_safe({**task, "entity_type": "task"})
+
+
+def _log_drift(context: ActionContext, raw: DriftActionInput) -> dict[str, Any]:
+    user = context.session.get(User, context.user_id)
+    task_id = raw.task_id
+    if raw.task_reference:
+        task_id = _resolve_task(context, task_id, raw.task_reference).id
+    try:
+        from orin_api.focus_router import DriftCreate, create_drift_event
+        result = create_drift_event(DriftCreate(task_id=task_id,
+            focus_session_id=raw.focus_session_id, trigger_type=raw.trigger_type), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return _json_safe({**result, "entity_type": "drift_event"})
+
+
+def _release_task(context: ActionContext, raw: ReleaseTaskInput) -> dict[str, Any]:
+    task = _resolve_task(context, raw.task_id, raw.task_reference)
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.focus_router import ReviewInput, review_task
+        result = review_task(task.id, ReviewInput(outcome="release"), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return _json_safe({**result["task"], "entity_type": "task"})
+
+
+def _end_focus_session(context: ActionContext, raw: EndFocusInput) -> dict[str, Any]:
+    statement = select(FocusSession).where(FocusSession.user_id == context.user_id,
+        FocusSession.status.in_(["active", "paused"]))
+    if raw.focus_session_id is not None:
+        statement = statement.where(FocusSession.id == raw.focus_session_id)
+    focus = context.session.scalar(statement.order_by(FocusSession.started_at.desc()).with_for_update())
+    if focus is None:
+        raise ActionExecutionError("There is no active focus session to end.")
+    user = context.session.get(User, context.user_id)
+    try:
+        from orin_api.workspace_router import FocusUpdate, update_focus
+        result = update_focus(focus.id, FocusUpdate(action="complete"), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return _json_safe({**result, "entity_type": "focus_session"})
+
+
+def _run_daily_close(context: ActionContext, raw: DailyCloseActionInput) -> dict[str, Any]:
+    user = context.session.get(User, context.user_id)
+    tomorrow_id = _resolve_task(context, None, raw.tomorrow_task_reference).id if raw.tomorrow_task_reference else None
+    try:
+        from orin_api.focus_router import DailyCloseCreate, get_close_today, save_daily_close
+        current = get_close_today(user, context.session)
+        result = save_daily_close(DailyCloseCreate(done_list=current["done_list"],
+            tomorrow_task_id=tomorrow_id, reflection=raw.reflection,
+            drift_triggers=raw.drift_triggers), user, context.session)
+    except HTTPException as exc:
+        _raise_route_error(exc)
+    return _json_safe({**result, "entity_type": "daily_close"})
 
 
 def _create_project(context: ActionContext, raw: CreateProjectInput) -> dict[str, Any]:
@@ -515,6 +686,14 @@ def build_action_registry(
 
     definitions = [
         ActionDefinition("create_task", CreateTaskInput, "task.create", RiskLevel.LOW, _create_task, Reversibility.REVERSIBLE),
+        ActionDefinition("break_down_task", BreakDownTaskInput, "task.update", RiskLevel.LOW, _break_down_task, Reversibility.REVERSIBLE),
+        ActionDefinition("set_energy_today", EnergyTodayInput, "task.read", RiskLevel.LOW, _set_energy_today, Reversibility.REVERSIBLE),
+        ActionDefinition("propose_todays_three", StrictActionInput, "task.read", RiskLevel.LOW, _propose_todays_three, Reversibility.REVERSIBLE),
+        ActionDefinition("swap_task", SwapTaskInput, "task.update", RiskLevel.LOW, _swap_task, Reversibility.REVERSIBLE),
+        ActionDefinition("log_drift", DriftActionInput, "task.read", RiskLevel.LOW, _log_drift, Reversibility.REVERSIBLE),
+        ActionDefinition("release_task", ReleaseTaskInput, "task.update", RiskLevel.MEDIUM, _release_task, Reversibility.REVERSIBLE, requires_approval=True),
+        ActionDefinition("end_focus_session", EndFocusInput, "task.read", RiskLevel.LOW, _end_focus_session, Reversibility.REVERSIBLE),
+        ActionDefinition("run_daily_close", DailyCloseActionInput, "task.read", RiskLevel.LOW, _run_daily_close, Reversibility.REVERSIBLE),
         ActionDefinition("create_tasks_batch", BatchTaskInput, "task.create", RiskLevel.LOW, _create_tasks_batch, Reversibility.REVERSIBLE),
         ActionDefinition("update_task", UpdateTaskInput, "task.update", RiskLevel.LOW, _update_task, Reversibility.REVERSIBLE),
         ActionDefinition("complete_task", CompleteTaskInput, "task.complete", RiskLevel.LOW, _complete_task, Reversibility.REVERSIBLE),
@@ -524,7 +703,7 @@ def build_action_registry(
         ActionDefinition("get_activity", GetActivityInput, "activity.read", RiskLevel.LOW, _get_activity, Reversibility.REVERSIBLE),
         ActionDefinition("request_worker_action", WorkerActionInput, "worker.execute", RiskLevel.LOW, _request_worker_action, Reversibility.PARTIAL),
         ActionDefinition("save_memory", SaveMemoryInput, "memory.write", RiskLevel.LOW, _save_memory, Reversibility.REVERSIBLE),
-        ActionDefinition("start_focus_session", StartFocusInput, "project.read", RiskLevel.LOW, _start_focus, Reversibility.REVERSIBLE),
+        ActionDefinition("start_focus_session", StartFocusInput, "focus.start", RiskLevel.LOW, _start_focus, Reversibility.REVERSIBLE),
         ActionDefinition("set_tool_visibility", SetToolVisibilityInput, "settings.personalize", RiskLevel.LOW, _set_tool_visibility, Reversibility.REVERSIBLE),
         ActionDefinition("send_notification", SendNotificationInput, "notification.send", RiskLevel.MEDIUM, send_notification, Reversibility.IRREVERSIBLE, requires_approval=notification_requires_approval),
         ActionDefinition("request_approval", RequestApprovalInput, "approval.request", RiskLevel.LOW, request_approval, Reversibility.REVERSIBLE),

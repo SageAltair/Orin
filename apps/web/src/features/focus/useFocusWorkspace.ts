@@ -46,7 +46,7 @@ export function useFocusWorkspace() {
     catch { setError("Could not find another suitable task. You can rest or stay with this one."); return null; }
   };
   const start = async () => { setBusy(true); try { await request("/focus/now/start", { method: "POST", body: "{}" }); await refresh(); } catch { setError("Could not start the focus timer. Please try again."); } finally { setBusy(false); } };
-  const complete = async () => { setBusy(true); try { await request("/focus/now/complete", { method: "POST", body: "{}" }); await refresh(); } catch { setError("Could not mark this task complete. Please try again."); } finally { setBusy(false); } };
+  const complete = async () => { setBusy(true); try { await request("/focus/now/complete", { method: "POST", body: "{}" }); await refresh(); return true; } catch { setError("Could not mark this task complete. Please try again."); return false; } finally { setBusy(false); } };
   const saveFirstStep = async (task: FocusTask, first_step: string) => { try { await request(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ first_step }) }); await refresh(); } catch { setError("Could not save that smaller step. Please try again."); } };
   const suggestSmallerStep = async (task: FocusTask): Promise<string | null> => {
     try {

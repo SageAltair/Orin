@@ -40,22 +40,27 @@ export function Capture({ onSave, onSuggest, busy, onDone }: {
   };
 
   return <section className="focus-card focus-capture" aria-labelledby="capture-heading">
-    <span className="focus-eyebrow">CAPTURE</span><h1 id="capture-heading">Let it land here.</h1>
-    <p>You can decide what it means later.</p>
+    <span className="focus-eyebrow">ONE THING AT A TIME</span><h1 id="capture-heading">What would you like to do?</h1>
+    <p>Write it in your own words. You don’t need to plan it yet.</p>
     <form onSubmit={submit}>
       <label className="sr-only" htmlFor="focus-capture-input">What would you like to remember?</label>
-      <textarea ref={input} id="focus-capture-input" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder="Write or say anything" rows={3} />
+      <textarea ref={input} id="focus-capture-input" autoFocus value={title} onChange={event => setTitle(event.target.value)} placeholder="For example: reply to the message" rows={3} />
       {suggestion && <div className="focus-suggestion" role="group" aria-label="Optional task suggestions">
         <p>Optional suggestions. You can edit them before saving.</p>
         <div className="focus-action-row"><button type="button" className="focus-secondary" onClick={() => { setTitle(suggestion.title); setFirstStep(suggestion.first_step); setEnergy(suggestion.energy_level); setSuggestion(null); }}>Use suggestions</button><button type="button" className="focus-text-button" onClick={() => setSuggestion(null)}>Keep my words</button></div>
       </div>}
-      {(firstStep || energy) && <div className="focus-capture-details">
-        <label className="focus-field-label" htmlFor="capture-first-step">First step (optional)</label>
-        <input id="capture-first-step" value={firstStep} onChange={event => setFirstStep(event.target.value)} maxLength={500} />
-        <label className="focus-field-label" htmlFor="capture-energy">Energy (optional)</label>
-        <select id="capture-energy" value={energy} onChange={event => setEnergy(event.target.value as Energy | "")}><option value="">Choose later</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
-      </div>}
-      <div className="focus-action-row"><button type="button" className="focus-secondary" onClick={listen} aria-label="Capture by voice"><Mic size={18} /> Voice</button><button type="button" className="focus-secondary" onClick={() => void suggest()} disabled={suggesting || !title.trim()}>{suggesting ? "Thinking…" : "Suggest"}</button><button type="submit" className="focus-primary" disabled={busy}><Plus size={18} /> Save</button></div>
+      <details className="focus-settings focus-capture-help">
+        <summary>Need help with words or the first step?</summary>
+        <p>Orin can offer an optional suggestion. You can edit it or ignore it.</p>
+        <div className="focus-action-row"><button type="button" className="focus-secondary" onClick={listen} aria-label="Capture by voice"><Mic size={18} /> Speak instead</button><button type="button" className="focus-secondary" onClick={() => void suggest()} disabled={suggesting || !title.trim()}>{suggesting ? "Thinking…" : "Suggest a first step"}</button></div>
+        {(firstStep || energy) && <div className="focus-capture-details">
+          <label className="focus-field-label" htmlFor="capture-first-step">First step (optional)</label>
+          <input id="capture-first-step" value={firstStep} onChange={event => setFirstStep(event.target.value)} maxLength={500} />
+          <label className="focus-field-label" htmlFor="capture-energy">Energy (optional)</label>
+          <select id="capture-energy" value={energy} onChange={event => setEnergy(event.target.value as Energy | "")}><option value="">Choose later</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
+        </div>}
+      </details>
+      <div className="focus-action-row"><button type="submit" className="focus-primary" disabled={busy || !title.trim()}><Plus size={18} /> Save and continue</button></div>
     </form>
     {message && <p role="status" className="focus-quiet-message">{message}</p>}
   </section>;
