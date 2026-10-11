@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Sequence
 
-from orin_api.models import EnergyLevel, FocusSession, Task, TaskStatus
+from orin_api.models import EnergyLevel, FocusSession, Task, TaskPriority, TaskStatus
 
 
 def _touch_time(task: Task) -> datetime:
@@ -15,11 +15,23 @@ def _touch_time(task: Task) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
 
 
-def task_rank(task: Task) -> tuple[int, datetime, int]:
-    """Prefer tasks with context and momentum, then shorter estimates; stale work stays available."""
+def task_rank(
+    task: Task,
+    *,
+    today: date | None = None,
+    project_priority: TaskPriority | None = None,
+) -> tuple[int, int, int, int, int, datetime, int]:
+    """Rank using stored priority, real deadlines, status, context, and recent progress."""
+    priority_order = {TaskPriority.LOW: 0, TaskPriority.NORMAL: 1, TaskPriority.HIGH: 2, TaskPriority.URGENT: 3}
+    due_window = 0
+    if task.due_at is not None:
+        due_date = task.due_at.date()
+        days_until_due = (due_date - (today or date.today())).days
+        due_window = 3 if days_until_due <= 1 else 2 if days_until_due <= 3 else 1 if days_until_due <= 7 else 0
     context = int(bool(task.first_step)) + int(bool(task.why))
     estimated_minutes = task.estimated_minutes if task.estimated_minutes is not None else 25
-    return context, _touch_time(task), -estimated_minutes
+    return (priority_order[task.priority or TaskPriority.NORMAL], priority_order[project_priority or TaskPriority.NORMAL],
+            due_window, int(task.status == TaskStatus.IN_PROGRESS), context, _touch_time(task), -estimated_minutes)
 
 
 def select_todays_three(
@@ -28,17 +40,23 @@ def select_todays_three(
     *,
     excluded_ids: set[uuid.UUID] | None = None,
     routines: Sequence[str] = (),
+    blocked_ids: set[uuid.UUID] | None = None,
+    project_priorities: dict[uuid.UUID, TaskPriority] | None = None,
+    today: date | None = None,
 ) -> tuple[list[Task], uuid.UUID | None]:
     """Select up to three energy-matched open tasks and an eligible anchor."""
     excluded = excluded_ids or set()
+    blocked = blocked_ids or set()
+    priorities = project_priorities or {}
     eligible = [
         task for task in tasks
-        if task.id not in excluded
-        and task.status not in {TaskStatus.DONE, TaskStatus.CANCELLED}
+        if task.id not in excluded and task.id not in blocked
+        and task.status not in {TaskStatus.DONE, TaskStatus.CANCELLED, TaskStatus.BLOCKED}
         and task.energy_level == energy
     ]
     routine_names = tuple(name.casefold() for name in routines)
-    eligible.sort(key=lambda task: (int(bool(task.trigger and any(name in task.trigger.casefold() for name in routine_names))), *task_rank(task)), reverse=True)
+    eligible.sort(key=lambda task: (*task_rank(task, today=today, project_priority=priorities.get(task.project_id)),
+        int(bool(task.trigger and any(name in task.trigger.casefold() for name in routine_names)))), reverse=True)
     anchor_pool = eligible
     if energy == EnergyLevel.LOW:
         anchor_pool = [task for task in eligible if task.estimated_minutes is not None and task.estimated_minutes <= 15]

@@ -18,7 +18,7 @@ from orin_api.database import get_session
 from orin_api.focus_domain import complete_task, keep_task_in_review, local_day_key, release_task, reopen_task, set_focus_state, shrink_task_step, touch_task
 from orin_api.focus_behavior import is_quiet_time, missed_days_since, prompt_form, rolling_completed_days
 from orin_api.focus_planning import select_now_task, select_todays_three, task_rank
-from orin_api.models import DailyClose, DailyPlan, DailyPlanTask, DriftEvent, DriftTrigger, EnergyLevel, FocusSession, FocusState, Task, TaskStatus, User, UserSettings
+from orin_api.models import DailyClose, DailyPlan, DailyPlanTask, DriftEvent, DriftTrigger, EnergyLevel, FocusSession, FocusState, Project, Task, TaskDependency, TaskStatus, User, UserSettings
 
 router = APIRouter(prefix="/api/v1/focus", tags=["focus"])
 
@@ -199,6 +199,7 @@ def _task_view(task: Task) -> dict[str, object]:
             "focus_state": task.focus_state.value if task.focus_state else None, "first_step": task.first_step,
             "why": task.why, "energy_level": task.energy_level.value if task.energy_level else None,
             "estimated_minutes": task.estimated_minutes, "is_anchor": task.is_anchor,
+            "priority": task.priority.value, "due_at": task.due_at,
             "today_position": task.today_position, "today_day_key": task.today_day_key,
             "last_touched_at": task.last_touched_at, "decay_review_at": task.decay_review_at,
             "completed_at": task.completed_at, "released_at": task.released_at, "project_id": task.project_id}
@@ -273,10 +274,25 @@ def _current_now(session: Session, user: User) -> tuple[Task | None, FocusSessio
 
 def _now_view(task: Task | None, focus: FocusSession | None, day_key: str,
               energy: EnergyLevel | None, *, rest_day: bool = False) -> dict[str, object]:
+    reasons: list[str] = []
+    if task is not None:
+        if focus is not None and focus.task_id == task.id:
+            reasons.append("You already have a focus session open for this task.")
+        elif task.is_anchor:
+            reasons.append("You chose this as today's anchor.")
+        else:
+            reasons.append("You placed this task in today's plan.")
+        if task.priority.value in {"high", "urgent"}:
+            reasons.append(f"It has {task.priority.value} priority.")
+        if task.due_at is not None:
+            reasons.append("It has a due date recorded.")
+        if task.status == TaskStatus.IN_PROGRESS:
+            reasons.append("Work on it is already in progress.")
     return {"task": _task_view(task) if task else None,
             "focus_session": ({"id": focus.id, "task_id": focus.task_id, "duration_minutes": focus.duration_minutes,
                                "started_at": focus.started_at, "status": focus.status} if focus else None),
             "day_key": day_key, "energy_level": energy.value if energy else None, "rest_day": rest_day,
+            "recommendation_reasons": reasons,
             "empty_state": task is None}
 
 
@@ -363,8 +379,17 @@ def propose_today(user: User = Depends(get_current_user), session: Session = Dep
         candidates = session.scalars(select(Task).where(Task.owner_id == user.id,
             Task.status.in_([TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED]),
             Task.focus_state.in_([FocusState.INBOX, FocusState.LATER]))).all()
+        candidate_ids = [task.id for task in candidates]
+        blocked_ids = set(session.scalars(select(TaskDependency.task_id).join(
+            Task, Task.id == TaskDependency.depends_on_task_id
+        ).where(TaskDependency.task_id.in_(candidate_ids), Task.owner_id == user.id,
+            Task.status.not_in([TaskStatus.DONE, TaskStatus.CANCELLED]))).all()) if candidate_ids else set()
+        project_ids = {task.project_id for task in candidates if task.project_id is not None}
+        project_priorities = dict(session.execute(select(Project.id, Project.priority).where(
+            Project.id.in_(project_ids), Project.owner_id == user.id)).all()) if project_ids else {}
         selected, anchor_id = select_todays_three(candidates, settings_row.energy_today, excluded_ids=excluded,
-            routines=[item.get("name", "") for item in settings_row.routines if item.get("name")])
+            routines=[item.get("name", "") for item in settings_row.routines if item.get("name")],
+            blocked_ids=blocked_ids, project_priorities=project_priorities, today=date.fromisoformat(day_key))
         _replace_plan(session, user, plan, day_key,
                       [TodayTaskInput(task_id=task.id, is_anchor=task.id == anchor_id) for task in selected])
     response = _plan_view(session, user, plan, day_key, settings_row.energy_today)

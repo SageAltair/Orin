@@ -46,6 +46,7 @@ export function Now({ state, busy, onStart, onSmaller, onSuggestSmaller, onSwap,
     <span className="focus-eyebrow">ONE SMALL STEP</span><h1 id="now-heading">{task.title}</h1>
     <div className="focus-first-step"><span>Smallest first step</span><p>{task.first_step || "Choose one small way to begin."}</p></div>
     {task.why && <p className="focus-why">{task.why}</p>}
+    {state?.recommendation_reasons?.length ? <p className="focus-recommendation-reason">Why this is here: {state.recommendation_reasons.join(" ")}</p> : null}
     <div className="focus-timer" aria-label={active ? "Focus timer running" : "Focus timer ready"}>
       <div className="focus-timer-track" role="progressbar" aria-label="Focus time remaining" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(remaining * 100)}><span style={{ width: `${remaining * 100}%`, transition: reducedMotion ? "none" : "width 1s ease" }} /></div>
       {!hideNumbers && <span className="focus-timer-label" role="status" aria-live="polite">{active ? `${Math.ceil((state!.focus_session!.duration_minutes * remaining))} min left` : `${task.estimated_minutes ?? 25} min, at your pace`}</span>}

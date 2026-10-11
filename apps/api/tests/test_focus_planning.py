@@ -5,7 +5,7 @@ import uuid
 import os
 from collections.abc import Generator
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from threading import Barrier
 
 import pytest
@@ -20,7 +20,7 @@ from orin_api.config import Settings, get_settings
 from orin_api.database import Base, get_session
 from orin_api.focus_planning import select_now_task, select_todays_three
 from orin_api.main import app
-from orin_api.models import DailyPlan, EnergyLevel, FocusSession, FocusState, Task, TaskStatus, User
+from orin_api.models import DailyPlan, EnergyLevel, FocusSession, FocusState, Project, Task, TaskPriority, TaskStatus, User
 
 
 @pytest.fixture
@@ -113,6 +113,27 @@ def test_task_estimates_break_ties_after_context_and_recent_activity() -> None:
         task.last_touched_at = now
     selected, _ = select_todays_three(tasks, EnergyLevel.MEDIUM)
     assert [task.estimated_minutes for task in selected] == [10, 20, 30]
+
+
+def test_today_proposal_uses_recorded_priorities_deadlines_and_dependency_readiness() -> None:
+    today = date(2026, 10, 11)
+    urgent = make_task(EnergyLevel.MEDIUM, title="Urgent")
+    urgent.priority = TaskPriority.URGENT
+    soon = make_task(EnergyLevel.MEDIUM, title="Due soon")
+    soon.due_at = datetime(2026, 10, 13, tzinfo=timezone.utc)
+    later = make_task(EnergyLevel.MEDIUM, title="Due later")
+    later.due_at = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    blocked = make_task(EnergyLevel.MEDIUM, title="Waiting on prerequisite")
+    project = Project(id=uuid.uuid4(), owner_id=uuid.uuid4(), name="Important project", priority=TaskPriority.HIGH)
+    project_task = make_task(EnergyLevel.MEDIUM, title="Project task")
+    project_task.project_id = project.id
+    project_task.priority = TaskPriority.NORMAL
+    selected, _ = select_todays_three(
+        [urgent, soon, later, blocked, project_task], EnergyLevel.MEDIUM,
+        blocked_ids={blocked.id}, project_priorities={project.id: project.priority}, today=today,
+    )
+    assert selected[:3] == [urgent, project_task, soon]
+    assert blocked not in selected
 
 
 def test_now_selection_obeys_active_anchor_and_position_order() -> None:
@@ -212,7 +233,10 @@ def test_smaller_step_suggestion_and_unavailable_ai_leave_manual_path_open(clien
 def test_now_starts_task_linked_focus_and_advances_after_completion(client: TestClient) -> None:
     captured = client.post("/api/v1/focus/capture", json={"title": "Prepare the outline"}).json()
     client.put("/api/v1/focus/today/tasks", json={"tasks": [{"task_id": captured["id"], "is_anchor": True}]})
-    assert client.get("/api/v1/focus/now").json()["task"]["id"] == captured["id"]
+    recommendation = client.get("/api/v1/focus/now").json()
+    assert recommendation["task"]["id"] == captured["id"]
+    assert recommendation["recommendation_reasons"] == ["You chose this as today's anchor."]
+    assert recommendation["task"]["priority"] == "normal"
     started = client.post("/api/v1/focus/now/start", json={})
     assert started.status_code == 200
     assert started.json()["focus_session"]["task_id"] == captured["id"]

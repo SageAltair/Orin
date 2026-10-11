@@ -4,7 +4,7 @@ export type Energy = "low" | "medium" | "high";
 export type DriftTrigger = "app" | "thought" | "emotion" | "person" | "tired" | "other";
 export interface CaptureSuggestion { title: string; first_step: string; energy_level: Energy }
 
-export interface FocusTask extends Pick<Task, "id" | "title" | "status" | "focus_state" | "first_step" | "why" | "energy_level" | "estimated_minutes" | "project_id"> {
+export interface FocusTask extends Pick<Task, "id" | "title" | "status" | "focus_state" | "first_step" | "why" | "energy_level" | "estimated_minutes" | "project_id" | "priority" | "due_at"> {
   is_anchor?: boolean;
   today_position?: number;
   completed_at?: string | null;
@@ -22,6 +22,7 @@ export interface NowState {
   day_key: string;
   energy_level: Energy | null;
   empty_state: boolean;
+  recommendation_reasons?: string[];
 }
 
 export interface CloseState {
