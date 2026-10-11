@@ -986,3 +986,17 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   line-height: 1.5;
   margin: 0.75rem 0;
 }
+.quick-capture-scrim { position: fixed; inset: 0; z-index: 120; display: grid; place-items: start center; padding: min(15vh, 110px) 18px 24px; background: rgb(24 25 28 / 38%); }
+.quick-capture { width: min(100%, 520px); padding: 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: 0 20px 70px rgb(0 0 0 / 20%); }
+.quick-capture header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.quick-capture h2 { margin: 0; font-size: 18px; }
+.quick-capture header button { display: grid; place-items: center; width: 36px; height: 36px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; }
+.quick-capture form { display: grid; gap: 12px; }
+.quick-capture label { font-size: 13px; font-weight: 600; }
+.quick-capture textarea { width: 100%; min-height: 112px; padding: 12px; resize: vertical; border: 1px solid var(--line); border-radius: 9px; color: var(--text); background: var(--bg); font: inherit; }
+.quick-capture form > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.quick-capture form > div > span { color: var(--muted); font-size: 12px; }
+.quick-capture-scrim .quick-capture { color: var(--text); }
+.topbar-capture { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; cursor: pointer; }
+.topbar-capture:hover, .quick-capture header button:hover { background: var(--hover); }
+@media (max-width: 520px) { .topbar-capture { min-height: 34px; padding-inline: 8px; font-size: 12px; } .quick-capture-scrim { padding: 12vh 12px 20px; } .quick-capture { padding: 16px; } }

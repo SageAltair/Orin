@@ -349,6 +349,24 @@ class Task(TimestampMixin, Base):
     dependencies: Mapped[list[TaskDependency]] = relationship(foreign_keys="TaskDependency.task_id", back_populates="task", cascade="all, delete-orphan")
 
 
+class TaskReturnPoint(CreatedAtMixin, Base):
+    __tablename__ = "task_return_points"
+    __table_args__ = (
+        UniqueConstraint("user_id", "idempotency_key", name="uq_task_return_points_user_idempotency"),
+        Index("ix_task_return_points_task_created", "task_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
+    accomplished: Mapped[str | None] = mapped_column(Text)
+    stopped_at: Mapped[str | None] = mapped_column(Text)
+    next_action: Mapped[str | None] = mapped_column(Text)
+    references: Mapped[str | None] = mapped_column(Text)
+    blocker: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+
+
 class CalendarEvent(TimestampMixin, Base):
     """User-owned calendar commitment. All-day values are local dates, not instants."""
     __tablename__ = "calendar_events"

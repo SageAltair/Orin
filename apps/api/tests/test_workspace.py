@@ -63,6 +63,22 @@ def test_project_context_uses_real_task_activity_and_memory_data(client: TestCli
     assert context["agents"] == [] and context["files"] == []
 
 
+def test_task_return_points_are_persisted_idempotently_and_hidden_from_other_tasks(client: TestClient) -> None:
+    first = client.post("/api/v1/tasks", json={"title": "Prepare the opening scene"}).json()
+    second = client.post("/api/v1/tasks", json={"title": "Review the narration"}).json()
+    payload = {"accomplished": "Chose the story", "stopped_at": "Drafting the first scene", "next_action": "Write the opening paragraph", "references": "outline.md", "blocker": None, "idempotency_key": "return-point-1"}
+
+    saved = client.post(f"/api/v1/tasks/{first['id']}/return-points", json=payload)
+    replay = client.post(f"/api/v1/tasks/{first['id']}/return-points", json=payload)
+
+    assert saved.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["id"] == saved.json()["id"]
+    assert client.get(f"/api/v1/tasks/{first['id']}/return-points").json() == [saved.json()]
+    assert client.get(f"/api/v1/tasks/{second['id']}/return-points").json() == []
+    assert client.post(f"/api/v1/tasks/{first['id']}/return-points", json={**payload, "idempotency_key": "empty", "accomplished": None, "stopped_at": None, "next_action": None, "references": None}).status_code == 422
+
+
 def test_memory_lifecycle_is_owned_searchable_and_rejects_secret_like_content(client: TestClient) -> None:
     project = _project(client)
     payload = {"memory_type": "preference", "title": "Concise", "content": "Prefer concise summaries.", "source": "user"}

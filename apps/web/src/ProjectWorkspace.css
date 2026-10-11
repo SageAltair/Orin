@@ -94,3 +94,18 @@
   .project-create-form { display: grid; grid-template-columns: 1fr auto; }
   .project-create-outcome { grid-column: 1 / -1; }
 }
+.task-return-points { display: grid; gap: 9px; padding-top: 14px; border-top: 1px solid var(--line); }
+.task-return-points h4, .task-return-points p { margin: 0; }
+.task-return-points form { display: grid; gap: 9px; }
+.task-return-points label { display: grid; gap: 5px; color: var(--soft); font-size: 12px; }
+.task-return-points input, .task-return-points textarea { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; }
+.task-return-points textarea { min-height: 58px; resize: vertical; }
+.latest-return-point summary { width: fit-content; color: var(--accent); cursor: pointer; font-size: 12px; }
+.latest-return-point dl { display: grid; gap: 8px; margin: 10px 0; }
+.latest-return-point dl div { display: grid; gap: 3px; }
+.latest-return-point dt { color: var(--muted); font-size: 11px; }
+.latest-return-point dd { margin: 0; color: var(--text); font-size: 13px; white-space: pre-wrap; }
+.latest-return-point > strong { font-size: 12px; }
+.latest-return-point > p { color: var(--soft); font-size: 13px; line-height: 1.45; }
+.latest-return-point > details { margin-top: 8px; }
+.latest-return-point > details summary { width: fit-content; color: var(--accent); cursor: pointer; font-size: 11px; }

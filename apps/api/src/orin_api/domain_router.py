@@ -9,9 +9,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, status
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
@@ -42,6 +42,7 @@ from orin_api.models import (
     Project,
     ProjectStatus,
     Task,
+    TaskReturnPoint,
     TaskDependency,
     TaskSchedule,
     TaskStatus,
@@ -98,6 +99,22 @@ router = APIRouter(prefix="/api/v1", tags=["core"])
 logger = logging.getLogger(__name__)
 ACTION_REGISTRY = build_action_registry()
 EXECUTION_ENGINE = ExecutionEngine(ACTION_REGISTRY)
+
+
+class TaskReturnPointInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accomplished: str | None = Field(default=None, max_length=4000)
+    stopped_at: str | None = Field(default=None, max_length=4000)
+    next_action: str | None = Field(default=None, max_length=2000)
+    references: str | None = Field(default=None, max_length=4000)
+    blocker: str | None = Field(default=None, max_length=2000)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def require_return_context(self) -> "TaskReturnPointInput":
+        if not any((self.accomplished, self.stopped_at, self.next_action, self.references, self.blocker)):
+            raise ValueError("Add at least one detail before saving a return point")
+        return self
 
 
 @router.get("/commands", response_model=list[CommandHistoryRead])
@@ -1339,6 +1356,50 @@ def list_activity(
     if until is not None:
         statement = statement.where(Activity.created_at <= until)
     return list(session.scalars(statement.limit(limit).offset(offset)).all())
+
+
+@router.get("/tasks/{task_id}/return-points")
+def list_task_return_points(task_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    rows = session.scalars(select(TaskReturnPoint).where(TaskReturnPoint.user_id == user.id, TaskReturnPoint.task_id == task_id)
+        .order_by(TaskReturnPoint.created_at.desc()).limit(100)).all()
+    return [{"id": str(row.id), "created_at": row.created_at.isoformat(), "kind": "return_point",
+        "accomplished": row.accomplished, "stopped_at": row.stopped_at, "next_action": row.next_action,
+        "references": row.references, "blocker": row.blocker} for row in rows]
+
+
+@router.post("/tasks/{task_id}/return-points", status_code=status.HTTP_201_CREATED)
+def save_task_return_point(task_id: uuid.UUID, data: TaskReturnPointInput, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    prior = session.scalar(select(TaskReturnPoint).where(TaskReturnPoint.user_id == user.id, TaskReturnPoint.idempotency_key == data.idempotency_key))
+    if prior is not None:
+        if prior.task_id != task.id:
+            raise HTTPException(status_code=409, detail="This request key was already used")
+        return {"id": str(prior.id), "created_at": prior.created_at.isoformat(), "kind": "return_point",
+            **data.model_dump(exclude={"idempotency_key"})}
+    saved = TaskReturnPoint(user_id=user.id, task_id=task.id, **data.model_dump())
+    session.add(saved)
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id,
+        activity_type=ActivityType.TASK_UPDATED, summary=f"Saved a return point for: {task.title}", source="api")
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        prior = session.scalar(select(TaskReturnPoint).where(TaskReturnPoint.user_id == user.id,
+            TaskReturnPoint.idempotency_key == data.idempotency_key))
+        if prior is None:
+            raise
+        if prior.task_id != task.id:
+            raise HTTPException(status_code=409, detail="This request key was already used")
+        return {"id": str(prior.id), "created_at": prior.created_at.isoformat(), "kind": "return_point",
+            **data.model_dump(exclude={"idempotency_key"})}
+    session.refresh(saved)
+    return {"id": str(saved.id), "created_at": saved.created_at.isoformat(), "kind": "return_point",
+        **data.model_dump(exclude={"idempotency_key"})}
 
 
 @router.get("/activity/{activity_id}", response_model=ActivityRead)

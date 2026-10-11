@@ -563,3 +563,17 @@ test("home dashboard shows persisted tasks, projects, and work sessions", async 
   await expect(page.getByText("Orin launch")).toBeVisible();
   await expect(page.getByText("Release planning")).toBeVisible();
 });
+
+test("quick capture saves an inbox task from the global workspace toolbar", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.keyboard.press("Control+Shift+Space");
+  await expect(page.getByRole("dialog", { name: "Quick capture" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.locator(".topbar-capture").click();
+  await page.getByRole("textbox", { name: "What do you want to remember?" }).fill("Ask the ministry team about the venue");
+  await page.locator(".quick-capture button[type=submit]").click();
+  await expect(page.getByRole("status")).toContainText("Saved to your Inbox");
+  await expect(page.getByText("Ask the ministry team about the venue", { exact: true })).toBeVisible();
+});
