@@ -5,6 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from orin_api.config import get_settings
 from orin_api.database import Base
+from orin_api.migration_support import ensure_alembic_version_column_length
 import orin_api.models  # noqa: F401
 
 config = context.config
@@ -22,7 +23,10 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     connectable = engine_from_config(config.get_section(config.config_ini_section, {}), prefix="sqlalchemy.", poolclass=pool.NullPool)
-    with connectable.connect() as connection:
+    with connectable.begin() as connection:
+        # Alembic normally creates this table as VARCHAR(32). Prepare it first,
+        # otherwise a long revision ID fails while Alembic records the upgrade.
+        ensure_alembic_version_column_length(connection)
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
             context.run_migrations()
