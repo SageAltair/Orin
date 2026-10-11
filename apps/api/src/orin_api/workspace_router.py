@@ -7,16 +7,17 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.domain_router import ensure_project_access
-from orin_api.models import Activity, ActivityType, Capability, EnvironmentPreference, FocusSession, KnowledgeDocument, KnowledgeDocumentLink, KnowledgeDocumentVersion, KnowledgeInsight, KnowledgeReview, Memory, Project, Task, TaskStatus, User, UserCapability
+from orin_api.models import Activity, ActivityType, Capability, EnvironmentPreference, FocusSession, KnowledgeDocument, KnowledgeDocumentLink, KnowledgeDocumentVersion, KnowledgeExtractionJob, KnowledgeFeedback, KnowledgeInsight, KnowledgeReview, Memory, Project, Task, TaskStatus, User, UserCapability
 from orin_api.knowledge_intelligence import evaluate_knowledge
+from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.ai import AITaskType, AIProviderError, ModelSelector, create_provider
 from orin_api.config import Settings, get_settings
 from orin_api.services import add_activity
@@ -136,11 +137,29 @@ class ReviewAction(BaseModel):
     due_at: datetime | None = None
 
 
+class KnowledgeFeedbackCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    insight_id: uuid.UUID | None = None
+    document_id: uuid.UUID | None = None
+    feedback_type: Literal["helpful", "incorrect", "dismissed", "corrected", "outcome"]
+    correction: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_feedback_target(self) -> "KnowledgeFeedbackCreate":
+        if (self.insight_id is None) == (self.document_id is None):
+            raise ValueError("Provide exactly one insight or document target")
+        if self.feedback_type == "corrected" and not (self.correction and self.correction.strip()):
+            raise ValueError("Corrected feedback requires a correction")
+        return self
+
+
 def _document_view(row: KnowledgeDocument) -> dict[str, object]:
     return {"id": row.id, "project_id": row.project_id, "title": row.title, "content": row.content,
             "document_type": row.document_type, "status": row.status, "tags": row.tags,
             "archived": row.archived, "exclude_from_ai": row.exclude_from_ai, "version": row.version,
-            "review_at": row.review_at, "created_at": row.created_at, "updated_at": row.updated_at}
+            "review_at": row.review_at, "extraction_status": row.extraction_status,
+            "extracted_data": row.extracted_data, "extraction_version": row.extraction_version,
+            "extraction_error": row.extraction_error, "created_at": row.created_at, "updated_at": row.updated_at}
 
 
 def _memory_view(row: Memory) -> dict[str, object]:
@@ -310,6 +329,78 @@ def get_knowledge_document(document_id: uuid.UUID, user: User = Depends(get_curr
     return _document_view(_own_document(session, document_id, user.id))
 
 
+def _extraction_view(job: KnowledgeExtractionJob) -> dict[str, object]:
+    return {"id": job.id, "document_id": job.document_id, "document_version": job.document_version,
+            "status": job.status, "attempts": job.attempts, "next_retry_at": job.next_retry_at,
+            "error": job.error, "model_name": job.model_name, "prompt_version": job.prompt_version,
+            "created_at": job.created_at, "updated_at": job.updated_at}
+
+
+@router.post("/knowledge/documents/{document_id}/extract", status_code=202)
+def request_knowledge_extraction(document_id: uuid.UUID, background_tasks: BackgroundTasks,
+                                 user: User = Depends(get_current_user), session: Session = Depends(get_session),
+                                 settings: Settings = Depends(get_settings)) -> dict[str, object]:
+    document = _own_document(session, document_id, user.id)
+    if document.archived or document.exclude_from_ai:
+        raise HTTPException(status_code=409, detail="Archived or AI-excluded documents cannot be analyzed")
+    job = session.scalar(select(KnowledgeExtractionJob).where(
+        KnowledgeExtractionJob.document_id == document.id,
+        KnowledgeExtractionJob.document_version == document.version,
+    ).with_for_update())
+    if job is None:
+        job = KnowledgeExtractionJob(user_id=user.id, document_id=document.id, document_version=document.version)
+        session.add(job)
+        session.flush()
+    elif job.status in {"failed", "superseded"}:
+        job.status, job.attempts, job.error, job.next_retry_at = "queued", 0, None, None
+    elif job.status == "processing":
+        updated_at = job.updated_at.replace(tzinfo=timezone.utc) if job.updated_at.tzinfo is None else job.updated_at
+        if datetime.now(timezone.utc) - updated_at > timedelta(minutes=10):
+            job.status, job.error, job.next_retry_at = "queued", None, None
+    should_run = job.status == "queued"
+    if should_run:
+        document.extraction_status, document.extraction_error = "queued", None
+    session.commit()
+    session.refresh(job)
+    if should_run:
+        background_tasks.add_task(process_extraction_job, job.id, settings)
+    return _extraction_view(job)
+
+
+@router.get("/knowledge/documents/{document_id}/extraction")
+def get_knowledge_extraction(document_id: uuid.UUID, user: User = Depends(get_current_user),
+                             session: Session = Depends(get_session)) -> dict[str, object]:
+    document = _own_document(session, document_id, user.id)
+    job = session.scalar(select(KnowledgeExtractionJob).where(
+        KnowledgeExtractionJob.document_id == document.id,
+        KnowledgeExtractionJob.document_version == document.version,
+    ))
+    state = document.extraction_status
+    if document.extracted_data is not None and document.extraction_version != document.version:
+        state = "stale"
+    if document.exclude_from_ai:
+        state = "excluded"
+    return {"status": state, "extracted_data": document.extracted_data if not document.exclude_from_ai else None,
+            "job": _extraction_view(job) if job else None}
+
+
+@router.post("/knowledge/feedback", status_code=201)
+def record_knowledge_feedback(data: KnowledgeFeedbackCreate, user: User = Depends(get_current_user),
+                              session: Session = Depends(get_session)) -> dict[str, object]:
+    if data.insight_id:
+        insight = session.scalar(select(KnowledgeInsight).where(KnowledgeInsight.id == data.insight_id, KnowledgeInsight.user_id == user.id))
+        if insight is None:
+            raise HTTPException(status_code=404, detail="Insight not found")
+    if data.document_id:
+        _own_document(session, data.document_id, user.id)
+    row = KnowledgeFeedback(user_id=user.id, insight_id=data.insight_id, document_id=data.document_id,
+                            feedback_type=data.feedback_type, correction=data.correction)
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return {"id": row.id, "feedback_type": row.feedback_type, "created_at": row.created_at}
+
+
 @router.patch("/knowledge/documents/{document_id}")
 def update_knowledge_document(document_id: uuid.UUID, data: DocumentUpdate, user: User = Depends(get_current_user),
                               session: Session = Depends(get_session)) -> dict[str, object]:
@@ -328,6 +419,20 @@ def update_knowledge_document(document_id: uuid.UUID, data: DocumentUpdate, user
     changes = {key: value for key, value in values.items() if getattr(row, key) != value}
     if changes:
         session.add(KnowledgeDocumentVersion(document_id=row.id, version=row.version, title=row.title, content=row.content))
+        if set(changes) & {"title", "content", "document_type", "tags", "exclude_from_ai", "archived"}:
+            active_jobs = session.scalars(select(KnowledgeExtractionJob).where(
+                KnowledgeExtractionJob.document_id == row.id,
+                KnowledgeExtractionJob.status.in_(["queued", "processing"]),
+            )).all()
+            for job in active_jobs:
+                job.status, job.error = "superseded", "Source changed or was archived before analysis completed."
+        if set(changes) & {"title", "content", "document_type", "tags", "exclude_from_ai"}:
+            if changes.get("exclude_from_ai") is True:
+                row.extracted_data = None
+                row.extraction_version = 0
+                row.extraction_status = "excluded"
+            elif changes.get("exclude_from_ai") is False or not row.exclude_from_ai:
+                row.extraction_status, row.extraction_error = "not_requested", None
         for key, value in changes.items():
             setattr(row, key, value)
         row.version += 1
@@ -532,6 +637,46 @@ def weekly_knowledge_review(user: User = Depends(get_current_user), session: Ses
                          for item in insight.evidence if isinstance(item, dict) and "document_id" in item and "title" in item]})
     return {"generated_at": now, "window_start": start, "window_end": now, "observations": observations,
             "limitations": ["This review uses document activity and deterministic keyword signals. It does not infer personal traits or analyze excluded notes."]}
+
+
+@router.get("/knowledge/reports/{report_type}")
+def knowledge_report(report_type: str, topic: str | None = Query(default=None, max_length=120),
+                     user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    """Generate factual, evidence-linked daily/monthly/topic/writing/decision reports."""
+    if report_type not in {"daily", "monthly", "topic", "writing", "decisions"}:
+        raise HTTPException(status_code=404, detail="Unknown knowledge report")
+    if report_type == "topic" and not (topic and topic.strip()):
+        raise HTTPException(status_code=422, detail="A topic is required")
+    now = datetime.now(timezone.utc)
+    days = 1 if report_type == "daily" else 30
+    start = now - timedelta(days=days)
+    query = select(KnowledgeDocument).where(KnowledgeDocument.user_id == user.id,
+        KnowledgeDocument.archived.is_(False), KnowledgeDocument.exclude_from_ai.is_(False),
+        KnowledgeDocument.document_type != "journal")
+    if report_type == "writing":
+        query = query.where(KnowledgeDocument.document_type == "draft")
+    elif report_type == "decisions":
+        query = query.where(KnowledgeDocument.document_type == "decision")
+    docs = session.scalars(query.order_by(KnowledgeDocument.updated_at.desc()).limit(500)).all()
+    if report_type == "topic":
+        needle = topic.strip().casefold()
+        docs = [doc for doc in docs if needle in f"{doc.title} {doc.content} {' '.join(doc.tags)}".casefold()]
+    recent = [doc for doc in docs if (doc.updated_at.replace(tzinfo=timezone.utc) if doc.updated_at.tzinfo is None else doc.updated_at.astimezone(timezone.utc)) >= start]
+    observations: list[dict[str, object]] = []
+    if recent:
+        observations.append({"kind": "records", "title": f"{len(recent)} matching records updated in the last {days} day(s)",
+            "detail": "This is a count of document updates, not an assessment of importance.",
+            "evidence": [{"document_id": str(doc.id), "title": doc.title} for doc in recent[:20]]})
+    if report_type in {"writing", "monthly"}:
+        unfinished = [doc for doc in docs if doc.document_type == "draft" and doc.status in {"developing", "ready_to_resume"}]
+        if unfinished:
+            observations.append({"kind": "unfinished", "title": f"{len(unfinished)} drafts remain unfinished",
+                "detail": "These drafts are still in developing or ready to resume status; no deadline is implied.",
+                "evidence": [{"document_id": str(doc.id), "title": doc.title} for doc in unfinished[:20]]})
+    if report_type == "topic" and not recent:
+        observations.append({"kind": "sparse", "title": "No matching topic records were found", "detail": f"No included records matched {topic!r}.", "evidence": []})
+    return {"generated_at": now, "window_start": start, "window_end": now, "observations": observations,
+        "limitations": ["Reports use document metadata and text matching. They exclude journals and AI-excluded documents; interpretations are not generated from sparse evidence."]}
 
 
 @router.patch("/knowledge/reviews/{review_id}")

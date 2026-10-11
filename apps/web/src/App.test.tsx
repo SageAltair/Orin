@@ -27,7 +27,7 @@ describe("Markdown response rendering", () => {
     const workspace = renderToStaticMarkup(<KnowledgeWorkspace projects={[]} />);
     const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
     expect(workspace).toContain("Ask can synthesize included notes");
-    expect(workspace).toContain("Weekly review");
+    expect(workspace).toContain("Weekly report");
     expect(workspace).toContain("New note");
     expect(capture).toContain("Saved to your Knowledge inbox");
     expect(capture).toContain('aria-modal="true"');

@@ -694,6 +694,41 @@ class KnowledgeDocument(TimestampMixin, Base):
     exclude_from_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    extraction_status: Mapped[str] = mapped_column(String(16), nullable=False, default="not_requested", server_default="not_requested")
+    extracted_data: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    extraction_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    extraction_error: Mapped[str | None] = mapped_column(String(240))
+
+
+class KnowledgeExtractionJob(TimestampMixin, Base):
+    __tablename__ = "knowledge_extraction_jobs"
+    __table_args__ = (
+        UniqueConstraint("document_id", "document_version", name="uq_knowledge_extraction_version"),
+        Index("ix_knowledge_extraction_jobs_status_retry", "status", "next_retry_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    document_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued", server_default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(String(240))
+    model_name: Mapped[str | None] = mapped_column(String(160))
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False, default="knowledge-extraction-v1", server_default="knowledge-extraction-v1")
+
+
+class KnowledgeFeedback(CreatedAtMixin, Base):
+    __tablename__ = "knowledge_feedback"
+    __table_args__ = (Index("ix_knowledge_feedback_user_created", "user_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    insight_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_insights.id", ondelete="CASCADE"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"))
+    feedback_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    correction: Mapped[str | None] = mapped_column(Text)
 
 
 class KnowledgeDocumentVersion(CreatedAtMixin, Base):

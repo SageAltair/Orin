@@ -45,6 +45,13 @@ export interface KnowledgeDocumentRecord {
   exclude_from_ai: boolean;
   review_at: string | null;
   version: number;
+  extraction_status?: "not_requested" | "queued" | "processing" | "succeeded" | "failed" | "superseded" | "excluded" | "stale";
+  extraction_version?: number;
+  extracted_data?: {
+    summary: string; topics: string[]; entities: string[]; decisions: string[];
+    open_questions: string[]; candidate_actions: string[]; date_mentions: string[];
+  } | null;
+  extraction_error?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,7 +61,7 @@ export interface KnowledgeInsightRecord {
   type: string;
   title: string;
   explanation: string;
-  evidence: Array<{ document_id: string; title: string; updated_at: string }>;
+  evidence: Array<{ document_id?: string; task_id?: string; record_type?: "document" | "task"; title: string; updated_at?: string }>;
   frequency: number;
   confidence: number;
   limitations: string;
@@ -91,6 +98,8 @@ export interface KnowledgeWeeklyReport {
   observations: Array<{ kind: string; title: string; detail: string; evidence: Array<{ document_id: string; title: string }> }>;
   limitations: string[];
 }
+
+export interface KnowledgeReport extends KnowledgeWeeklyReport {}
 
 export interface KnowledgeDocumentVersionRecord {
   id: string;

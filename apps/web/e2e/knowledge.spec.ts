@@ -25,6 +25,12 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.locator(".knowledge-properties label").filter({ hasText: "Type" }).locator("select").selectOption("research");
   await page.getByLabel("Content").fill("Research AI tools for story outlining and narration.");
   await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await page.getByRole("button", { name: "Bold" }).click();
+  await expect(page.getByLabel("Content")).toContainText("**text**");
+  await page.getByRole("button", { name: "Preview formatting" }).click();
+  await expect(page.locator(".knowledge-markdown-preview").getByText("text")).toBeVisible();
+  await page.getByRole("button", { name: "Edit markdown" }).click();
+  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
   await page.getByLabel("Link to").selectOption({ label: "Create Christian storytelling videos" });
   await page.getByRole("button", { name: "Add link" }).click();
   await expect(page.locator(".knowledge-relations > div").getByText(/Create Christian storytelling videos/)).toBeVisible();
@@ -45,10 +51,11 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await expect(page.locator(".knowledge-answer")).toBeVisible();
   await expect(page.locator(".knowledge-answer").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
   await page.getByRole("button", { name: "Refresh signals" }).click();
-  const review = page.locator(".knowledge-signal").filter({ hasText: "Unfinished video script draft" });
+  const reviewColumn = page.locator(".knowledge-signal-grid > div").nth(1);
+  const review = reviewColumn.locator(".knowledge-signal").filter({ hasText: "Unfinished video script draft" });
   await expect(review).toBeVisible();
   await review.getByRole("button", { name: "Snooze" }).click();
-  const snoozedSection = page.locator("details").filter({ hasText: "Snoozed" });
+  const snoozedSection = reviewColumn.locator("details").filter({ hasText: "Snoozed" });
   await snoozedSection.locator("summary").click();
   const snoozed = snoozedSection.locator(".knowledge-signal").filter({ hasText: "Unfinished video script draft" });
   await expect(snoozed).toBeVisible();
@@ -60,8 +67,8 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await expect(page.locator(".knowledge-documents").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Knowledge" }).click();
-  await expect(page.getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Unfinished video script draft/ })).toBeVisible();
-  await page.getByRole("button", { name: /AI assisted storytelling research/ }).click();
+  await expect(page.locator(".knowledge-documents").getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible();
+  await expect(page.locator(".knowledge-documents").getByRole("button", { name: /Unfinished video script draft/ })).toBeVisible();
+  await page.locator(".knowledge-documents").getByRole("button", { name: /AI assisted storytelling research/ }).click();
   await expect(page.locator(".knowledge-relations > div").getByText(/Create Christian storytelling videos/)).toBeVisible();
 });

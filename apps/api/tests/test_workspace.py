@@ -31,6 +31,7 @@ def client() -> Generator[TestClient, None, None]:
 
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None)
     try:
         with TestClient(app) as test_client:
             yield test_client
@@ -154,6 +155,21 @@ def test_knowledge_intelligence_is_evidence_linked_filtered_and_actionable(clien
     assert any(row["id"] == topic["id"] for row in client.get("/api/v1/knowledge/insights?include_dismissed=true").json())
 
 
+def test_repeated_task_blockers_create_insight_with_task_evidence(client: TestClient) -> None:
+    project = _project(client)
+    tasks = [client.post("/api/v1/tasks", json={"title": title, "project_id": project["id"]}).json()
+             for title in ["Prepare story outline", "Record story narration"]]
+    for index, task in enumerate(tasks):
+        saved = client.post(f"/api/v1/tasks/{task['id']}/return-points", json={
+            "blocker": "Waiting for the shared review materials", "idempotency_key": f"blocker-{index}"})
+        assert saved.status_code == 201
+    assert client.post("/api/v1/knowledge/intelligence/evaluate").status_code == 200
+    insight = next(item for item in client.get("/api/v1/knowledge/insights").json()
+                   if item["type"] == "repeated_blocker")
+    assert {item["task_id"] for item in insight["evidence"]} == {task["id"] for task in tasks}
+    assert "may describe" in insight["explanation"]
+
+
 def test_knowledge_reviews_are_due_owned_and_persist_actions(client: TestClient) -> None:
     document = client.post("/api/v1/knowledge/documents", json={
         "title": "Resume grant draft", "content": "Next paragraph", "document_type": "draft",
@@ -215,6 +231,36 @@ def test_weekly_knowledge_report_contains_observations_with_evidence(client: Tes
     assert activity["evidence"] == [{"document_id": document["id"], "title": "Story outline"}]
     assert all(row["document_id"] != excluded["id"] for observation in report_data["observations"] for row in observation["evidence"])
     assert report_data["limitations"]
+
+
+def test_knowledge_report_variants_filter_records_and_keep_evidence(client: TestClient) -> None:
+    draft = client.post("/api/v1/knowledge/documents", json={"title": "Story draft", "content": "A story about hope.", "document_type": "draft", "status": "developing"}).json()
+    decision = client.post("/api/v1/knowledge/documents", json={"title": "Story format decision", "content": "Use short episodes.", "document_type": "decision"}).json()
+    client.post("/api/v1/knowledge/documents", json={"title": "Private journal story", "content": "Story private.", "document_type": "journal"})
+    for report_type, source in [("writing", draft), ("decisions", decision), ("topic?topic=hope", draft)]:
+        response = client.get(f"/api/v1/knowledge/reports/{report_type}")
+        assert response.status_code == 200
+        evidence = [item for observation in response.json()["observations"] for item in observation["evidence"]]
+        assert any(item["document_id"] == source["id"] for item in evidence)
+        assert all("Private journal" not in item["title"] for item in evidence)
+    assert client.get("/api/v1/knowledge/reports/topic").status_code == 422
+    assert client.get("/api/v1/knowledge/reports/not-a-report").status_code == 404
+
+
+def test_extraction_queue_is_versioned_idempotent_and_respects_exclusion(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.workspace_router as workspace_router
+
+    monkeypatch.setattr(workspace_router, "process_extraction_job", lambda *_: None)
+    document = client.post("/api/v1/knowledge/documents", json={"title": "Idea", "content": "A candidate."}).json()
+    first = client.post(f"/api/v1/knowledge/documents/{document['id']}/extract")
+    duplicate = client.post(f"/api/v1/knowledge/documents/{document['id']}/extract")
+    assert first.status_code == duplicate.status_code == 202
+    assert first.json()["id"] == duplicate.json()["id"]
+    assert client.get(f"/api/v1/knowledge/documents/{document['id']}/extraction").json()["status"] == "queued"
+    excluded = client.patch(f"/api/v1/knowledge/documents/{document['id']}", json={"exclude_from_ai": True, "expected_version": 1})
+    assert excluded.status_code == 200
+    assert client.get(f"/api/v1/knowledge/documents/{document['id']}/extraction").json()["status"] == "excluded"
+    assert client.post(f"/api/v1/knowledge/documents/{document['id']}/extract").status_code == 409
 
 
 def test_focus_session_is_server_owned_pauseable_and_audited(client: TestClient) -> None:
