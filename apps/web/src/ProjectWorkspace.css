@@ -1,5 +1,10 @@
 .project-tasks { min-width: 0; }
 .project-list-controls { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr); gap: 12px; }
+.project-create-form { flex-wrap: wrap; }
+.project-create-outcome { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+.project-create-outcome summary { width: fit-content; padding: 4px 0; color: var(--accent); cursor: pointer; }
+.project-create-outcome label { display: grid; gap: 6px; margin-top: 7px; }
+.project-create-outcome textarea { min-height: 70px; padding: 9px 11px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; resize: vertical; }
 .project-list-controls > label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
 .project-list-controls input, .project-list-controls select { min-height: 40px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
 .project-header-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
