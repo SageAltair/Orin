@@ -39,7 +39,13 @@ async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject
     if (pathname === "/api/v1/focus-sessions" && route.request().method() === "GET") return route.fulfill({ json: focusSessions });
     if (pathname === "/api/v1/focus-sessions" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const focus = { ...item, id: "focus-1", status: "active", ends_at: "2026-10-08T02:00:00Z" }; focusSessions.push(focus); return route.fulfill({ status: 201, json: focus }); }
     if (/\/api\/v1\/focus-sessions\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const session = focusSessions[0]; if (session) Object.assign(session, { status: (await route.request().postDataJSON() as { action: string }).action === "cancel" ? "cancelled" : "paused" }); return route.fulfill({ json: session }); }
-    if (/\/api\/v1\/projects\/[^/]+\/context$/.test(pathname)) return route.fulfill({ json: { project: {}, progress: { completed_tasks: 0, total_tasks: 0, percentage: null }, tasks: [], blockers: [], activity: [], knowledge: memories, next_actions: [], active_focus: null, agents: [], files: [] } });
+    if (/\/api\/v1\/projects\/[^/]+\/context$/.test(pathname)) {
+      const projectId = pathname.split("/").at(-2);
+      const projectTasks = tasks.filter(task => task.project_id === projectId);
+      const completed = projectTasks.filter(task => task.status === "done").length;
+      const openTasks = projectTasks.filter(task => !["done", "cancelled"].includes(String(task.status)));
+      return route.fulfill({ json: { project: projects.find(project => project.id === projectId) ?? {}, progress: { completed_tasks: completed, total_tasks: projectTasks.length, percentage: projectTasks.length ? Math.round(completed * 100 / projectTasks.length) : null }, tasks: projectTasks, blockers: projectTasks.filter(task => task.status === "blocked"), activity: [], knowledge: memories, next_actions: openTasks.slice(0, 3), active_focus: null, agents: [], files: [] } });
+    }
     if (/\/api\/v1\/projects\/[^/]+\/milestones$/.test(pathname) && route.request().method() === "GET") return route.fulfill({ json: [] });
     if (pathname === "/api/v1/approvals" && route.request().method() === "GET") return route.fulfill({ json: approvals });
     if (pathname.includes("/approvals/") && route.request().method() === "POST") {
@@ -87,13 +93,14 @@ async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject
       }
       return route.fulfill({ json: { command_id: "cmd-3", status: "unsupported", intent: "UNSUPPORTED", result: null, message: "This request is not supported." } });
     }
-    if (pathname.endsWith("/tasks") && route.request().method() === "GET") return route.fulfill({ json: tasks });
+    if (pathname.endsWith("/tasks") && route.request().method() === "GET") { const projectId = new URL(route.request().url()).searchParams.get("project_id"); return route.fulfill({ json: projectId ? tasks.filter(task => task.project_id === projectId) : tasks }); }
     if (pathname.endsWith("/tasks") && route.request().method() === "POST") {
-      const data = await route.request().postDataJSON() as { title: string };
-      const task = { id: `task-${tasks.length + 1}`, owner_id: "user-1", project_id: null, assignee_id: null, title: data.title, description: null, status: "todo", priority: "normal", due_at: null, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" };
+      const data = await route.request().postDataJSON() as { title: string; project_id?: string | null };
+      const task = { id: `task-${tasks.length + 1}`, owner_id: "user-1", project_id: data.project_id ?? null, assignee_id: null, title: data.title, description: null, status: "todo", priority: "normal", due_at: null, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" };
       tasks.push(task);
       return route.fulfill({ status: 201, json: task });
     }
+    if (/\/api\/v1\/tasks\/[^/]+\/dependencies$/.test(pathname) && route.request().method() === "GET") return route.fulfill({ json: [] });
     if (/\/api\/v1\/tasks\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const task = tasks.find(item => item.id === pathname.split("/").at(-1)); if (!task) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); Object.assign(task, await route.request().postDataJSON()); if (["done", "cancelled"].includes(String(task.status))) { const index = taskBlocks.findIndex(block => block.task_id === task.id); if (index >= 0) taskBlocks.splice(index, 1); } return route.fulfill({ json: task }); }
     if (pathname === "/api/v1/projects" && route.request().method() === "GET") return route.fulfill({ json: projects });
     if (pathname === "/api/v1/projects" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const project = { ...item, id: `project-${projects.length + 1}`, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }; projects.push(project); return route.fulfill({ status: 201, json: project }); }
@@ -562,6 +569,40 @@ test("home dashboard shows persisted tasks, projects, and work sessions", async 
   await expect(page.getByText("Already finished")).toHaveCount(0);
   await expect(page.getByText("Orin launch")).toBeVisible();
   await expect(page.getByText("Release planning")).toBeVisible();
+});
+
+test("project workspace creates an outcome, updates a task, and reflects completion", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Projects" }).click();
+
+  await page.getByPlaceholder("Create a project").fill("Launch a clear first release");
+  await page.getByText("Add the intended outcome").click();
+  await page.getByLabel("What would success look like?").fill("A reliable release that early users can complete onboarding with.");
+  await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByText("Project created.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Objective", exact: true })).toHaveValue("A reliable release that early users can complete onboarding with.");
+
+  await page.getByPlaceholder("Add a task to this project").fill("Write the onboarding checklist");
+  await page.getByRole("button", { name: "Add task" }).click();
+  const taskButton = page.getByRole("button", { name: "Write the onboarding checklist" });
+  await expect(taskButton).toBeVisible();
+  await taskButton.click();
+  const taskDetails = page.getByRole("dialog", { name: "Task details" });
+  await expect(taskDetails).toBeVisible();
+  const titleInput = taskDetails.getByLabel("Title");
+  await titleInput.fill("Draft the onboarding checklist");
+  const savedTask = page.waitForResponse(response => response.url().includes("/api/v1/tasks/task-1") && response.request().method() === "PATCH");
+  await taskDetails.getByLabel("Description").click();
+  await savedTask;
+  await taskDetails.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByRole("button", { name: "Draft the onboarding checklist" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Status for Draft the onboarding checklist" }).selectOption("done");
+  await expect(page.getByText("1 of 1 tasks complete (100%)")).toBeVisible();
+  await page.getByLabel("Show").selectOption("done");
+  await expect(page.getByRole("button", { name: "Draft the onboarding checklist" })).toBeVisible();
 });
 
 test("quick capture saves an inbox task from the global workspace toolbar", async ({ page }) => {
