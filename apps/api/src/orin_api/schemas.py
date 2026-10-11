@@ -141,6 +141,10 @@ class TaskUpdate(BaseModel):
     trigger: str | None = Field(default=None, max_length=240)
 
 
+class TaskDependencyCreate(BaseModel):
+    depends_on_task_id: uuid.UUID
+
+
 class TaskRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

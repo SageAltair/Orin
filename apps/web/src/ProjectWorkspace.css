@@ -34,6 +34,13 @@
 .project-milestone-more textarea, .project-milestone-edit textarea, .project-milestone-edit input { min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
 .project-milestone-more textarea, .project-milestone-edit textarea { min-height: 70px; resize: vertical; }
 .project-milestone-edit small { color: var(--muted); font-size: 11px; }
+.task-dependencies { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.task-dependencies h4, .task-dependencies p { margin: 0; }
+.task-dependencies ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.task-dependencies li { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--soft); font-size: 12px; }
+.task-dependencies form { display: flex; align-items: end; gap: 8px; margin-top: 6px; }
+.task-dependencies form label { flex: 1; }
+.task-dependencies form select { width: 100%; }
 @media (max-width: 600px) {
   .project-list-controls { grid-template-columns: 1fr; }
   .project-header-fields { grid-template-columns: 1fr; }
@@ -44,4 +51,5 @@
   .project-milestone-more { grid-column: 1; }
   .project-milestone-row { grid-template-columns: 1fr; }
   .project-milestone-edit { grid-column: 1; }
+  .task-dependencies form { align-items: stretch; flex-direction: column; }
 }

@@ -135,6 +135,28 @@ def test_project_milestones_link_to_project_tasks_and_are_user_scoped(client: Te
     assert client.get(f"/api/v1/projects/{uuid.uuid4()}/milestones").status_code == 404
 
 
+def test_task_dependencies_are_idempotent_scoped_and_reject_cycles(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Dependency project"}).json()
+    tasks = [client.post("/api/v1/tasks", json={"title": title, "project_id": project["id"]}).json() for title in ["A", "B", "C"]]
+    task_a, task_b, task_c = tasks
+
+    added = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_b["id"]})
+    assert added.status_code == 201
+    assert added.json()["id"] == task_b["id"]
+    duplicate = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_b["id"]})
+    assert duplicate.status_code == 201
+    assert client.get(f"/api/v1/tasks/{task_a['id']}/dependencies").json()[0]["id"] == task_b["id"]
+    assert client.post(f"/api/v1/tasks/{task_b['id']}/dependencies", json={"depends_on_task_id": task_c["id"]}).status_code == 201
+
+    cycle = client.post(f"/api/v1/tasks/{task_c['id']}/dependencies", json={"depends_on_task_id": task_a["id"]})
+    assert cycle.status_code == 422
+    self_dependency = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_a["id"]})
+    assert self_dependency.status_code == 422
+
+    assert client.delete(f"/api/v1/tasks/{task_a['id']}/dependencies/{task_b['id']}").status_code == 204
+    assert client.get(f"/api/v1/tasks/{task_a['id']}/dependencies").json() == []
+
+
 def test_command_history_returns_only_owned_persisted_requests(client: TestClient) -> None:
     session_factory = app.dependency_overrides[get_session]
     # The test fixture's session override shares the same in-memory database.

@@ -42,6 +42,7 @@ from orin_api.models import (
     Project,
     ProjectStatus,
     Task,
+    TaskDependency,
     TaskSchedule,
     TaskStatus,
     TaskPriority,
@@ -68,6 +69,7 @@ from orin_api.schemas import (
     TaskCreate,
     TaskRead,
     TaskUpdate,
+    TaskDependencyCreate,
     CommandCreate,
     CommandResult,
     CommandHistoryRead,
@@ -1171,6 +1173,77 @@ def validate_task_links(session: Session, user_id: uuid.UUID, project_id: uuid.U
             raise HTTPException(status_code=422, detail="Milestone must belong to the task's project")
     if assignee_id is not None:
         require_user(session, assignee_id)
+
+
+def would_create_dependency_cycle(session: Session, user_id: uuid.UUID, task_id: uuid.UUID, prerequisite_id: uuid.UUID) -> bool:
+    edges = session.execute(
+        select(TaskDependency.task_id, TaskDependency.depends_on_task_id)
+        .join(Task, Task.id == TaskDependency.task_id)
+        .where(Task.owner_id == user_id)
+    ).all()
+    prerequisites: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for source_id, target_id in edges:
+        prerequisites.setdefault(source_id, []).append(target_id)
+    pending = [prerequisite_id]
+    seen: set[uuid.UUID] = set()
+    while pending:
+        current = pending.pop()
+        if current == task_id:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(prerequisites.get(current, []))
+    return False
+
+
+@router.get("/tasks/{task_id}/dependencies", response_model=list[TaskRead])
+def list_task_dependencies(task_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[Task]:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return list(session.scalars(
+        select(Task).join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
+        .where(TaskDependency.task_id == task_id, Task.owner_id == user.id)
+        .order_by(Task.title.asc())
+    ).all())
+
+
+@router.post("/tasks/{task_id}/dependencies", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
+def add_task_dependency(task_id: uuid.UUID, data: TaskDependencyCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Task:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    prerequisite = session.scalar(select(Task).where(Task.id == data.depends_on_task_id, Task.owner_id == user.id))
+    if task is None or prerequisite is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    existing = session.scalar(select(TaskDependency).where(TaskDependency.task_id == task.id, TaskDependency.depends_on_task_id == prerequisite.id))
+    if existing is not None:
+        return prerequisite
+    if would_create_dependency_cycle(session, user.id, task.id, prerequisite.id):
+        raise HTTPException(status_code=422, detail="This dependency would create a cycle")
+    dependency = TaskDependency(task_id=task.id, depends_on_task_id=prerequisite.id)
+    session.add(dependency)
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Added prerequisite: {prerequisite.title}")
+    session.commit()
+    return prerequisite
+
+
+@router.delete("/tasks/{task_id}/dependencies/{depends_on_task_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_task_dependency(task_id: uuid.UUID, depends_on_task_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Response:
+    task = session.scalar(select(Task).where(Task.id == task_id, Task.owner_id == user.id))
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    dependency = session.scalar(
+        select(TaskDependency).join(Task, Task.id == TaskDependency.depends_on_task_id)
+        .where(TaskDependency.task_id == task.id, TaskDependency.depends_on_task_id == depends_on_task_id, Task.owner_id == user.id)
+    )
+    if dependency is None:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+    prerequisite = session.scalar(select(Task).where(Task.id == depends_on_task_id, Task.owner_id == user.id))
+    session.delete(dependency)
+    if prerequisite is not None:
+        add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=task.project_id, task_id=task.id, activity_type=ActivityType.TASK_UPDATED, summary=f"Removed prerequisite: {prerequisite.title}")
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/tasks", response_model=TaskRead, status_code=status.HTTP_201_CREATED)
