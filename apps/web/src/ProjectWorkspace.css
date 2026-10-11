@@ -23,10 +23,25 @@
 .project-task-card { display: grid; gap: 7px; margin-bottom: 8px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .project-task-card select { min-height: 32px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--soft); background: var(--surface); font: inherit; font-size: 11px; }
 .project-task-column > .inline-empty { padding: 8px 2px; font-size: 11px; }
+.project-milestone-form { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; }
+.project-milestone-more { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.project-milestone-more summary, .project-milestone-edit summary { width: fit-content; padding: 5px 0; color: var(--accent); cursor: pointer; }
+.project-milestone-more label, .project-milestone-edit label { display: grid; gap: 5px; margin-top: 10px; }
+.project-milestone-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; align-items: center; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.project-milestone-row .data-main { min-width: 0; }
+.project-milestone-row .data-main p { margin: 4px 0 0; white-space: pre-wrap; color: var(--soft); font-size: 12px; }
+.project-milestone-edit { grid-column: 1 / -1; }
+.project-milestone-more textarea, .project-milestone-edit textarea, .project-milestone-edit input { min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.project-milestone-more textarea, .project-milestone-edit textarea { min-height: 70px; resize: vertical; }
+.project-milestone-edit small { color: var(--muted); font-size: 11px; }
 @media (max-width: 600px) {
   .project-list-controls { grid-template-columns: 1fr; }
   .project-header-fields { grid-template-columns: 1fr; }
   .project-task-tools { align-items: stretch; flex-direction: column; }
   .project-task-row { align-items: stretch; }
   .project-task-row select { flex: 1 1 100%; }
+  .project-milestone-form { grid-template-columns: 1fr; }
+  .project-milestone-more { grid-column: 1; }
+  .project-milestone-row { grid-template-columns: 1fr; }
+  .project-milestone-edit { grid-column: 1; }
 }
