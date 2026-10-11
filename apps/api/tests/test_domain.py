@@ -97,6 +97,44 @@ def test_activity_filter_and_detail_are_user_scoped(client: TestClient) -> None:
     assert client.get("/api/v1/activity", params={"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}).status_code == 422
 
 
+def test_project_milestones_link_to_project_tasks_and_are_user_scoped(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Milestone project"}).json()
+    assert project["priority"] == "normal"
+    updated_project = client.patch(f"/api/v1/projects/{project['id']}", json={
+        "priority": "high", "target_date": "2026-12-31", "name": "Milestone project revised",
+    })
+    assert updated_project.status_code == 200
+    assert updated_project.json()["priority"] == "high"
+    assert updated_project.json()["target_date"] == "2026-12-31"
+    milestone_response = client.post(f"/api/v1/projects/{project['id']}/milestones", json={
+        "title": "First release", "target_date": "2026-12-01", "completion_criteria": "Release is available to users",
+    })
+    assert milestone_response.status_code == 201
+    milestone = milestone_response.json()
+    assert milestone["project_id"] == project["id"]
+    assert milestone["status"] == "pending"
+
+    task = client.post("/api/v1/tasks", json={
+        "title": "Prepare release notes", "project_id": project["id"], "milestone_id": milestone["id"],
+    })
+    assert task.status_code == 201
+    assert task.json()["milestone_id"] == milestone["id"]
+
+    completed = client.patch(f"/api/v1/milestones/{milestone['id']}", json={"status": "completed"})
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+
+    other_project = client.post("/api/v1/projects", json={"name": "Another project"}).json()
+    other_milestone = client.post(f"/api/v1/projects/{other_project['id']}/milestones", json={"title": "Other checkpoint"}).json()
+    mismatch = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"milestone_id": other_milestone["id"]})
+    assert mismatch.status_code == 422
+
+    assert client.delete(f"/api/v1/milestones/{milestone['id']}").status_code == 204
+    remaining_task = client.get("/api/v1/tasks", params={"project_id": project["id"]}).json()[0]
+    assert remaining_task["milestone_id"] is None
+    assert client.get(f"/api/v1/projects/{uuid.uuid4()}/milestones").status_code == 404
+
+
 def test_command_history_returns_only_owned_persisted_requests(client: TestClient) -> None:
     session_factory = app.dependency_overrides[get_session]
     # The test fixture's session override shares the same in-memory database.

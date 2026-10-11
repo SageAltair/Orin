@@ -28,6 +28,7 @@ from orin_api.models import (
     Conversation,
     FileAttachment,
     Memory,
+    Milestone,
     CommandStatus,
     Approval,
     ApprovalStatus,
@@ -61,6 +62,9 @@ from orin_api.schemas import (
     ProjectCreate,
     ProjectRead,
     ProjectUpdate,
+    MilestoneCreate,
+    MilestoneRead,
+    MilestoneUpdate,
     TaskCreate,
     TaskRead,
     TaskUpdate,
@@ -1060,7 +1064,8 @@ def create_project(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Project:
-    project = Project(owner_id=user.id, name=data.name.strip(), description=data.description, objective=data.objective)
+    project = Project(owner_id=user.id, **data.model_dump())
+    project.name = project.name.strip()
     session.add(project)
     session.flush()
     add_project_owner_membership(session, project)
@@ -1095,6 +1100,51 @@ def ensure_project_access(session: Session, project_id: uuid.UUID, user_id: uuid
     return session.scalar(select(Project).where(Project.id == project_id, Project.owner_id == user_id))
 
 
+@router.get("/projects/{project_id}/milestones", response_model=list[MilestoneRead])
+def list_milestones(project_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[Milestone]:
+    if ensure_project_access(session, project_id, user.id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return list(session.scalars(select(Milestone).where(Milestone.project_id == project_id).order_by(Milestone.target_date.asc().nulls_last(), Milestone.created_at.asc())).all())
+
+
+@router.post("/projects/{project_id}/milestones", response_model=MilestoneRead, status_code=status.HTTP_201_CREATED)
+def create_milestone(project_id: uuid.UUID, data: MilestoneCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Milestone:
+    project = ensure_project_access(session, project_id, user.id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    milestone = Milestone(project_id=project.id, **data.model_dump())
+    session.add(milestone)
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project.id, activity_type=ActivityType.PROJECT_UPDATED, summary=f"Added milestone: {milestone.title}")
+    session.commit()
+    session.refresh(milestone)
+    return milestone
+
+
+@router.patch("/milestones/{milestone_id}", response_model=MilestoneRead)
+def update_milestone(milestone_id: uuid.UUID, data: MilestoneUpdate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Milestone:
+    milestone = session.scalar(select(Milestone).join(Project).where(Milestone.id == milestone_id, Project.owner_id == user.id))
+    if milestone is None:
+        raise HTTPException(status_code=404, detail="Milestone not found")
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(milestone, field, value)
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=milestone.project_id, activity_type=ActivityType.PROJECT_UPDATED, summary=f"Updated milestone: {milestone.title}")
+    session.commit()
+    session.refresh(milestone)
+    return milestone
+
+
+@router.delete("/milestones/{milestone_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_milestone(milestone_id: uuid.UUID, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Response:
+    milestone = session.scalar(select(Milestone).join(Project).where(Milestone.id == milestone_id, Project.owner_id == user.id))
+    if milestone is None:
+        raise HTTPException(status_code=404, detail="Milestone not found")
+    project_id, title = milestone.project_id, milestone.title
+    session.delete(milestone)
+    add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=project_id, activity_type=ActivityType.PROJECT_UPDATED, summary=f"Removed milestone: {title}")
+    session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/tasks", response_model=list[TaskRead])
 def list_tasks(
     user: User = Depends(get_current_user),
@@ -1112,9 +1162,13 @@ def list_tasks(
     return list(session.scalars(statement.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc()).limit(limit).offset(offset)).all())
 
 
-def validate_task_links(session: Session, user_id: uuid.UUID, project_id: uuid.UUID | None, assignee_id: uuid.UUID | None) -> None:
+def validate_task_links(session: Session, user_id: uuid.UUID, project_id: uuid.UUID | None, assignee_id: uuid.UUID | None, milestone_id: uuid.UUID | None = None) -> None:
     if project_id is not None and ensure_project_access(session, project_id, user_id) is None:
         raise HTTPException(status_code=422, detail="Project is not available to this user")
+    if milestone_id is not None:
+        milestone = session.scalar(select(Milestone).join(Project).where(Milestone.id == milestone_id, Project.owner_id == user_id))
+        if milestone is None or project_id != milestone.project_id:
+            raise HTTPException(status_code=422, detail="Milestone must belong to the task's project")
     if assignee_id is not None:
         require_user(session, assignee_id)
 
@@ -1125,7 +1179,7 @@ def create_task(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Task:
-    validate_task_links(session, user.id, data.project_id, data.assignee_id)
+    validate_task_links(session, user.id, data.project_id, data.assignee_id, data.milestone_id)
     values = data.model_dump()
     requested_status = values.pop("status")
     task = Task(owner_id=user.id, **values)
@@ -1154,7 +1208,7 @@ def update_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     changes = data.model_dump(exclude_unset=True)
-    validate_task_links(session, user.id, changes.get("project_id", task.project_id), changes.get("assignee_id", task.assignee_id))
+    validate_task_links(session, user.id, changes.get("project_id", task.project_id), changes.get("assignee_id", task.assignee_id), changes.get("milestone_id", task.milestone_id))
     if "title" in changes and changes["title"] is not None:
         changes["title"] = changes["title"].strip()
     requested_status = changes.pop("status", None)

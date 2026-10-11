@@ -263,10 +263,33 @@ class Project(TimestampMixin, Base):
     objective: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[ProjectStatus] = mapped_column(enum_column(ProjectStatus, "project_status"), nullable=False, default=ProjectStatus.ACTIVE, server_default=ProjectStatus.ACTIVE.value)
+    priority: Mapped[TaskPriority] = mapped_column(enum_column(TaskPriority, "project_priority"), nullable=False, default=TaskPriority.NORMAL, server_default=TaskPriority.NORMAL.value)
+    target_date: Mapped[date | None] = mapped_column(Date)
 
     owner: Mapped[User] = relationship(back_populates="projects")
     members: Mapped[list[ProjectMember]] = relationship(back_populates="project", cascade="all, delete-orphan")
     tasks: Mapped[list[Task]] = relationship(back_populates="project")
+    milestones: Mapped[list[Milestone]] = relationship(back_populates="project", cascade="all, delete-orphan")
+
+
+class Milestone(TimestampMixin, Base):
+    __tablename__ = "milestones"
+    __table_args__ = (
+        CheckConstraint("length(trim(title)) > 0", name="ck_milestones_title_nonempty"),
+        CheckConstraint("status IN ('pending', 'completed')", name="ck_milestones_status"),
+        Index("ix_milestones_project_target", "project_id", "target_date"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    target_date: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    completion_criteria: Mapped[str | None] = mapped_column(Text)
+
+    project: Mapped[Project] = relationship(back_populates="milestones")
+    tasks: Mapped[list[Task]] = relationship(back_populates="milestone")
 
 
 class ProjectMember(TimestampMixin, Base):
@@ -296,6 +319,7 @@ class Task(TimestampMixin, Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    milestone_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("milestones.id", ondelete="SET NULL"))
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -320,6 +344,7 @@ class Task(TimestampMixin, Base):
 
     owner: Mapped[User] = relationship(back_populates="tasks", foreign_keys=[owner_id])
     project: Mapped[Project | None] = relationship(back_populates="tasks")
+    milestone: Mapped[Milestone | None] = relationship(back_populates="tasks")
     dependencies: Mapped[list[TaskDependency]] = relationship(foreign_keys="TaskDependency.task_id", back_populates="task", cascade="all, delete-orphan")
 
 

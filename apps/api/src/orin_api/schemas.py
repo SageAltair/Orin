@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated, Literal
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
@@ -47,6 +47,8 @@ class ProjectCreate(BaseModel):
     name: ProjectName
     description: str | None = None
     objective: str | None = Field(default=None, max_length=2000)
+    priority: TaskPriority = TaskPriority.NORMAL
+    target_date: date | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -54,6 +56,8 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
     objective: str | None = Field(default=None, max_length=2000)
     status: ProjectStatus | None = None
+    priority: TaskPriority | None = None
+    target_date: date | None = None
 
 
 class ProjectRead(BaseModel):
@@ -65,6 +69,40 @@ class ProjectRead(BaseModel):
     description: str | None
     objective: str | None = None
     status: ProjectStatus
+    priority: TaskPriority
+    target_date: date | None
+    created_at: datetime
+    updated_at: datetime
+
+
+MilestoneTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=180)]
+
+
+class MilestoneCreate(BaseModel):
+    title: MilestoneTitle
+    description: str | None = None
+    target_date: date | None = None
+    completion_criteria: str | None = None
+
+
+class MilestoneUpdate(BaseModel):
+    title: MilestoneTitle | None = None
+    description: str | None = None
+    target_date: date | None = None
+    completion_criteria: str | None = None
+    status: Literal["pending", "completed"] | None = None
+
+
+class MilestoneRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    title: str
+    description: str | None
+    target_date: date | None
+    status: str
+    completion_criteria: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -73,6 +111,7 @@ class TaskCreate(BaseModel):
     title: TaskTitle
     description: str | None = None
     project_id: uuid.UUID | None = None
+    milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.NORMAL
@@ -89,6 +128,7 @@ class TaskUpdate(BaseModel):
     title: TaskTitle | None = None
     description: str | None = None
     project_id: uuid.UUID | None = None
+    milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
@@ -107,6 +147,7 @@ class TaskRead(BaseModel):
     id: uuid.UUID
     owner_id: uuid.UUID
     project_id: uuid.UUID | None
+    milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None
     title: str
     description: str | None

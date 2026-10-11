@@ -23,6 +23,20 @@ export interface ProjectSummary {
   description: string | null;
   objective: string | null;
   status: "planning" | "active" | "blocked" | "paused" | "completed" | "archived";
+  priority: "low" | "normal" | "high" | "urgent";
+  target_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectMilestone {
+  id: string;
+  project_id: string;
+  title: string;
+  description: string | null;
+  target_date: string | null;
+  status: "pending" | "completed";
+  completion_criteria: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -87,6 +101,7 @@ export interface TaskRecord extends FocusTaskFields {
   id: string;
   owner_id: string;
   project_id: string | null;
+  milestone_id?: string | null;
   assignee_id: string | null;
   title: string;
   description: string | null;
