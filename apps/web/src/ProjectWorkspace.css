@@ -50,6 +50,34 @@
 .task-dependencies form { display: flex; align-items: end; gap: 8px; margin-top: 6px; }
 .task-dependencies form label { flex: 1; }
 .task-dependencies form select { width: 100%; }
+.main-content:has(.project-workspace) { width: min(calc(100% - 88px), 1040px); }
+.project-workspace { display: grid; gap: 21px; }
+.project-create-form { align-items: center; padding: 12px; background: var(--surface-raised, var(--surface)); border: 1px solid var(--line); border-radius: 9px; }
+.project-create-form > input { flex: 1; min-height: 38px; }
+.project-list-controls { grid-template-columns: minmax(180px, 1fr) minmax(200px, 1.5fr); align-items: end; }
+.project-heading { display: grid; gap: 10px; padding: 8px 0 17px; border-bottom: 1px solid var(--line); }
+.project-title { margin: 0; font-size: clamp(24px, 3vw, 32px); font-weight: 520; letter-spacing: -.045em; }
+.project-title input { width: 100%; padding: 0; color: var(--text); background: transparent; border: 0; outline: 0; font: inherit; letter-spacing: inherit; }
+.project-title input:focus { box-shadow: 0 1px var(--accent); }
+.project-heading .project-description input { width: min(100%, 720px); padding: 0; color: var(--soft); background: transparent; border: 0; outline: 0; font-size: 13px; }
+.project-heading-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; color: var(--muted); font-size: 11px; text-transform: capitalize; }
+.project-state { color: var(--accent); font-weight: 600; }
+.project-outcome { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr); gap: 20px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.project-outcome > div:first-child { display: grid; align-content: start; gap: 8px; }
+.project-outcome textarea { min-height: 76px; padding: 10px 11px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 12px; resize: vertical; }
+.project-outcome .project-header-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; }
+.project-outcome label { display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
+.project-outcome select, .project-outcome input { min-width: 0; min-height: 37px; padding: 7px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.project-outcome .secondary-button { grid-column: 1 / -1; justify-self: start; }
+.project-signal-row { display: grid; grid-template-columns: 1fr 1fr .7fr; gap: 20px; padding: 15px 0 19px; border-bottom: 1px solid var(--line); }
+.project-signal-row > div { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.project-signal-row strong { overflow-wrap: anywhere; font-size: 13px; font-weight: 520; }
+.project-signal-row progress { width: 100%; height: 4px; accent-color: var(--accent); }
+.project-tasks > .section-title h3, .project-workspace > .home-section > h3 { font-size: 17px; font-weight: 530; letter-spacing: -.02em; }
+.project-task-row { min-height: 58px; }
+.project-task-row:hover { background: var(--hover); }
+.project-workspace :is(input, textarea, select, button):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) { .main-content:has(.project-workspace) { width: calc(100% - 40px); } .project-outcome { grid-template-columns: 1fr; } .project-outcome .project-header-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) {
   .project-list-controls { grid-template-columns: 1fr; }
   .project-header-fields { grid-template-columns: 1fr; }
@@ -61,4 +89,8 @@
   .project-milestone-row { grid-template-columns: 1fr; }
   .project-milestone-edit { grid-column: 1; }
   .task-dependencies form { align-items: stretch; flex-direction: column; }
+  .project-signal-row { grid-template-columns: 1fr; gap: 13px; }
+  .project-outcome .project-header-fields { grid-template-columns: 1fr; }
+  .project-create-form { display: grid; grid-template-columns: 1fr auto; }
+  .project-create-outcome { grid-column: 1 / -1; }
 }

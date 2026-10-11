@@ -40,6 +40,7 @@ async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject
     if (pathname === "/api/v1/focus-sessions" && route.request().method() === "POST") { const item = await route.request().postDataJSON() as Record<string, unknown>; const focus = { ...item, id: "focus-1", status: "active", ends_at: "2026-10-08T02:00:00Z" }; focusSessions.push(focus); return route.fulfill({ status: 201, json: focus }); }
     if (/\/api\/v1\/focus-sessions\/[^/]+$/.test(pathname) && route.request().method() === "PATCH") { const session = focusSessions[0]; if (session) Object.assign(session, { status: (await route.request().postDataJSON() as { action: string }).action === "cancel" ? "cancelled" : "paused" }); return route.fulfill({ json: session }); }
     if (/\/api\/v1\/projects\/[^/]+\/context$/.test(pathname)) return route.fulfill({ json: { project: {}, progress: { completed_tasks: 0, total_tasks: 0, percentage: null }, tasks: [], blockers: [], activity: [], knowledge: memories, next_actions: [], active_focus: null, agents: [], files: [] } });
+    if (/\/api\/v1\/projects\/[^/]+\/milestones$/.test(pathname) && route.request().method() === "GET") return route.fulfill({ json: [] });
     if (pathname === "/api/v1/approvals" && route.request().method() === "GET") return route.fulfill({ json: approvals });
     if (pathname.includes("/approvals/") && route.request().method() === "POST") {
       if (pathname.endsWith("/decision")) {
