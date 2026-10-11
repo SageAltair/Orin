@@ -323,6 +323,7 @@ class Task(TimestampMixin, Base):
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
     title: Mapped[str] = mapped_column(String(240), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
+    verification_criteria: Mapped[str | None] = mapped_column(Text)
     status: Mapped[TaskStatus] = mapped_column(enum_column(TaskStatus, "task_status"), nullable=False, default=TaskStatus.TODO, server_default=TaskStatus.TODO.value)
     priority: Mapped[TaskPriority] = mapped_column(enum_column(TaskPriority, "task_priority"), nullable=False, default=TaskPriority.NORMAL, server_default=TaskPriority.NORMAL.value)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

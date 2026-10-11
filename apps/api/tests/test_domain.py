@@ -157,6 +157,19 @@ def test_task_dependencies_are_idempotent_scoped_and_reject_cycles(client: TestC
     assert client.get(f"/api/v1/tasks/{task_a['id']}/dependencies").json() == []
 
 
+def test_task_verification_criteria_are_persisted(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Verification project"}).json()
+    created = client.post("/api/v1/tasks", json={
+        "title": "Prepare draft", "project_id": project["id"], "first_step": "Open the document",
+        "estimated_minutes": 20, "verification_criteria": "Draft contains all required sections",
+    })
+    assert created.status_code == 201
+    assert created.json()["verification_criteria"] == "Draft contains all required sections"
+    updated = client.patch(f"/api/v1/tasks/{created.json()['id']}", json={"verification_criteria": "Reviewed and ready to share"})
+    assert updated.status_code == 200
+    assert updated.json()["verification_criteria"] == "Reviewed and ready to share"
+
+
 def test_command_history_returns_only_owned_persisted_requests(client: TestClient) -> None:
     session_factory = app.dependency_overrides[get_session]
     # The test fixture's session override shares the same in-memory database.

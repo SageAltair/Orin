@@ -110,6 +110,7 @@ class MilestoneRead(BaseModel):
 class TaskCreate(BaseModel):
     title: TaskTitle
     description: str | None = None
+    verification_criteria: str | None = Field(default=None, max_length=4000)
     project_id: uuid.UUID | None = None
     milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
@@ -127,6 +128,7 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: TaskTitle | None = None
     description: str | None = None
+    verification_criteria: str | None = Field(default=None, max_length=4000)
     project_id: uuid.UUID | None = None
     milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None = None
@@ -155,6 +157,7 @@ class TaskRead(BaseModel):
     assignee_id: uuid.UUID | None
     title: str
     description: str | None
+    verification_criteria: str | None = None
     status: TaskStatus
     priority: TaskPriority
     due_at: datetime | None

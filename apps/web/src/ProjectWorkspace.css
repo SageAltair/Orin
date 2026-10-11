@@ -35,6 +35,10 @@
 .project-milestone-more textarea, .project-milestone-edit textarea { min-height: 70px; resize: vertical; }
 .project-milestone-edit small { color: var(--muted); font-size: 11px; }
 .task-dependencies { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.task-planning-fields { display: grid; gap: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.task-planning-fields h4, .task-planning-fields label { margin: 0; }
+.task-planning-fields textarea, .task-planning-fields input { min-height: 38px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.task-planning-fields textarea { min-height: 64px; resize: vertical; }
 .task-dependencies h4, .task-dependencies p { margin: 0; }
 .task-dependencies ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .task-dependencies li { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--soft); font-size: 12px; }

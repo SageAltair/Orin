@@ -105,6 +105,7 @@ export interface TaskRecord extends FocusTaskFields {
   assignee_id: string | null;
   title: string;
   description: string | null;
+  verification_criteria?: string | null;
   status: "todo" | "in_progress" | "blocked" | "done" | "cancelled";
   priority: "low" | "normal" | "high" | "urgent";
   due_at: string | null;
