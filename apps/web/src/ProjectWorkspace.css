@@ -1,0 +1,16 @@
+.project-tasks { min-width: 0; }
+.project-task-tools { display: flex; align-items: end; gap: 12px; margin: 14px 0 4px; }
+.project-task-tools label { display: grid; gap: 5px; flex: 1; color: var(--muted); font-size: 12px; }
+.project-task-tools input, .project-task-tools select, .project-task-panel input, .project-task-panel select, .project-task-panel textarea { min-height: 40px; padding: 8px 10px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.project-task-row { gap: 12px; }
+.project-task-row select { flex: 0 1 150px; }
+.task-open-button { display: grid; gap: 3px; flex: 1; min-width: 0; padding: 4px; color: var(--text); text-align: left; background: transparent; border: 0; cursor: pointer; }
+.task-open-button strong { overflow-wrap: anywhere; }
+.task-open-button small { color: var(--muted); font-size: 11px; }
+.project-task-panel { display: grid; gap: 14px; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
+.project-task-panel textarea { min-height: 100px; resize: vertical; }
+@media (max-width: 600px) {
+  .project-task-tools { align-items: stretch; flex-direction: column; }
+  .project-task-row { align-items: stretch; }
+  .project-task-row select { flex: 1 1 100%; }
+}
