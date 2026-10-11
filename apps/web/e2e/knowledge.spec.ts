@@ -33,11 +33,31 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByLabel("Document title").fill("Unfinished video script draft");
   await page.locator(".knowledge-properties label").filter({ hasText: "Type" }).locator("select").selectOption("draft");
   await page.getByLabel("Status").selectOption("developing");
+  await page.getByLabel("Review date").fill("2020-01-01T10:00");
   await page.getByLabel("Content").fill("Opening scene and narration are not finished.");
   await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
 
+  await page.getByRole("button", { name: "Weekly review" }).click();
+  await expect(page.locator(".knowledge-weekly-report")).toBeVisible();
+
+  await page.getByLabel("Ask your knowledge").fill("Christian storytelling");
+  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await expect(page.locator(".knowledge-answer")).toBeVisible();
+  await expect(page.locator(".knowledge-answer").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
+  await page.getByRole("button", { name: "Refresh signals" }).click();
+  const review = page.locator(".knowledge-signal").filter({ hasText: "Unfinished video script draft" });
+  await expect(review).toBeVisible();
+  await review.getByRole("button", { name: "Snooze" }).click();
+  const snoozedSection = page.locator("details").filter({ hasText: "Snoozed" });
+  await snoozedSection.locator("summary").click();
+  const snoozed = snoozedSection.locator(".knowledge-signal").filter({ hasText: "Unfinished video script draft" });
+  await expect(snoozed).toBeVisible();
+  await snoozed.getByRole("button", { name: "Resume" }).click();
+  await expect(review.getByRole("button", { name: "Done" })).toBeVisible();
+  await review.getByRole("button", { name: "Done" }).click();
+
   await page.getByLabel("Search documents").fill("Christian storytelling");
-  await expect(page.getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
+  await expect(page.locator(".knowledge-documents").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Knowledge" }).click();
   await expect(page.getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible();

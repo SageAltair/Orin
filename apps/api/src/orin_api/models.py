@@ -693,6 +693,7 @@ class KnowledgeDocument(TimestampMixin, Base):
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     exclude_from_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class KnowledgeDocumentVersion(CreatedAtMixin, Base):
@@ -714,6 +715,47 @@ class KnowledgeDocumentLink(CreatedAtMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     source_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
     target_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+
+
+class KnowledgeInsight(TimestampMixin, Base):
+    __tablename__ = "knowledge_insights"
+    __table_args__ = (
+        UniqueConstraint("user_id", "insight_type", "fingerprint", name="uq_knowledge_insight_identity"),
+        Index("ix_knowledge_insights_user_status", "user_id", "status", "evaluated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    insight_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(160), nullable=False)
+    title: Mapped[str] = mapped_column(String(180), nullable=False)
+    explanation: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[list[dict[str, object]]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    frequency: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    confidence: Mapped[float] = mapped_column(default=0.5, server_default="0.5")
+    limitations: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_next_step: Mapped[str | None] = mapped_column(Text)
+    window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+
+class KnowledgeReview(TimestampMixin, Base):
+    __tablename__ = "knowledge_reviews"
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_knowledge_review_document"),
+        Index("ix_knowledge_reviews_user_status_due", "user_id", "status", "due_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_surfaced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class EnvironmentPreference(TimestampMixin, Base):

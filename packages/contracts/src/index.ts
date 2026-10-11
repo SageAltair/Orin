@@ -43,9 +43,53 @@ export interface KnowledgeDocumentRecord {
   tags: string[];
   archived: boolean;
   exclude_from_ai: boolean;
+  review_at: string | null;
   version: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface KnowledgeInsightRecord {
+  id: string;
+  type: string;
+  title: string;
+  explanation: string;
+  evidence: Array<{ document_id: string; title: string; updated_at: string }>;
+  frequency: number;
+  confidence: number;
+  limitations: string;
+  suggested_next_step: string;
+  status: "active" | "snoozed" | "dismissed" | "resolved";
+  snoozed_until: string | null;
+  window_start: string | null;
+  window_end: string | null;
+  evaluated_at: string;
+}
+
+export interface KnowledgeReviewRecord {
+  id: string;
+  document_id: string;
+  title: string;
+  document_type: KnowledgeDocumentType;
+  status: "pending" | "snoozed" | "dismissed" | "resolved";
+  due_at: string;
+  snoozed_until: string | null;
+}
+
+export interface KnowledgeAskResult {
+  answer: string;
+  citations: Array<{ document_id: string; title: string; document_type: KnowledgeDocumentType; updated_at: string }>;
+  sources?: Array<{ document_id: string; title: string; document_type: KnowledgeDocumentType; updated_at: string; excerpt: string }>;
+  mode: "keyword_only" | "ai_synthesis";
+  limitations: string[];
+}
+
+export interface KnowledgeWeeklyReport {
+  generated_at: string;
+  window_start: string;
+  window_end: string;
+  observations: Array<{ kind: string; title: string; detail: string; evidence: Array<{ document_id: string; title: string }> }>;
+  limitations: string[];
 }
 
 export interface KnowledgeDocumentVersionRecord {

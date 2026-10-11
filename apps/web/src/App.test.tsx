@@ -26,7 +26,8 @@ describe("Markdown response rendering", () => {
   it("renders the knowledge capture entry point and privacy notice", () => {
     const workspace = renderToStaticMarkup(<KnowledgeWorkspace projects={[]} />);
     const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
-    expect(workspace).toContain("Capture and connect your writing");
+    expect(workspace).toContain("Ask can synthesize included notes");
+    expect(workspace).toContain("Weekly review");
     expect(workspace).toContain("New note");
     expect(capture).toContain("Saved to your Knowledge inbox");
     expect(capture).toContain('aria-modal="true"');

@@ -125,6 +125,98 @@ def test_knowledge_documents_versions_links_search_and_exclusion(client: TestCli
     assert client.get("/api/v1/users/me/preferences").json()["visible_capabilities"] == ["activity", "calendar", "focus", "home", "memories", "projects", "tasks"]
 
 
+def test_knowledge_intelligence_is_evidence_linked_filtered_and_actionable(client: TestClient) -> None:
+    included = []
+    for index in range(3):
+        response = client.post("/api/v1/knowledge/documents", json={"title": f"Storytelling note {index}", "content": "Storytelling for thoughtful communities."})
+        assert response.status_code == 201
+        included.append(response.json())
+    excluded = client.post("/api/v1/knowledge/documents", json={"title": "Private storytelling", "content": "Storytelling excluded text", "exclude_from_ai": True})
+    journal = client.post("/api/v1/knowledge/documents", json={"title": "Storytelling journal", "content": "Storytelling personal entry", "document_type": "journal"})
+    assert excluded.status_code == journal.status_code == 201
+
+    result = client.post("/api/v1/knowledge/intelligence/evaluate")
+    assert result.status_code == 200
+    topics = client.get("/api/v1/knowledge/insights").json()
+    topic = next(item for item in topics if item["title"] == "Recurring topic: storytelling")
+    assert topic["frequency"] == 3
+    assert {row["document_id"] for row in topic["evidence"]} == {row["id"] for row in included}
+    assert topic["limitations"] and topic["suggested_next_step"]
+    assert client.post("/api/v1/knowledge/intelligence/evaluate").json()["insights_created"] == 0
+
+    snoozed = client.patch(f"/api/v1/knowledge/insights/{topic['id']}", json={"action": "snooze"})
+    assert snoozed.status_code == 200 and snoozed.json()["status"] == "snoozed"
+    assert client.post("/api/v1/knowledge/intelligence/evaluate").status_code == 200
+    assert next(row for row in client.get("/api/v1/knowledge/insights").json() if row["id"] == topic["id"])["status"] == "snoozed"
+    dismissed = client.patch(f"/api/v1/knowledge/insights/{topic['id']}", json={"action": "dismiss"})
+    assert dismissed.status_code == 200 and dismissed.json()["status"] == "dismissed"
+    assert all(row["id"] != topic["id"] for row in client.get("/api/v1/knowledge/insights").json())
+    assert any(row["id"] == topic["id"] for row in client.get("/api/v1/knowledge/insights?include_dismissed=true").json())
+
+
+def test_knowledge_reviews_are_due_owned_and_persist_actions(client: TestClient) -> None:
+    document = client.post("/api/v1/knowledge/documents", json={
+        "title": "Resume grant draft", "content": "Next paragraph", "document_type": "draft",
+        "status": "developing", "review_at": "2020-01-01T00:00:00Z",
+    })
+    assert document.status_code == 201
+    reviews = client.get("/api/v1/knowledge/reviews").json()
+    assert len(reviews) == 1 and reviews[0]["document_id"] == document.json()["id"]
+    review = reviews[0]
+    snoozed = client.patch(f"/api/v1/knowledge/reviews/{review['id']}", json={"action": "snooze"})
+    assert snoozed.status_code == 200 and snoozed.json()["status"] == "snoozed"
+    resumed = client.patch(f"/api/v1/knowledge/reviews/{review['id']}", json={"action": "resume"})
+    assert resumed.status_code == 200 and resumed.json()["status"] == "pending"
+    done = client.patch(f"/api/v1/knowledge/reviews/{review['id']}", json={"action": "resolve"})
+    assert done.status_code == 200 and done.json()["status"] == "resolved"
+    assert client.get("/api/v1/knowledge/reviews").json() == []
+    assert client.patch(f"/api/v1/knowledge/reviews/{uuid.uuid4()}", json={"action": "dismiss"}).status_code == 404
+
+
+def test_knowledge_ask_retrieves_owned_nonexcluded_sources_with_graceful_fallback(client: TestClient) -> None:
+    included = client.post("/api/v1/knowledge/documents", json={"title": "Storytelling research", "content": "AI can support Christian storytelling."}).json()
+    client.post("/api/v1/knowledge/documents", json={"title": "Private storytelling", "content": "Private AI storytelling", "exclude_from_ai": True})
+    response = client.post("/api/v1/knowledge/ask", json={"question": "Christian storytelling"})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["mode"] == "keyword_only"
+    assert result["citations"][0]["document_id"] == included["id"]
+    assert all(source["title"] != "Private storytelling" for source in result["sources"])
+    assert "not configured" in result["answer"]
+    assert client.post("/api/v1/knowledge/ask", json={"question": "nothing matches zzz"}).json()["citations"] == []
+
+
+def test_knowledge_ask_uses_configured_provider_and_only_accepts_owned_citations(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from orin_api import workspace_router
+    from orin_api.config import get_settings
+
+    document = client.post("/api/v1/knowledge/documents", json={"title": "Storytelling notes", "content": "Christian storytelling."}).json()
+    class FakeProvider:
+        def generate(self, **kwargs: object) -> str:
+            return f"The notes mention storytelling. [doc:{document['id']}] [doc:{uuid.uuid4()}]"
+    monkeypatch.setattr(workspace_router, "create_provider", lambda settings: FakeProvider())
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="gpt-4o-mini")
+
+    response = client.post("/api/v1/knowledge/ask", json={"question": "Christian storytelling"})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["mode"] == "ai_synthesis"
+    assert len(result["citations"]) == 1 and result["citations"][0]["document_id"] == document["id"]
+    assert "[doc:" not in result["answer"].split(" ")[-1]
+
+
+def test_weekly_knowledge_report_contains_observations_with_evidence(client: TestClient) -> None:
+    document = client.post("/api/v1/knowledge/documents", json={"title": "Story outline", "content": "Outline changed this week."}).json()
+    excluded = client.post("/api/v1/knowledge/documents", json={"title": "Private journal", "content": "Do not include this", "document_type": "journal"}).json()
+    report = client.get("/api/v1/knowledge/reports/weekly")
+    assert report.status_code == 200
+    report_data = report.json()
+    activity = next(item for item in report_data["observations"] if item["kind"] == "activity")
+    assert activity["evidence"] == [{"document_id": document["id"], "title": "Story outline"}]
+    assert all(row["document_id"] != excluded["id"] for observation in report_data["observations"] for row in observation["evidence"])
+    assert report_data["limitations"]
+
+
 def test_focus_session_is_server_owned_pauseable_and_audited(client: TestClient) -> None:
     project = _project(client)
     response = client.post("/api/v1/focus-sessions", json={"project_id": project["id"], "objective": "Review cards", "duration_minutes": 120})
