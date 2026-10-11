@@ -29,6 +29,33 @@ export interface ProjectSummary {
   updated_at: string;
 }
 
+export type KnowledgeDocumentType = "quick_note" | "knowledge" | "research" | "idea" | "draft" | "journal" | "meeting" | "decision" | "reference";
+export type KnowledgeDocumentStatus = "inbox" | "developing" | "waiting" | "ready_to_resume" | "completed" | "parked" | "abandoned";
+
+/** User-authored document stored in the personal knowledge workspace. */
+export interface KnowledgeDocumentRecord {
+  id: string;
+  project_id: string | null;
+  title: string;
+  content: string;
+  document_type: KnowledgeDocumentType;
+  status: KnowledgeDocumentStatus;
+  tags: string[];
+  archived: boolean;
+  exclude_from_ai: boolean;
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeDocumentVersionRecord {
+  id: string;
+  version: number;
+  title: string;
+  content: string;
+  created_at: string;
+}
+
 export interface ProjectMilestone {
   id: string;
   project_id: string;

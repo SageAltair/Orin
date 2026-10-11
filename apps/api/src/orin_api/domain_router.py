@@ -28,6 +28,7 @@ from orin_api.models import (
     Conversation,
     FileAttachment,
     Memory,
+    KnowledgeDocument,
     Milestone,
     CommandStatus,
     Approval,
@@ -199,6 +200,10 @@ def search_workspace(q: str = Query(min_length=2, max_length=120), user: User = 
         (Memory.title.ilike(term) | Memory.content.ilike(term))).order_by(Memory.updated_at.desc()).limit(limit)).all()
     results.extend(SearchResultRead(result_id=row.id, kind="memory", project_id=row.project_id,
         text=row.title, excerpt=row.content[:320], created_at=row.updated_at, title=row.title) for row in memory_rows)
+    document_rows = session.scalars(select(KnowledgeDocument).where(KnowledgeDocument.user_id == user.id, KnowledgeDocument.archived.is_(False),
+        KnowledgeDocument.title.ilike(f"%{q}%") | KnowledgeDocument.content.ilike(f"%{q}%")).order_by(KnowledgeDocument.updated_at.desc()).limit(limit)).all()
+    results.extend(SearchResultRead(result_id=row.id, kind="document", document_id=row.id, project_id=row.project_id,
+        text=row.title, excerpt=row.content[:320], created_at=row.updated_at, title=row.title) for row in document_rows)
     results.sort(key=lambda item: item.created_at, reverse=True)
     return results[:limit]
 

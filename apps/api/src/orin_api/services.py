@@ -44,7 +44,7 @@ CAPABILITY_CATALOG = (
     ("projects", "Projects", "Organize work by outcome"),
     ("tasks", "Tasks", "Keep track of next steps"),
     ("activity", "Activity", "A record of recent changes"),
-    ("memories", "Personal memories", "Manage facts you choose to keep"),
+    ("memories", "Knowledge", "Capture, find, and connect your writing"),
     ("focus", "Focus sessions", "Start and review focused work"),
     ("settings", "Settings", "Shape your Orin workspace"),
 )

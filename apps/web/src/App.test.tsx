@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App, { CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
+import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
 
 describe("capability navigation", () => {
@@ -22,6 +23,15 @@ describe("capability navigation", () => {
 });
 
 describe("Markdown response rendering", () => {
+  it("renders the knowledge capture entry point and privacy notice", () => {
+    const workspace = renderToStaticMarkup(<KnowledgeWorkspace projects={[]} />);
+    const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
+    expect(workspace).toContain("Capture and connect your writing");
+    expect(workspace).toContain("New note");
+    expect(capture).toContain("Saved to your Knowledge inbox");
+    expect(capture).toContain('aria-modal="true"');
+  });
+
   it("restores command history in order without duplicating an already rendered command", () => {
     const old = { command_id: "old", text: "first", created_at: "2026-10-08T00:00:00Z", status: "completed", intent: "RESPOND", result: { response: "first answer" }, message: "first answer" };
     const latest = { ...old, command_id: "latest", text: "second", result: { response: "second answer" }, message: "second answer" };

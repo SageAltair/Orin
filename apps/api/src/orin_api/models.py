@@ -678,6 +678,44 @@ class Memory(TimestampMixin, Base):
     metadata_json: Mapped[dict[str, object]] = mapped_column("metadata", JSON, nullable=False, default=dict, server_default="{}")
 
 
+class KnowledgeDocument(TimestampMixin, Base):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (Index("ix_knowledge_documents_user_updated", "user_id", "updated_at"), Index("ix_knowledge_documents_user_type_status", "user_id", "document_type", "status"))
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False, default="Untitled")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    document_type: Mapped[str] = mapped_column(String(24), nullable=False, default="quick_note", server_default="quick_note")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="inbox", server_default="inbox")
+    tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    exclude_from_ai: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+
+
+class KnowledgeDocumentVersion(CreatedAtMixin, Base):
+    __tablename__ = "knowledge_document_versions"
+    __table_args__ = (Index("ix_knowledge_document_versions_document", "document_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class KnowledgeDocumentLink(CreatedAtMixin, Base):
+    __tablename__ = "knowledge_document_links"
+    __table_args__ = (UniqueConstraint("source_id", "target_id", name="uq_knowledge_document_link"), CheckConstraint("source_id <> target_id", name="ck_knowledge_document_link_not_self"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+
+
 class EnvironmentPreference(TimestampMixin, Base):
     __tablename__ = "environment_preferences"
     __table_args__ = (UniqueConstraint("user_id", "surface", "item", name="uq_environment_preference_item"),)

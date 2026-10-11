@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.domain_router import ensure_project_access
-from orin_api.models import Activity, ActivityType, Capability, EnvironmentPreference, FocusSession, Memory, Project, Task, TaskStatus, User, UserCapability
+from orin_api.models import Activity, ActivityType, Capability, EnvironmentPreference, FocusSession, KnowledgeDocument, KnowledgeDocumentLink, KnowledgeDocumentVersion, Memory, Project, Task, TaskStatus, User, UserCapability
 from orin_api.services import add_activity
 from orin_api.services import ensure_user_preferences
 
@@ -75,6 +75,46 @@ class FocusUpdate(BaseModel):
     action: Literal["pause", "resume", "complete", "cancel"]
     objective: str | None = Field(default=None, min_length=1, max_length=500)
     duration_minutes: int | None = Field(default=None, ge=5, le=480)
+
+
+DOCUMENT_TYPES = {"quick_note", "knowledge", "research", "idea", "draft", "journal", "meeting", "decision", "reference"}
+DOCUMENT_STATUSES = {"inbox", "developing", "waiting", "ready_to_resume", "completed", "parked", "abandoned"}
+
+
+class DocumentCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(default="Untitled", min_length=1, max_length=240)
+    content: str = Field(default="", max_length=100000)
+    document_type: str = "quick_note"
+    status: str = "inbox"
+    project_id: uuid.UUID | None = None
+    tags: list[str] = Field(default_factory=list, max_length=30)
+    exclude_from_ai: bool = False
+
+
+class DocumentUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    content: str | None = Field(default=None, max_length=100000)
+    document_type: str | None = None
+    status: str | None = None
+    project_id: uuid.UUID | None = None
+    tags: list[str] | None = Field(default=None, max_length=30)
+    archived: bool | None = None
+    exclude_from_ai: bool | None = None
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class DocumentLinkCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_id: uuid.UUID
+
+
+def _document_view(row: KnowledgeDocument) -> dict[str, object]:
+    return {"id": row.id, "project_id": row.project_id, "title": row.title, "content": row.content,
+            "document_type": row.document_type, "status": row.status, "tags": row.tags,
+            "archived": row.archived, "exclude_from_ai": row.exclude_from_ai, "version": row.version,
+            "created_at": row.created_at, "updated_at": row.updated_at}
 
 
 def _memory_view(row: Memory) -> dict[str, object]:
@@ -190,6 +230,115 @@ def delete_memory(memory_id: uuid.UUID, user: User = Depends(get_current_user), 
     session.delete(row)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/knowledge/documents")
+def list_knowledge_documents(q: str | None = Query(default=None, min_length=1, max_length=120), document_type: str | None = None,
+                             status_filter: str | None = Query(default=None, alias="status"), project_id: uuid.UUID | None = None,
+                             include_archived: bool = False, user: User = Depends(get_current_user),
+                             session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    statement = select(KnowledgeDocument).where(KnowledgeDocument.user_id == user.id)
+    if not include_archived:
+        statement = statement.where(KnowledgeDocument.archived.is_(False))
+    if document_type:
+        if document_type not in DOCUMENT_TYPES:
+            raise HTTPException(status_code=422, detail="Document type is invalid")
+        statement = statement.where(KnowledgeDocument.document_type == document_type)
+    if status_filter:
+        if status_filter not in DOCUMENT_STATUSES:
+            raise HTTPException(status_code=422, detail="Document status is invalid")
+        statement = statement.where(KnowledgeDocument.status == status_filter)
+    if project_id:
+        _own_project(session, project_id, user.id)
+        statement = statement.where(KnowledgeDocument.project_id == project_id)
+    if q:
+        statement = statement.where(KnowledgeDocument.title.ilike(f"%{q}%") | KnowledgeDocument.content.ilike(f"%{q}%"))
+    rows = session.scalars(statement.order_by(KnowledgeDocument.updated_at.desc()).limit(200)).all()
+    return [_document_view(row) for row in rows]
+
+
+@router.post("/knowledge/documents", status_code=201)
+def create_knowledge_document(data: DocumentCreate, user: User = Depends(get_current_user),
+                              session: Session = Depends(get_session)) -> dict[str, object]:
+    if data.document_type not in DOCUMENT_TYPES or data.status not in DOCUMENT_STATUSES:
+        raise HTTPException(status_code=422, detail="Document type or status is invalid")
+    if data.project_id:
+        _own_project(session, data.project_id, user.id)
+    row = KnowledgeDocument(user_id=user.id, **data.model_dump())
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _document_view(row)
+
+
+def _own_document(session: Session, document_id: uuid.UUID, user_id: uuid.UUID) -> KnowledgeDocument:
+    row = session.scalar(select(KnowledgeDocument).where(KnowledgeDocument.id == document_id, KnowledgeDocument.user_id == user_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return row
+
+
+@router.get("/knowledge/documents/{document_id}")
+def get_knowledge_document(document_id: uuid.UUID, user: User = Depends(get_current_user),
+                          session: Session = Depends(get_session)) -> dict[str, object]:
+    return _document_view(_own_document(session, document_id, user.id))
+
+
+@router.patch("/knowledge/documents/{document_id}")
+def update_knowledge_document(document_id: uuid.UUID, data: DocumentUpdate, user: User = Depends(get_current_user),
+                              session: Session = Depends(get_session)) -> dict[str, object]:
+    row = _own_document(session, document_id, user.id)
+    values = data.model_dump(exclude_unset=True)
+    expected = values.pop("expected_version", None)
+    if expected is not None and expected != row.version:
+        raise HTTPException(status_code=409, detail={"message": "This document changed elsewhere. Reload it before saving."})
+    if values.get("document_type") is not None and values["document_type"] not in DOCUMENT_TYPES:
+        raise HTTPException(status_code=422, detail="Document type is invalid")
+    if values.get("status") is not None and values["status"] not in DOCUMENT_STATUSES:
+        raise HTTPException(status_code=422, detail="Document status is invalid")
+    project_id = values.get("project_id")
+    if project_id:
+        _own_project(session, project_id, user.id)
+    changes = {key: value for key, value in values.items() if getattr(row, key) != value}
+    if changes:
+        session.add(KnowledgeDocumentVersion(document_id=row.id, version=row.version, title=row.title, content=row.content))
+        for key, value in changes.items():
+            setattr(row, key, value)
+        row.version += 1
+        session.commit()
+        session.refresh(row)
+    return _document_view(row)
+
+
+@router.get("/knowledge/documents/{document_id}/versions")
+def list_knowledge_versions(document_id: uuid.UUID, user: User = Depends(get_current_user),
+                            session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    row = _own_document(session, document_id, user.id)
+    versions = session.scalars(select(KnowledgeDocumentVersion).where(KnowledgeDocumentVersion.document_id == row.id).order_by(KnowledgeDocumentVersion.version.desc()).limit(50)).all()
+    return [{"id": item.id, "version": item.version, "title": item.title, "content": item.content, "created_at": item.created_at} for item in versions]
+
+
+@router.get("/knowledge/documents/{document_id}/links")
+def get_knowledge_links(document_id: uuid.UUID, user: User = Depends(get_current_user),
+                        session: Session = Depends(get_session)) -> dict[str, list[dict[str, object]]]:
+    row = _own_document(session, document_id, user.id)
+    outgoing = session.scalars(select(KnowledgeDocument).join(KnowledgeDocumentLink, KnowledgeDocument.id == KnowledgeDocumentLink.target_id).where(KnowledgeDocumentLink.user_id == user.id, KnowledgeDocumentLink.source_id == row.id)).all()
+    incoming = session.scalars(select(KnowledgeDocument).join(KnowledgeDocumentLink, KnowledgeDocument.id == KnowledgeDocumentLink.source_id).where(KnowledgeDocumentLink.user_id == user.id, KnowledgeDocumentLink.target_id == row.id)).all()
+    return {"links": [{"id": item.id, "title": item.title} for item in outgoing], "backlinks": [{"id": item.id, "title": item.title} for item in incoming]}
+
+
+@router.post("/knowledge/documents/{document_id}/links", status_code=201)
+def create_knowledge_link(document_id: uuid.UUID, data: DocumentLinkCreate, user: User = Depends(get_current_user),
+                          session: Session = Depends(get_session)) -> dict[str, str]:
+    _own_document(session, document_id, user.id)
+    _own_document(session, data.target_id, user.id)
+    if data.target_id == document_id:
+        raise HTTPException(status_code=422, detail="A document cannot link to itself")
+    link = session.scalar(select(KnowledgeDocumentLink).where(KnowledgeDocumentLink.user_id == user.id, KnowledgeDocumentLink.source_id == document_id, KnowledgeDocumentLink.target_id == data.target_id))
+    if link is None:
+        session.add(KnowledgeDocumentLink(user_id=user.id, source_id=document_id, target_id=data.target_id))
+        session.commit()
+    return {"status": "linked"}
 
 
 @router.get("/environment/preferences")

@@ -98,6 +98,26 @@ def test_environment_preferences_are_explicit_and_resettable(client: TestClient)
     assert saved.status_code == 200 and saved.json()["source"] == "explicit"
     assert client.get("/api/v1/environment/preferences").json()[0]["visibility"] == "hidden"
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["hidden_capabilities"]
+
+
+def test_knowledge_documents_versions_links_search_and_exclusion(client: TestClient) -> None:
+    idea = client.post("/api/v1/knowledge/documents", json={"title": "Storytelling video idea", "content": "Create Christian storytelling videos.", "document_type": "idea"})
+    research = client.post("/api/v1/knowledge/documents", json={"title": "AI assisted storytelling", "content": "Research narrative tools.", "document_type": "research", "exclude_from_ai": True})
+    assert idea.status_code == 201 and research.status_code == 201
+    idea_id, research_id = idea.json()["id"], research.json()["id"]
+
+    edited = client.patch(f"/api/v1/knowledge/documents/{idea_id}", json={"content": "Plan Christian storytelling videos with a clear audience.", "expected_version": 1})
+    assert edited.status_code == 200 and edited.json()["version"] == 2
+    assert client.get(f"/api/v1/knowledge/documents/{idea_id}/versions").json()[0]["content"] == "Create Christian storytelling videos."
+    assert client.post(f"/api/v1/knowledge/documents/{idea_id}/links", json={"target_id": research_id}).status_code == 201
+    assert client.get(f"/api/v1/knowledge/documents/{research_id}/links").json()["backlinks"][0]["id"] == idea_id
+    assert client.get("/api/v1/knowledge/documents?q=storytelling").status_code == 200
+    search = client.get("/api/v1/search?q=storytelling").json()
+    assert any(item["kind"] == "document" and item["result_id"] == idea_id for item in search)
+    assert client.patch(f"/api/v1/knowledge/documents/{idea_id}", json={"title": "Stale edit", "expected_version": 1}).status_code == 409
+    archived = client.patch(f"/api/v1/knowledge/documents/{idea_id}", json={"archived": True, "expected_version": 2})
+    assert archived.json()["archived"] is True
+    assert client.get("/api/v1/knowledge/documents").json() == [research.json()]
     assert client.put("/api/v1/environment/preferences", json={"surface": "navigation", "item": "projects", "visibility": "prioritized", "priority": 10}).status_code == 200
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["pinned_capabilities"]
     assert client.delete("/api/v1/environment/preferences").status_code == 204

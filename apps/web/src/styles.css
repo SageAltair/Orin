@@ -1000,3 +1000,32 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 .topbar-capture { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface); font: inherit; cursor: pointer; }
 .topbar-capture:hover, .quick-capture header button:hover { background: var(--hover); }
 @media (max-width: 520px) { .topbar-capture { min-height: 34px; padding-inline: 8px; font-size: 12px; } .quick-capture-scrim { padding: 12vh 12px 20px; } .quick-capture { padding: 16px; } }
+
+.knowledge-workspace { display: grid; gap: 18px; }
+.knowledge-heading, .knowledge-editor-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.knowledge-heading h2 { margin: 4px 0; font-size: 25px; }
+.knowledge-heading p { margin: 4px 0; color: var(--muted); font-size: 13px; }
+.knowledge-layout { display: grid; grid-template-columns: minmax(220px, 290px) minmax(0, 1fr); gap: 18px; min-height: 560px; }
+.knowledge-list, .knowledge-editor { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.knowledge-list { display: flex; flex-direction: column; gap: 12px; }
+.knowledge-list label, .knowledge-properties label, .knowledge-relations label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; }
+.knowledge-list input, .knowledge-list select, .knowledge-properties select, .knowledge-relations select { min-width: 0; width: 100%; padding: 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--text); background: var(--bg); font: inherit; }
+.knowledge-documents { display: grid; align-content: start; gap: 5px; overflow: auto; }
+.knowledge-document { display: grid; gap: 4px; padding: 11px; text-align: left; border: 0; border-radius: 8px; color: var(--text); background: transparent; cursor: pointer; }
+.knowledge-document:hover, .knowledge-document.selected { background: var(--hover); }
+.knowledge-document span, .knowledge-document small, .knowledge-editor-top > span { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+.knowledge-editor form { display: grid; gap: 16px; }
+.knowledge-editor-top > div { display: flex; gap: 8px; }
+.knowledge-title { width: 100%; padding: 8px 0; border: 0; border-bottom: 1px solid var(--line); color: var(--text); background: transparent; font: inherit; font-size: 25px; font-weight: 650; }
+.knowledge-properties { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; }
+.knowledge-content-label { display: grid; gap: 7px; font-size: 12px; color: var(--muted); }
+.knowledge-content-label textarea { width: 100%; min-height: 260px; resize: vertical; padding: 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--bg); font: inherit; line-height: 1.65; }
+.knowledge-relations { display: grid; gap: 9px; padding-top: 12px; border-top: 1px solid var(--line); }
+.knowledge-relations h3 { margin: 0; font-size: 14px; }
+.knowledge-relations > div { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+.knowledge-history article { padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.knowledge-history p, .knowledge-history small { color: var(--muted); }
+.knowledge-empty { display: grid; place-content: center; justify-items: start; min-height: 480px; }
+.knowledge-empty h3 { margin-bottom: 0; }
+.knowledge-empty p { max-width: 420px; color: var(--muted); }
+@media (max-width: 760px) { .knowledge-layout { grid-template-columns: 1fr; } .knowledge-documents { max-height: 250px; } .knowledge-properties { grid-template-columns: 1fr; } .knowledge-editor { min-height: 440px; } }

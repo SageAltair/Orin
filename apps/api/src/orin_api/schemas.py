@@ -255,6 +255,7 @@ class SearchResultRead(BaseModel):
     task_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     conversation_id: uuid.UUID | None = None
+    document_id: uuid.UUID | None = None
     text: str
     excerpt: str
     created_at: datetime
