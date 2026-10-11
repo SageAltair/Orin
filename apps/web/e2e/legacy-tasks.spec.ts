@@ -2,7 +2,10 @@ import { expect, test } from "@playwright/test";
 
 test("rollout flag off keeps the legacy Tasks list and task actions available", async ({ page }) => {
   const now = "2026-10-10T08:00:00Z";
-  let tasks: Array<Record<string, unknown>> = [];
+  let tasks: Array<Record<string, unknown>> = [
+    { id: "task-today", title: "Review the launch outline", description: null, status: "todo", priority: "normal", due_at: null, focus_state: "today", project_id: null, created_at: now, updated_at: now },
+    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2026-10-13T14:00:00Z", focus_state: "later", project_id: null, created_at: now, updated_at: now },
+  ];
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
@@ -12,7 +15,7 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
     if (pathname === "/api/v1/tasks" && method === "GET") return route.fulfill({ json: tasks });
     if (pathname === "/api/v1/tasks" && method === "POST") {
       const input = await route.request().postDataJSON() as { title: string };
-      const task = { id: "task-1", title: input.title, description: null, status: "todo", priority: "normal", due_at: null, project_id: null, created_at: now, updated_at: now };
+      const task = { id: "task-1", title: input.title, description: null, status: "todo", priority: "normal", due_at: null, focus_state: "inbox", project_id: null, created_at: now, updated_at: now };
       tasks = [task, ...tasks]; return route.fulfill({ status: 201, json: task });
     }
     if (pathname === "/api/v1/tasks/task-1" && method === "PATCH") {
@@ -34,6 +37,14 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
   await page.getByLabel("New task").fill("Keep the legacy task flow");
   await page.getByRole("button", { name: "Add task" }).click();
   await expect(page.getByLabel("Edit Keep the legacy task flow")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Inbox/ }).click();
+  await expect(page.getByLabel("Edit Keep the legacy task flow")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
+  await expect(page.getByLabel("Edit Review the launch outline")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
+  await expect(page.getByLabel("Edit Prepare next week's notes")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /All/ }).click();
   await page.getByRole("button", { name: "Complete Keep the legacy task flow" }).click();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
   await expect(page.getByRole("button", { name: "Reopen Keep the legacy task flow" })).toBeVisible();
 });

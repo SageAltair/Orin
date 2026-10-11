@@ -544,7 +544,7 @@ test("Ask Orin composer grows for multiline text and sends with Enter", async ({
 test("home dashboard shows persisted tasks, projects, and work sessions", async ({ page }) => {
   await mockApi(page);
   const updated = new Date().toISOString();
-  await page.route("**/api/v1/tasks", route => route.fulfill({ json: [
+  await page.route("**/api/v1/tasks**", route => route.fulfill({ json: [
     { id: "task-next", title: "Prepare the launch outline", status: "todo", priority: "high", due_at: null, project_id: "project-active" },
     { id: "task-done", title: "Already finished", status: "done", priority: "urgent", due_at: null, project_id: "project-active" },
   ] }));

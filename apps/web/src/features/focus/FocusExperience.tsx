@@ -8,9 +8,10 @@ import { Now } from "./Now";
 import { TodaysThree } from "./TodaysThree";
 import { useFocusWorkspace } from "./useFocusWorkspace";
 import { Recovery } from "./Recovery";
+import { TaskCollection } from "./TaskCollection";
 import type { CaptureSuggestion, FocusTask } from "./types";
 
-type Surface = "now" | "today" | "capture" | "close" | "later" | "settings" | "recovery";
+type Surface = "now" | "today" | "capture" | "close" | "later" | "tasks" | "settings" | "recovery";
 type Theme = "light" | "dark" | "auto";
 type Settings = { theme: Theme; reduced_motion: boolean; hide_timer_numbers: boolean; sound_enabled: boolean; haptics_enabled: boolean; check_in_interval: number | null };
 
@@ -69,7 +70,7 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
 
   const nav = useMemo(() => [
     { id: "now" as const, label: "Now" }, { id: "today" as const, label: "Today" },
-    { id: "capture" as const, label: "Capture" }, { id: "close" as const, label: "Close" },
+    { id: "capture" as const, label: "Capture" }, { id: "tasks" as const, label: "Browse" }, { id: "close" as const, label: "Close" },
   ], []);
   const saveSettings = async (patch: Record<string, unknown>) => {
     try { await request("/focus/settings", { method: "PUT", body: JSON.stringify(patch) }); }
@@ -117,6 +118,7 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
       {surface === "capture" && <><Capture onSave={capture} onSuggest={suggestCapture} busy={focus.busy} onDone={() => { window.setTimeout(() => navClick("now"), 500); }} />{captureMessage && <p className="focus-quiet-message" role="status">{captureMessage}</p>}</>}
       {surface === "close" && <>{closeMessage ? <section className="focus-card"><span className="focus-eyebrow">CLOSED</span><h1>That was enough for today.</h1><p>You can begin again whenever you return.</p><button className="focus-primary" onClick={() => navClick("now")}>Back to Now</button></section> : <Close value={focus.close} later={focus.later} busy={focus.busy} onSave={async input => { if (await focus.saveClose(input)) setCloseMessage("saved"); }} onSkip={() => navClick("now")} />}</>}
       {surface === "later" && <Later tasks={focus.later} onBack={() => navClick("today")} onChoose={addLaterToToday} />}
+      {surface === "tasks" && <TaskCollection onScheduleTask={onScheduleTask} />}
       {surface === "settings" && <section className="focus-card focus-settings-page"><button className="focus-text-button" onClick={() => navClick("today")}>Back to Today</button><span className="focus-eyebrow">PREFERENCES</span><h1>Make it comfortable.</h1><label>Theme<select value={theme} onChange={event => setThemeValue(event.target.value as Theme)}><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="focus-toggle"><input type="checkbox" checked={reducedMotion} onChange={event => setMotionValue(event.target.checked)} /> Reduce motion</label><label className="focus-toggle"><input type="checkbox" checked={hideTimerNumbers} onChange={event => setTimerNumbersValue(event.target.checked)} /> Hide timer numbers</label><label className="focus-toggle"><input type="checkbox" checked={soundEnabled} onChange={event => setSoundValue(event.target.checked)} /> Sound (off by default)</label><label className="focus-toggle"><input type="checkbox" checked={hapticsEnabled} onChange={event => setHapticsValue(event.target.checked)} /> Light haptics</label><p className="focus-quiet-message">Reminders cannot be delivered yet. They are not being sent.</p><p className="focus-quiet-message">Orin supports focus and is not a medical treatment.</p></section>}
       {surface === "recovery" && <Recovery onBack={() => navClick("now")} onChanged={() => void focus.refresh()} />}
     </main>

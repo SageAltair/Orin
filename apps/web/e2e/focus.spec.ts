@@ -5,6 +5,12 @@ const timestamp = "2026-10-10T08:00:00Z";
 async function setupFocus(page: Page) {
   let task: Record<string, unknown> | null = null;
   let session: Record<string, unknown> | null = null;
+  const collectionTasks: Record<string, unknown>[] = [
+    { id: "inbox-task", title: "Ask the team about the venue", description: null, status: "todo", priority: "normal", due_at: null, focus_state: "inbox", project_id: null },
+    { id: "today-task", title: "Review the project outline", description: null, status: "todo", priority: "high", due_at: null, focus_state: "today", project_id: null },
+    { id: "upcoming-task", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2026-10-13T14:00:00Z", focus_state: "later", project_id: null },
+    { id: "completed-task", title: "Send the approved update", description: null, status: "done", priority: "normal", due_at: null, focus_state: "released", project_id: null },
+  ];
   let settings: Record<string, unknown> = { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false, check_in_interval: 15 };
   const plan = () => ({ day_key: "2026-10-10", energy_level: null, tasks: task ? [{ ...task, is_anchor: true, today_position: 0 }] : [] });
   await page.route("**/api/v1/**", async route => {
@@ -39,6 +45,8 @@ async function setupFocus(page: Page) {
       task = { ...task, ...await route.request().postDataJSON() as Record<string, unknown> };
       return route.fulfill({ json: task });
     }
+    if (pathname === "/api/v1/tasks" && method === "GET") return route.fulfill({ json: collectionTasks });
+    if (/\/api\/v1\/tasks\/[^/]+$/.test(pathname) && method === "PATCH") { const item = collectionTasks.find(candidate => candidate.id === pathname.split("/").at(-1)); if (!item) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); Object.assign(item, await route.request().postDataJSON()); return route.fulfill({ json: item }); }
     if (pathname === "/api/v1/focus/today/tasks" && method === "PUT") return route.fulfill({ json: plan() });
     if (pathname === "/api/v1/focus/now/start" && method === "POST") {
       session = { id: "focus-1", task_id: "task-1", duration_minutes: 25, started_at: timestamp, status: "active" };
@@ -237,4 +245,19 @@ test("focus layout remains readable at 200 percent page zoom", async ({ page }) 
   await expect(page.getByRole("button", { name: "Save and continue" })).toBeVisible();
   const shell = await page.locator(".focus-shell").evaluate(element => ({ scroll: element.scrollWidth, client: element.clientWidth }));
   expect(shell.scroll).toBeLessThanOrEqual(shell.client + 1);
+});
+
+test("the focus workspace can find inbox, today, upcoming, and completed tasks", async ({ page }) => {
+  await setupFocus(page); await page.goto("/"); await signIn(page);
+  const focusNav = page.getByRole("navigation", { name: "Focus navigation" });
+  await focusNav.getByRole("button", { name: "Browse" }).click();
+  await expect(page.getByRole("heading", { name: "Find what you need." })).toBeVisible();
+  await expect(page.getByText("Ask the team about the venue")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
+  await expect(page.getByText("Review the project outline")).toBeVisible();
+  await expect(page.getByText("Ask the team about the venue")).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
+  await expect(page.getByText("Prepare next week's notes")).toBeVisible();
+  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
+  await expect(page.getByText("Send the approved update")).toBeVisible();
 });
