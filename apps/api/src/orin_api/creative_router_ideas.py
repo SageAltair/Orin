@@ -205,17 +205,23 @@ def list_idea_links(
 def delete_idea_link(
     idea_id: uuid.UUID,
     document_id: uuid.UUID,
+    link_type: Literal["inspires", "contrasts", "extends", "supports"] | None = Query(default=None),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> Response:
-    link = session.scalar(
-        select(IdeaDocumentLink).where(
-            IdeaDocumentLink.idea_id == idea_id,
-            IdeaDocumentLink.document_id == document_id,
-        )
+    query = select(IdeaDocumentLink).where(
+        IdeaDocumentLink.idea_id == idea_id,
+        IdeaDocumentLink.document_id == document_id,
+        IdeaDocumentLink.user_id == user.id,
     )
-    if link is None or link.user_id != user.id:
+    if link_type is not None:
+        query = query.where(IdeaDocumentLink.link_type == link_type)
+    links = session.scalars(query).all()
+    if not links:
         raise HTTPException(status_code=404, detail="Link not found")
+    if len(links) > 1:
+        raise HTTPException(status_code=409, detail="Choose the relationship type to remove.")
+    link = links[0]
     link_id = link.id
     session.delete(link)
     session.flush()

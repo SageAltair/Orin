@@ -158,12 +158,12 @@ export function IdeasCanvas({
     }
   };
 
-  const disconnect = async (documentId: string) => {
+  const disconnect = async (documentId: string, relationship: IdeaLinkType) => {
     if (!selected) return;
     setBusy(true);
     setError("");
     try {
-      await unlinkIdeaFromDocument(selected.id, documentId);
+      await unlinkIdeaFromDocument(selected.id, documentId, relationship);
       setLinks(await fetchIdeaLinks(selected.id));
       setMessage("Link removed.");
     } catch (e) {
@@ -307,7 +307,7 @@ export function IdeasCanvas({
                       <button
                         type="button"
                         className="text-action"
-                        onClick={() => void disconnect(link.document_id)}
+                        onClick={() => void disconnect(link.document_id, link.link_type)}
                       >
                         Remove
                       </button>

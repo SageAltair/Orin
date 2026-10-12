@@ -28,8 +28,8 @@ export async function linkIdeaToDocument(ideaId: string, documentId: string, lin
   return request<CreativeIdeaLink>(`/creative/ideas/${ideaId}/links`, { method: "POST", body: JSON.stringify({ document_id: documentId, link_type: linkType, note: note ?? null }) });
 }
 
-export async function unlinkIdeaFromDocument(ideaId: string, documentId: string): Promise<void> {
-  await request<void>(`/creative/ideas/${ideaId}/links/${documentId}`, { method: "DELETE" });
+export async function unlinkIdeaFromDocument(ideaId: string, documentId: string, linkType: IdeaLinkType): Promise<void> {
+  await request<void>(`/creative/ideas/${ideaId}/links/${documentId}?link_type=${encodeURIComponent(linkType)}`, { method: "DELETE" });
 }
 
 /* --- Outline --- */

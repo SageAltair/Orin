@@ -497,3 +497,15 @@ def test_creative_tables_exist_in_the_schema(sessions: tuple[sessionmaker, uuid.
         tables = set(session.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'")).scalars())
     assert {"idea_inbox", "creative_outline_items", "creative_document_cards", "idea_document_links"} <= tables
 
+
+
+def test_unlink_selects_only_the_requested_relationship(client: TestClient) -> None:
+    idea_id = client.post("/api/v1/creative/ideas", json={"text": "Several relationships"}).json()["id"]
+    note_id = _note(client)["id"]
+    endpoint = f"/api/v1/creative/ideas/{idea_id}/links"
+    for relationship in ("supports", "contrasts"):
+        assert client.post(endpoint, json={"document_id": note_id, "link_type": relationship}).status_code == 200
+    assert client.delete(f"{endpoint}/{note_id}").status_code == 409
+    assert client.delete(f"{endpoint}/{note_id}?link_type=contrasts").status_code == 204
+    assert [row["link_type"] for row in client.get(endpoint).json()] == ["supports"]
+    assert client.get("/api/v1/creative/ideas").json()[0]["linked_document_ids"] == [note_id]
