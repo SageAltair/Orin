@@ -43,3 +43,13 @@ def test_production_requires_explicit_database_and_https_web_configuration() -> 
 def test_credentialed_cors_rejects_wildcard_origins() -> None:
     with pytest.raises(ValidationError):
         Settings(cors_origins="*")
+
+
+def test_example_environment_keeps_optional_github_disabled():
+    from pathlib import Path
+    from dotenv import dotenv_values
+    values = dotenv_values(Path(__file__).parents[3] / ".env.example")
+    values["AUTH_SECRET_KEY"] = "isolated-test-key-" + "x" * 64
+    config = Settings(_env_file=None, **{key.lower():value for key,value in values.items() if value is not None})
+    assert not config.github_app_callback_url
+    assert "http://localhost:5273" in config.allowed_cors_origins

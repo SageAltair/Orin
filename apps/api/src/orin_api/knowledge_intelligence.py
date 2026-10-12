@@ -6,13 +6,20 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
 
 from orin_api.models import KnowledgeDocument, KnowledgeInsight, KnowledgeReview, Task, TaskReturnPoint, TaskStatus
 
 STOP_WORDS = frozenset("about after again also because before being between could did does doing down each from have here into just more most only other should some such than that their them then there these they this those through under until very what when where which while with would your".split())
-TOKEN = re.compile(r"[a-zA-Z][a-zA-Z0-9'-]{3,}")
+TOKEN = re.compile(r"[^\W\d_][\w'-]{3,}", re.UNICODE)
+
+
+def invalidate_document_insights(session: Session, user_id: uuid.UUID, document_id: uuid.UUID) -> None:
+    """Remove derived evidence as soon as a source changes or becomes private."""
+    for row in session.scalars(select(KnowledgeInsight).where(KnowledgeInsight.user_id == user_id)).all():
+        if any(str(item.get("document_id")) == str(document_id) for item in row.evidence if isinstance(item, dict)):
+            session.delete(row)
 
 
 def _utc(value: datetime) -> datetime:
@@ -60,6 +67,25 @@ def evaluate_knowledge(session: Session, user_id: uuid.UUID, *, now: datetime | 
         for term in terms:
             topic_documents[term].append(doc)
 
+    # A source can disappear, change type or lose eligibility between evaluations.
+    eligible_ids = {str(doc.id) for doc in docs}
+    for insight in session.scalars(select(KnowledgeInsight).where(KnowledgeInsight.user_id == user_id)).all():
+        document_evidence = [item for item in insight.evidence if isinstance(item, dict) and item.get("document_id")]
+        invalid = any(str(item["document_id"]) not in eligible_ids for item in document_evidence)
+        if insight.fingerprint.startswith("topic:"):
+            invalid = invalid or len(topic_documents.get(insight.fingerprint[6:], [])) < 3
+        if insight.fingerprint.startswith("trend:"):
+            sources = topic_documents.get(insight.fingerprint[6:], [])
+            recent = [doc for doc in sources if _utc(doc.updated_at) >= current - timedelta(days=14)]
+            prior = [doc for doc in sources if current - timedelta(days=44) <= _utc(doc.updated_at) < current - timedelta(days=14)]
+            invalid = invalid or len(recent) < 2 or len(recent) <= len(prior)
+        if insight.fingerprint == "dormant:ideas":
+            invalid = invalid or not any(doc.document_type == "idea" and doc.status not in {"completed", "parked", "abandoned"} and _utc(doc.updated_at) <= current - timedelta(days=30) for doc in docs)
+        if insight.fingerprint == "unfinished:drafts:21d":
+            invalid = invalid or sum(doc.document_type == "draft" and doc.status in {"developing", "ready_to_resume"} and _utc(doc.updated_at) <= current - timedelta(days=21) for doc in docs) < 2
+        if invalid:
+            session.delete(insight)
+    session.flush()
     created_insights = 0
     for term, sources in sorted(topic_documents.items(), key=lambda item: (-len(item[1]), item[0])):
         if len(sources) < 3:
@@ -168,7 +194,8 @@ def evaluate_knowledge(session: Session, user_id: uuid.UUID, *, now: datetime | 
     by_document = {doc.id: doc for doc in session.scalars(select(KnowledgeDocument).where(KnowledgeDocument.user_id == user_id)).all()}
     for doc in by_document.values():
         review = session.scalar(select(KnowledgeReview).where(KnowledgeReview.document_id == doc.id, KnowledgeReview.user_id == user_id))
-        eligible_status = doc.status not in {"completed", "parked", "abandoned"} and not doc.archived
+        eligible_status = (doc.status not in {"completed", "parked", "abandoned"} and not doc.archived
+                           and not doc.exclude_from_ai and doc.document_type != "journal")
         updated_at = _utc(doc.updated_at)
         review_at = _utc(doc.review_at) if doc.review_at else None
         draft_due = doc.document_type == "draft" and doc.status in {"developing", "ready_to_resume"} and updated_at <= current - timedelta(days=7)
@@ -193,7 +220,7 @@ def evaluate_knowledge(session: Session, user_id: uuid.UUID, *, now: datetime | 
             review_count += 1
         elif review.status == "pending":
             review.due_at = due_at
-        elif review.status == "snoozed" and review.snoozed_until and review.snoozed_until <= current:
+        elif review.status == "snoozed" and review.snoozed_until and _utc(review.snoozed_until) <= _utc(current):
             review.status, review.snoozed_until, review.due_at = "pending", None, due_at
     session.flush()
     return {"insights_created": created_insights, "reviews_created": review_count}

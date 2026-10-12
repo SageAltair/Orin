@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Cookie, Depends, Response, status, HTTPException
+from fastapi import APIRouter, Cookie, Depends, Response, Request, status, HTTPException
+from orin_api.rate_limit import enforce_auth_limit
 from sqlalchemy.orm import Session
 
 from orin_api.auth import (
@@ -36,21 +37,25 @@ def _disable_caching(response: Response) -> None:
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(
     data: RegisterRequest,
+    request: Request,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> UserRead:
     _auth_secret(settings)
+    enforce_auth_limit(request, session, route="register", limit=5)
     return register_user(data, session)
 
 
 @router.post("/login", response_model=AuthTokenResponse)
 def login(
     data: LoginRequest,
+    request: Request,
     response: Response,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthTokenResponse:
     _auth_secret(settings)
+    enforce_auth_limit(request, session, route="login")
     token = authenticate_user(data, response, session, settings)
     _disable_caching(response)
     return token

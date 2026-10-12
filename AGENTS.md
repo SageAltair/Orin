@@ -2,7 +2,7 @@
 
 ## Product vision
 
-Orin connects human intention with digital execution. In the long term, users will express objectives in natural language and Orin will organize context, coordinate AI agents and computer workers, execute permitted work, request approval when needed, monitor progress, and report results. This repository establishes the platform foundation only. Do not implement authentication, AI agents, memory, integrations, or execution without a specific request.
+Orin connects human intention with digital execution. In the long term, users will express objectives in natural language and Orin will organize context, coordinate AI agents and computer workers, execute permitted work, request approval when needed, monitor progress, and report results. The repository implements the core personal workspace, a constrained AI command interpreter, Writing/Creative Studio and approval-gated device execution. Extend these only within the requested scope.
 
 ## Architecture rules
 
@@ -45,7 +45,7 @@ Orin connects human intention with digital execution. In the long term, users wi
 
 ### Docker
 
-- `docker compose up --build` — start web, API, PostgreSQL, and idle worker.
+- `docker compose up --build` — start web, API, and PostgreSQL; the worker is an opt-in profile.
 - `docker compose down` — stop services.
 - `docker compose down -v` — remove services and local database data.
 
@@ -55,7 +55,7 @@ Orin connects human intention with digital execution. In the long term, users wi
 - `npm run dev`
 - `npm run lint`
 - `npm run test`
-- `npm run test:e2e` (requires Chrome or a Playwright browser installed with `npx playwright install chromium`)
+- `npm run test:e2e` (requires a Playwright browser installed with `npx playwright install chromium`)
 - `npm run build`
 
 ### API (`apps/api`)
@@ -69,7 +69,7 @@ Orin connects human intention with digital execution. In the long term, users wi
 ### Worker (`apps/worker`)
 
 - `pip install -e apps/worker`
-- `orin-worker` — starts the idle worker process; no jobs are executed.
+- `orin-worker` — starts the enrolled worker; explicit credentials/roots are required. Project tests require an isolated Linux execution image.
 
 ## Rules for future AI coding agents
 

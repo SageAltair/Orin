@@ -27,6 +27,7 @@ services:
       ACCESS_TOKEN_LIFETIME_MINUTES: ${ACCESS_TOKEN_LIFETIME_MINUTES:-15}
       REFRESH_TOKEN_LIFETIME_DAYS: ${REFRESH_TOKEN_LIFETIME_DAYS:-30}
       PYTHONPATH: /app/src
+      BACKGROUND_WORKER_ENABLED: "true"
       AI_PROVIDER: ${AI_PROVIDER:-}
       AI_MODEL: ${AI_MODEL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -42,7 +43,7 @@ services:
       GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
       GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
       GITHUB_APP_CALLBACK_URL: ${GITHUB_APP_CALLBACK_URL:-}
-      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:5173}
+      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:5273}
       ATTACHMENT_STORAGE_PATH: ${ATTACHMENT_STORAGE_PATH:-/app/data/attachments}
       ATTACHMENT_MAX_SIZE_BYTES: ${ATTACHMENT_MAX_SIZE_BYTES:-10485760}
     depends_on:
@@ -81,11 +82,20 @@ services:
       - "${WEB_PORT:-5273}:5173"
 
   worker:
+    profiles: ["worker"]
     build:
       context: .
       dockerfile: infrastructure/docker/worker.Dockerfile
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ORIN_API_URL: ${ORIN_API_URL:-}
+      ORIN_DEVICE_ID: ${ORIN_DEVICE_ID:-}
+      ORIN_WORKER_TOKEN: ${ORIN_WORKER_TOKEN:-}
+      ORIN_ALLOWED_ROOTS: /workspace
+      ORIN_WORKER_STATE_PATH: /state/worker.sqlite3
+    volumes:
+      - worker_state:/state
+      - ${ORIN_WORKER_ROOT:-./worker-workspace}:/workspace
     depends_on:
       db:
         condition: service_healthy
@@ -94,4 +104,5 @@ services:
 volumes:
   postgres_data:
   orin_attachments:
+  worker_state:
   web_node_modules:

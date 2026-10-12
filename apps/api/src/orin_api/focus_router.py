@@ -389,7 +389,7 @@ def propose_today(user: User = Depends(get_current_user), session: Session = Dep
             Project.id.in_(project_ids), Project.owner_id == user.id)).all()) if project_ids else {}
         selected, anchor_id = select_todays_three(candidates, settings_row.energy_today, excluded_ids=excluded,
             routines=[item.get("name", "") for item in settings_row.routines if item.get("name")],
-            blocked_ids=blocked_ids, project_priorities=project_priorities, today=date.fromisoformat(day_key))
+            blocked_ids=blocked_ids, project_priorities=project_priorities, today=date.fromisoformat(day_key), timezone_name=settings_row.timezone)
         _replace_plan(session, user, plan, day_key,
                       [TodayTaskInput(task_id=task.id, is_anchor=task.id == anchor_id) for task in selected])
     response = _plan_view(session, user, plan, day_key, settings_row.energy_today)

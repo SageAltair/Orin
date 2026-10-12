@@ -44,3 +44,33 @@ def consume_user_window(session: Session, *, user_id: uuid.UUID, route: str,
         session.execute(delete(table).where(table.c.window_start < start - timedelta(hours=24)))
     session.commit()
     return RateLimitResult(True, max(0, limit - count), max(1, window_seconds - epoch % window_seconds))
+
+
+def enforce_user_limit(session: Session, user_id: uuid.UUID, route: str, *, limit: int = 10) -> None:
+    from fastapi import HTTPException
+    result = consume_user_window(session, user_id=user_id, route=route, limit=limit)
+    if not result.allowed:
+        raise HTTPException(status_code=429, detail="Please wait before trying again.",
+                            headers={"Retry-After": str(result.retry_after)})
+
+
+def enforce_auth_limit(request, session: Session, *, route: str, limit: int = 20) -> None:
+    import hashlib
+    from fastapi import HTTPException
+    from orin_api.models import AnonymousRateWindow
+    # Never trust arbitrary X-Forwarded-For. Configure trusted proxy handling at the ASGI boundary.
+    subject = hashlib.sha256((request.client.host if request.client else "unknown").encode()).hexdigest()
+    now = datetime.now(timezone.utc)
+    epoch = int(now.timestamp())
+    start = datetime.fromtimestamp(epoch - epoch % 60, tz=timezone.utc)
+    table = AnonymousRateWindow.__table__
+    insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
+    statement = insert(table).values(id=uuid.uuid4(), subject_hash=subject, route=route, window_start=start, request_count=1)
+    statement = statement.on_conflict_do_update(index_elements=[table.c.subject_hash, table.c.route, table.c.window_start],
+        set_={"request_count": table.c.request_count + 1}, where=table.c.request_count < limit).returning(table.c.request_count)
+    count = session.scalar(statement)
+    session.execute(delete(table).where(table.c.window_start < start - timedelta(hours=24)))
+    session.commit()
+    if count is None:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please wait a minute.",
+                            headers={"Retry-After": str(max(1, 60 - epoch % 60))})

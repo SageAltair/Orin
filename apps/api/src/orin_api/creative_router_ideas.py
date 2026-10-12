@@ -28,6 +28,12 @@ class StudioRequest(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
 
 
+class IdeaPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str | None = Field(default=None, min_length=1, max_length=20000)
+    status: Literal["active", "archived"] | None = None
+
+
 class IdeaInboxItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -115,15 +121,18 @@ def list_ideas(
 @router.patch("/ideas/{idea_id}", response_model=IdeaInboxItem)
 def update_idea(
     idea_id: uuid.UUID,
-    payload: StudioRequest,
+    payload: IdeaPatch,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> IdeaInboxItem:
     row = session.get(IdeaInbox, idea_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=404, detail="Idea not found")
-    row.title = payload.text.split("\n")[0].strip()[:240] or row.title
-    row.content = payload.text[:50000]
+    if payload.text is not None:
+        row.title = payload.text.split("\n")[0].strip()[:240] or row.title
+        row.content = payload.text[:50000]
+    if payload.status is not None:
+        row.status = payload.status
     session.flush()
     session.commit()
     return _idea_view(row)

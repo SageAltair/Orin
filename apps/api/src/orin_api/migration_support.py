@@ -37,3 +37,16 @@ def ensure_alembic_version_column_length(connection: Connection) -> None:
             existing_type=version_column["type"],
             existing_nullable=False,
         )
+
+
+# Alembic's public version-table hook keeps offline SQL consistent with online setup.
+from alembic.ddl.postgresql import PostgresqlImpl
+
+
+class WideVersionPostgresqlImpl(PostgresqlImpl):
+    __dialect__ = "postgresql"
+
+    def version_table_impl(self, **kwargs):
+        table = super().version_table_impl(**kwargs)
+        table.c.version_num.type = String(ALEMBIC_VERSION_LENGTH)
+        return table

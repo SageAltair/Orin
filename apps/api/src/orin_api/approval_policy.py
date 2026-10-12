@@ -26,7 +26,7 @@ def decide_approval(
         source = "custom_action" if action in (custom or {}) else "custom_default"
         reason = "Your custom policy requires approval." if required else "Your custom policy permits this action automatically."
     else:
-        thresholds = {"conservative": {"low"}, "balanced": {"low", "medium"}, "automatic": {"low", "medium"}}
+        thresholds = {"conservative": set(), "balanced": {"low"}, "automatic": {"low", "medium"}}
         required = risk not in thresholds[mode]
         if always and mode == "automatic":
             required = True

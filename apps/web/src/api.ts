@@ -43,7 +43,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   let response: Response;
-  try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, credentials: "include" }); }
+  try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(120000), credentials: "include" }); }
   catch { throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0); }
   if (response.status === 401 && retry && path !== "/auth/login" && path !== "/auth/refresh") {
     if (await refresh()) return request<T>(path, options, false);

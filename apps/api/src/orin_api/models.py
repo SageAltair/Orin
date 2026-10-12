@@ -1031,3 +1031,25 @@ class ProjectIntegrationSource(CreatedAtMixin, Base):
     provider_resource_id: Mapped[str] = mapped_column(String(120), nullable=False)
     resource_owner: Mapped[str] = mapped_column(String(120), nullable=False)
     resource_name: Mapped[str] = mapped_column(String(160), nullable=False)
+
+
+class AnonymousRateWindow(Base):
+    __tablename__ = "anonymous_rate_windows"
+    __table_args__ = (UniqueConstraint("subject_hash", "route", "window_start", name="uq_anonymous_rate_window"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    subject_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    route: Mapped[str] = mapped_column(String(120), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class Notification(CreatedAtMixin, Base):
+    __tablename__ = "notifications"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    event_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("calendar_events.id", ondelete="CASCADE"))
+    delivery_key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

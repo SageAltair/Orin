@@ -18,7 +18,7 @@ from orin_api.models import (
     IdeaInbox,
     CreativeDocumentCard,
     CreativeOutlineItem,
-    IdeaDocumentLink,
+    IdeaDocumentLink as IdeaDocumentLinkModel,
     KnowledgeDocument,
     Project,
 )
@@ -71,7 +71,7 @@ class IdeaDocumentLink:
 @dataclass
 class IdeasCatalog:
     ideas: dict[uuid.UUID, Idea] = field(default_factory=dict)
-    links: dict[tuple[uuid.UUID, uuid.UUID], IdeaDocumentLink] = field(
+    links: dict[tuple[uuid.UUID, uuid.UUID], IdeaDocumentLinkModel] = field(
         default_factory=dict
     )
 
@@ -113,6 +113,8 @@ class IdeasCatalog:
     ) -> Idea:
         if not title.strip():
             raise ValueError("Idea title must not be empty")
+        if document_id is not None and knowledge_document_user_id(session, document_id) != user_id:
+            raise ValueError("Document belongs to another user")
         idea = IdeaInbox(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -127,11 +129,11 @@ class IdeasCatalog:
         self.ideas[idea.id] = self._to_domain_idea(idea)
         return self.ideas[idea.id]
 
-    def link_idea_to_document(self, *, session, idea_id: uuid.UUID, document_id: uuid.UUID, link_type: str = "inspires", note: str = "") -> IdeaDocumentLink:
+    def link_idea_to_document(self, *, session, idea_id: uuid.UUID, document_id: uuid.UUID, link_type: str = "inspires", note: str = "") -> IdeaDocumentLinkModel:
         key = (idea_id, document_id)
         if key in self.links:
             raise ValueError("This idea is already linked to the document")
-        link = IdeaDocumentLink(
+        link = IdeaDocumentLinkModel(
             id=uuid.uuid4(),
             user_id=knowledge_document_user_id(session, document_id),
             idea_id=idea_id,
@@ -142,6 +144,8 @@ class IdeasCatalog:
         row = session.get(IdeaInbox, idea_id)
         if row is None:
             raise ValueError("Idea not found")
+        if row.user_id != link.user_id:
+            raise ValueError("Idea and document must have the same owner")
         existing = row.linked_document_ids or ""
         if str(document_id) not in existing.split(","):
             row.linked_document_ids = existing + ("," if existing else "") + str(document_id)

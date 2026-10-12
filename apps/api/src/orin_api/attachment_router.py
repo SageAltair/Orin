@@ -8,6 +8,8 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
+from orin_api.rate_limit import enforce_user_limit
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from pypdf import PdfReader
@@ -41,7 +43,7 @@ def _file_path(settings: Settings, attachment: FileAttachment) -> Path:
     return path
 
 
-def _extract_text(name: str, media_type: str, content: bytes) -> str | None:
+def _extract_text_unbounded(name: str, media_type: str, content: bytes) -> str | None:
     if media_type in IMAGE_TYPES.values():
         if media_type == "image/png" and not content.startswith(b"\x89PNG\r\n\x1a\n"):
             raise ValueError("This image is not a valid PNG file.")
@@ -61,7 +63,15 @@ def _extract_text(name: str, media_type: str, content: bytes) -> str | None:
             raise ValueError("Password-protected PDFs cannot be read. Upload an unlocked copy.")
         if len(reader.pages) > 200:
             raise ValueError("PDFs are limited to 200 pages.")
-        extracted = "\n\n".join((page.extract_text() or "") for page in reader.pages)[:MAX_EXTRACTED_CHARS]
+        parts = []
+        remaining = MAX_EXTRACTED_CHARS
+        for page in reader.pages:
+            text = (page.extract_text() or "")[:remaining]
+            parts.append(text)
+            remaining -= len(text) + 2
+            if remaining <= 0:
+                break
+        extracted = "\n\n".join(parts)[:MAX_EXTRACTED_CHARS]
         if not extracted.strip():
             raise ValueError("This PDF has no selectable text. Use OCR to create a text-readable copy first.")
         return extracted
@@ -74,6 +84,45 @@ def _extract_text(name: str, media_type: str, content: bytes) -> str | None:
     return text[:MAX_EXTRACTED_CHARS]
 
 
+def _parse_pdf_process(connection, name: str, content: bytes) -> None:
+    try:
+        if __import__("os").name == "posix":
+            import resource
+            resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+            resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+        connection.send((True, _extract_text_unbounded(name, "application/pdf", content)))
+    except Exception:
+        connection.send((False, "This PDF could not be read within the parsing limits."))
+    finally:
+        connection.close()
+
+
+def _extract_text(name: str, media_type: str, content: bytes) -> str | None:
+    if media_type != "application/pdf":
+        return _extract_text_unbounded(name, media_type, content)
+    import multiprocessing
+    context = multiprocessing.get_context("spawn")
+    parent, child = context.Pipe(duplex=False)
+    process = context.Process(target=_parse_pdf_process, args=(child, name, content), daemon=True)
+    process.start()
+    child.close()
+    try:
+        if not parent.poll(8):
+            raise ValueError("PDF parsing timed out. Try a smaller document.")
+        try:
+            ok, result = parent.recv()
+        except EOFError as exc:
+            raise ValueError("PDF parsing exceeded its resource limits.") from exc
+        if not ok:
+            raise ValueError(result)
+        return result
+    finally:
+        parent.close()
+        if process.is_alive():
+            process.terminate()
+        process.join(timeout=2)
+
+
 def _read(row: FileAttachment) -> AttachmentRead:
     return AttachmentRead(id=row.id, conversation_id=row.conversation_id, task_id=row.task_id,
         filename=row.filename, media_type=row.media_type, size_bytes=row.size_bytes, created_at=row.created_at)
@@ -83,11 +132,13 @@ def _read(row: FileAttachment) -> AttachmentRead:
 async def upload_attachments(files: list[UploadFile] = File(..., max_length=5),
     user: User = Depends(get_current_user), session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings)) -> list[AttachmentRead]:
+    enforce_user_limit(session, user.id, "attachments.upload", limit=12)
     if not files or len(files) > 5:
         raise HTTPException(status_code=422, detail="Attach between one and five files at a time.")
     root = Path(settings.attachment_storage_path).resolve()
     root.mkdir(parents=True, exist_ok=True)
     created: list[FileAttachment] = []
+    written_paths: list[Path] = []
     total_size = 0
     try:
         for upload in files:
@@ -103,7 +154,7 @@ async def upload_attachments(files: list[UploadFile] = File(..., max_length=5),
             if total_size > 20_971_520:
                 raise HTTPException(status_code=413, detail="Attachments in one request may total no more than 20 MB.")
             try:
-                extracted = _extract_text(raw_name, media_type, content)
+                extracted = await run_in_threadpool(_extract_text, raw_name, media_type, content)
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=422, detail=f"Could not read {raw_name}: {exc}") from exc
             file_id = uuid.uuid4()
@@ -112,6 +163,7 @@ async def upload_attachments(files: list[UploadFile] = File(..., max_length=5),
             if target.parent != root:
                 raise HTTPException(status_code=400, detail="Invalid attachment path.")
             target.write_bytes(content)
+            written_paths.append(target)
             row = FileAttachment(id=file_id, owner_id=user.id, filename=raw_name, media_type=media_type,
                 size_bytes=len(content), storage_key=storage_key, sha256=hashlib.sha256(content).hexdigest(),
                 extracted_text=extracted)
@@ -121,8 +173,8 @@ async def upload_attachments(files: list[UploadFile] = File(..., max_length=5),
         return [_read(row) for row in created]
     except Exception:
         session.rollback()
-        for row in created:
-            _file_path(settings, row).unlink(missing_ok=True)
+        for path in written_paths:
+            path.unlink(missing_ok=True)
         raise
 
 

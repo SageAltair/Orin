@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
-from orin_api.models import Memory, Project, ProjectStatus, Task, TaskDependency, TaskStatus
+from orin_api.models import KnowledgeDocument, Memory, Project, ProjectStatus, Task, TaskDependency, TaskStatus
 
 
 class ProjectContextService:
@@ -17,7 +17,15 @@ class ProjectContextService:
     def for_command(self, command: str, *, active_objective: str | None = None) -> dict[str, object] | None:
         """Return a bounded workspace snapshot, even for cross-project planning."""
         normalized = f"{active_objective or ''} {command}".casefold()
-        words = {word for word in re.findall(r"[a-z0-9]+", normalized) if len(word) > 3}
+        words = {word for word in re.findall(r"[^\W_]+", normalized, re.UNICODE) if len(word) > 3}
+        notes_query = select(KnowledgeDocument).where(KnowledgeDocument.user_id == self.user_id,
+            KnowledgeDocument.archived.is_(False), KnowledgeDocument.exclude_from_ai.is_(False),
+            KnowledgeDocument.document_type != "journal")
+        relevant_notes = self.session.scalars(notes_query.where(or_(*[
+            KnowledgeDocument.title.ilike(f"%{word}%") | KnowledgeDocument.content.ilike(f"%{word}%")
+            for word in words])).order_by(KnowledgeDocument.updated_at.desc()).limit(6)).all() if words else []
+        note_context = [{"document_id": str(note.id), "title": note.title, "excerpt": note.content[:1800]}
+                        for note in relevant_notes]
         projects = self.session.scalars(
             select(Project).where(Project.owner_id == self.user_id)
             .order_by(Project.updated_at.desc()).limit(30)
@@ -46,9 +54,9 @@ class ProjectContextService:
             ).all()
             relevant_preferences = [memory for memory in preferences if words.intersection(
                 re.findall(r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))][:3]
-            return ({"user_preferences": [{"title": item.title, "content": item.content}
+            return ({"writing_sources": note_context, "user_preferences": [{"title": item.title, "content": item.content}
                                             for item in relevant_preferences]}
-                    if relevant_preferences else None)
+                    if relevant_preferences or note_context else None)
         inventory_request = any(phrase in command.casefold() for phrase in (
             "all my projects", "all projects", "my existing projects", "review my workspace",
             "review all my tasks", "what tasks do i have", "list my projects", "list my tasks",
@@ -105,7 +113,7 @@ class ProjectContextService:
                  or (memory.project_id in selected_ids and memory.memory_type == "decision")
                  or (planning_request and inventory_request and memory.memory_type == "commitment"))
             and (memory.project_id is None or memory.project_id in selected_ids)][:10]
-        if not selected_projects and not selected_tasks and not relevant_memories:
+        if not selected_projects and not selected_tasks and not relevant_memories and not note_context:
             return None
 
         project_data = []
@@ -124,6 +132,7 @@ class ProjectContextService:
                 "blockers": [task.title for task in project_tasks if task.status == TaskStatus.BLOCKED],
             })
         return {
+            "writing_sources": note_context,
             "snapshot_scope": "Named matching projects, or recent active owned projects for planning/workspace questions; active and urgent tasks are prioritized.",
             "may_be_truncated": (len(projects) == 30 or len(selected_projects) == 15
                                  or len(selected_tasks) == 60 or len(personal) == 30

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+test.beforeEach(() => { test.skip(process.env.ORIN_LIVE_E2E !== "true", "Set ORIN_LIVE_E2E=true with an isolated API running to verify live writing workflows"); });
 
 test("personal knowledge capture, editing, links, search, and reload persistence", async ({ page }) => {
   test.setTimeout(60_000);
@@ -117,7 +118,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.reload();
   await page.getByRole("button", { name: "Writing" }).click();
   await page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ }).click();
-  await expect(page.getByText("Unsent writing from this browser is available.")).toBeVisible();
+  await expect(page.getByText(/A local draft is available/)).toBeVisible();
   await page.getByRole("button", { name: "Restore draft" }).click();
   await expect(page.getByLabel("Content")).toHaveValue("A local draft to recover after an interrupted save.");
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });

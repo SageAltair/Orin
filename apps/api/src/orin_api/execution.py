@@ -5,7 +5,7 @@ import uuid
 import re
 import json
 from datetime import datetime, timedelta, timezone
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Type
@@ -123,6 +123,21 @@ class ActionExecutionError(Exception):
         self.status = status
 
 
+class _ActionSession:
+    """Route adapters may flush, but only the execution boundary owns the transaction."""
+    def __init__(self, session: Session):
+        self._session = session
+
+    def __getattr__(self, name: str):
+        return getattr(self._session, name)
+
+    def commit(self) -> None:
+        self._session.flush()
+
+    def rollback(self) -> None:
+        raise ActionExecutionError("The action could not be completed.")
+
+
 class ExecutionEngine:
     def __init__(self, registry: ActionRegistry, approval_policy: ApprovalPolicy | None = None):
         self.registry = registry
@@ -180,7 +195,9 @@ class ExecutionEngine:
             approval_id = approval.id
 
         try:
-            result = definition.handler(context, inputs)
+            with context.session.begin_nested():
+                result = definition.handler(replace(context, session=_ActionSession(context.session)), inputs)
+                context.session.flush()
         except ActionExecutionError as exc:
             return self._audit(context, definition.name, definition, inputs, exc.status, str(exc), approval_id=approval_id)
         except Exception:
@@ -221,7 +238,7 @@ class ExecutionEngine:
             action_name=action,
             risk_level=definition.risk_level.value if definition else "low",
             permission=definition.permission if definition else "unknown",
-            approval_required=bool(definition and (definition.requires_approval or status == ActionStatus.PENDING_APPROVAL)),
+            approval_required=bool(definition and (definition.requires_approval or approval is not None or approval_id is not None or status == ActionStatus.PENDING_APPROVAL)),
             execution_status=status.value,
             result_status="succeeded" if status == ActionStatus.EXECUTED else status.value,
             entity_type=str(result.get("entity_type")) if isinstance(result, dict) and result.get("entity_type") else None,

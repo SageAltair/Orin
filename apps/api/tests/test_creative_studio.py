@@ -210,7 +210,7 @@ def test_outline_items_nest_by_parent_and_order_by_position(client: TestClient) 
 def test_outline_item_can_be_moved_and_marked_done(client: TestClient) -> None:
     project = _project(client)
     base = f"/api/v1/creative/projects/{project['id']}/outline"
-    created = client.post(base, json={"title": "A loose beat", "kind": "beat", "parent_id": str(uuid.uuid4())})
+    created = client.post(base, json={"title": "A loose beat", "kind": "beat"})
 
     patched = client.patch(f"{base}/{created.json()['id']}", json={"title": "A tightened beat", "status": "done", "position": 3})
 
@@ -223,7 +223,7 @@ def test_outline_item_can_be_moved_and_marked_done(client: TestClient) -> None:
 def test_outline_item_patch_rejects_unknown_status(client: TestClient) -> None:
     project = _project(client)
     base = f"/api/v1/creative/projects/{project['id']}/outline"
-    created = client.post(base, json={"title": "Beat", "kind": "beat", "parent_id": str(uuid.uuid4())})
+    created = client.post(base, json={"title": "Beat", "kind": "beat"})
 
     assert client.patch(f"{base}/{created.json()['id']}", json={"status": "shipped"}).status_code == 422
 

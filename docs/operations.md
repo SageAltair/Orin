@@ -17,3 +17,19 @@ Attachment bytes are stored under `ATTACHMENT_STORAGE_PATH` (default `data/attac
 ## Production boundaries
 
 `docker-compose.yml` is a local development stack (including API reload and an idle Worker), not a production deployment. Production startup requires an explicit `DATABASE_URL`, `AUTH_SECRET_KEY`, HTTPS `CORS_ORIGINS` and `WEB_APP_URL`, and `AUTH_REFRESH_COOKIE_SECURE=true`; the API rejects development database/web/CORS defaults and insecure refresh-cookie settings in production mode. Production also requires a TLS terminator, secure secret injection, database backups, edge rate limits for unauthenticated login and registration, and monitoring/retention configuration. GitHub OAuth secrets and encryption keys must be provisioned through the deployment secret manager.
+
+## Production template and proxy trust
+
+The separate `docker-compose.production.yml` builds static assets, runs API services as UID 10001, omits source bind mounts/reload, and exposes the web proxy only on host loopback. The template reserves the private 172.30.0.0/24 subnet and trusts forwarded client addresses only from that network. If that subnet conflicts with your infrastructure, change both its IPAM range and Uvicorn's forwarded allow list together. Nginx replaces incoming X-Forwarded-For with its observed client address. A host TLS terminator must use a reviewed real-IP configuration to preserve individual clients without trusting public spoofed headers. Keep the API and database ports private.
+
+The included Nginx auth limiter protects expensive unauthenticated endpoints and serves same-origin browser/API requests. Configure APP_ENV=production, a private DATABASE_URL, AUTH_SECRET_KEY, HTTPS CORS_ORIGINS/WEB_APP_URL and secure refresh cookies. Use a secret manager or a protected environment file. Do not commit the environment file. Preexisting Docker attachment volumes may need their ownership migrated to UID 10001 before upgrading; inspect/backup them first.
+
+## Background maintenance and worker enrollment
+
+Set BACKGROUND_WORKER_ENABLED=true on the API. It reconciles interrupted extraction, expired device jobs and calendar reminders. Watch API process health and background-maintenance error counts. Reminder delivery is in-app and durable; external push/email channels are not configured.
+
+The local Compose worker is an optional profile. Its enrollment URL must be HTTPS outside localhost; use the gateway's HTTPS URL when enrolling a container worker. Do not expose a Docker socket to the public API. Project test execution is only enabled on a separately provisioned Linux worker host with a prebuilt ORIN_WORKER_EXECUTION_IMAGE containing the required test dependencies. A sanitized read-only source snapshot is supplied to the isolated container; tests must write temporary outputs to /tmp and cannot update live files or access the network. Windows workers support the bounded file/system capabilities without this command runner.
+
+## Data portability and lifecycle
+
+The authenticated `/api/v1/privacy/export` endpoint returns an account ZIP with source records, related versions/links and available attachment bytes. Internal credentials/session tokens are omitted. Password-confirmed account deletion cascades owned relational data and removes attachment bytes. Database/volume backups can retain historical data until their configured retention expires; define and disclose that policy for your deployment. Regularly verify restore procedures in an isolated environment.

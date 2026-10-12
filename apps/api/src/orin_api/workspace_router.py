@@ -16,7 +16,8 @@ from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.domain_router import ensure_project_access
 from orin_api.models import Activity, ActivityType, Capability, EnvironmentPreference, FocusSession, KnowledgeDocument, KnowledgeDocumentLink, KnowledgeDocumentVersion, KnowledgeExtractionJob, KnowledgeFeedback, KnowledgeInsight, KnowledgeReview, Memory, Project, Task, TaskStatus, User, UserCapability
-from orin_api.knowledge_intelligence import evaluate_knowledge
+from orin_api.knowledge_intelligence import evaluate_knowledge, invalidate_document_insights
+from orin_api.rate_limit import enforce_user_limit
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.ai import AITaskType, AIProviderError, ModelSelector, create_provider
 from orin_api.config import Settings, get_settings
@@ -154,12 +155,14 @@ class KnowledgeFeedbackCreate(BaseModel):
 
 
 def _document_view(row: KnowledgeDocument) -> dict[str, object]:
+    def dated(value: datetime | None):
+        return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
     return {"id": row.id, "project_id": row.project_id, "title": row.title, "content": row.content,
             "document_type": row.document_type, "status": row.status, "tags": row.tags,
             "archived": row.archived, "exclude_from_ai": row.exclude_from_ai, "version": row.version,
-            "review_at": row.review_at, "extraction_status": row.extraction_status,
+            "review_at": dated(row.review_at), "extraction_status": row.extraction_status,
             "extracted_data": row.extracted_data, "extraction_version": row.extraction_version,
-            "extraction_error": row.extraction_error, "created_at": row.created_at, "updated_at": row.updated_at}
+            "extraction_error": row.extraction_error, "created_at": dated(row.created_at), "updated_at": dated(row.updated_at)}
 
 
 def _memory_view(row: Memory) -> dict[str, object]:
@@ -280,7 +283,8 @@ def delete_memory(memory_id: uuid.UUID, user: User = Depends(get_current_user), 
 @router.get("/knowledge/documents")
 def list_knowledge_documents(q: str | None = Query(default=None, min_length=1, max_length=120), document_type: str | None = None,
                              status_filter: str | None = Query(default=None, alias="status"), project_id: uuid.UUID | None = None,
-                             include_archived: bool = False, user: User = Depends(get_current_user),
+                             include_archived: bool = False, offset: int = Query(default=0, ge=0),
+                             limit: int = Query(default=200, ge=1, le=200), user: User = Depends(get_current_user),
                              session: Session = Depends(get_session)) -> list[dict[str, object]]:
     statement = select(KnowledgeDocument).where(KnowledgeDocument.user_id == user.id)
     if not include_archived:
@@ -298,7 +302,7 @@ def list_knowledge_documents(q: str | None = Query(default=None, min_length=1, m
         statement = statement.where(KnowledgeDocument.project_id == project_id)
     if q:
         statement = statement.where(KnowledgeDocument.title.ilike(f"%{q}%") | KnowledgeDocument.content.ilike(f"%{q}%"))
-    rows = session.scalars(statement.order_by(KnowledgeDocument.updated_at.desc()).limit(200)).all()
+    rows = session.scalars(statement.order_by(KnowledgeDocument.updated_at.desc(), KnowledgeDocument.id).offset(offset).limit(limit)).all()
     return [_document_view(row) for row in rows]
 
 
@@ -340,8 +344,12 @@ def _extraction_view(job: KnowledgeExtractionJob) -> dict[str, object]:
 def request_knowledge_extraction(document_id: uuid.UUID, background_tasks: BackgroundTasks,
                                  user: User = Depends(get_current_user), session: Session = Depends(get_session),
                                  settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    document = _own_document(session, document_id, user.id)
-    if document.archived or document.exclude_from_ai:
+    enforce_user_limit(session, user.id, "knowledge.extract", limit=6)
+    document = session.scalar(select(KnowledgeDocument).where(KnowledgeDocument.id == document_id,
+        KnowledgeDocument.user_id == user.id).with_for_update())
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.archived or document.exclude_from_ai or document.document_type == "journal":
         raise HTTPException(status_code=409, detail="Archived or AI-excluded documents cannot be analyzed")
     job = session.scalar(select(KnowledgeExtractionJob).where(
         KnowledgeExtractionJob.document_id == document.id,
@@ -404,9 +412,16 @@ def record_knowledge_feedback(data: KnowledgeFeedbackCreate, user: User = Depend
 @router.patch("/knowledge/documents/{document_id}")
 def update_knowledge_document(document_id: uuid.UUID, data: DocumentUpdate, user: User = Depends(get_current_user),
                               session: Session = Depends(get_session)) -> dict[str, object]:
-    row = _own_document(session, document_id, user.id)
+    row = session.scalar(select(KnowledgeDocument).where(
+        KnowledgeDocument.id == document_id, KnowledgeDocument.user_id == user.id
+    ).with_for_update().execution_options(populate_existing=True))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Document not found")
     values = data.model_dump(exclude_unset=True)
     expected = values.pop("expected_version", None)
+    if any(key in values and values[key] is None for key in (
+        "title", "content", "document_type", "status", "tags", "archived", "exclude_from_ai")):
+        raise HTTPException(status_code=422, detail="Note content and required metadata cannot be null")
     if expected is not None and expected != row.version:
         raise HTTPException(status_code=409, detail={"message": "This document changed elsewhere. Reload it before saving."})
     if values.get("document_type") is not None and values["document_type"] not in DOCUMENT_TYPES:
@@ -418,6 +433,7 @@ def update_knowledge_document(document_id: uuid.UUID, data: DocumentUpdate, user
         _own_project(session, project_id, user.id)
     changes = {key: value for key, value in values.items() if getattr(row, key) != value}
     if changes:
+        invalidate_document_insights(session, user.id, row.id)
         session.add(KnowledgeDocumentVersion(document_id=row.id, version=row.version, title=row.title, content=row.content))
         if set(changes) & {"title", "content", "document_type", "tags", "exclude_from_ai", "archived"}:
             active_jobs = session.scalars(select(KnowledgeExtractionJob).where(
@@ -490,6 +506,8 @@ def evaluate_personal_knowledge(user: User = Depends(get_current_user), session:
 @router.get("/knowledge/insights")
 def list_knowledge_insights(include_dismissed: bool = False, include_resolved: bool = False,
                             user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    evaluate_knowledge(session, user.id)
+    session.commit()
     statement = select(KnowledgeInsight).where(KnowledgeInsight.user_id == user.id)
     if not include_dismissed:
         statement = statement.where(KnowledgeInsight.status != "dismissed")
@@ -532,6 +550,7 @@ def list_knowledge_reviews(user: User = Depends(get_current_user), session: Sess
     rows = session.execute(select(KnowledgeReview, KnowledgeDocument).join(
         KnowledgeDocument, KnowledgeDocument.id == KnowledgeReview.document_id
     ).where(KnowledgeReview.user_id == user.id, KnowledgeReview.status.in_(["pending", "snoozed"]),
+            KnowledgeDocument.exclude_from_ai.is_(False), KnowledgeDocument.document_type != "journal",
             KnowledgeDocument.archived.is_(False), KnowledgeDocument.status.notin_(["completed", "parked", "abandoned"]))
         .order_by(KnowledgeReview.due_at)).all()
     return [_review_view(review, document) for review, document in rows]
@@ -541,10 +560,12 @@ def list_knowledge_reviews(user: User = Depends(get_current_user), session: Sess
 def ask_knowledge(data: KnowledgeQuestion, user: User = Depends(get_current_user),
                   session: Session = Depends(get_session), settings: Settings = Depends(get_settings)) -> dict[str, object]:
     """Answer against owned, non-excluded knowledge and always return the source records."""
+    enforce_user_limit(session, user.id, "knowledge.ask")
     statement = select(KnowledgeDocument).where(
         KnowledgeDocument.user_id == user.id,
         KnowledgeDocument.archived.is_(False),
         KnowledgeDocument.exclude_from_ai.is_(False),
+        KnowledgeDocument.document_type != "journal",
     )
     if data.document_type:
         if data.document_type not in DOCUMENT_TYPES:
@@ -552,25 +573,26 @@ def ask_knowledge(data: KnowledgeQuestion, user: User = Depends(get_current_user
         statement = statement.where(KnowledgeDocument.document_type == data.document_type)
     if data.project_id is not None:
         statement = statement.where(KnowledgeDocument.project_id == data.project_id)
-    terms = {word.casefold() for word in re.findall(r"[A-Za-z0-9]{2,}", data.question)}
+    terms = {word.casefold() for word in re.findall(r"[^\W_]{2,}", data.question, re.UNICODE)}
     ranked: list[tuple[int, KnowledgeDocument]] = []
-    for doc in session.scalars(statement.order_by(KnowledgeDocument.updated_at.desc()).limit(500)).all():
-        title_terms = {word.casefold() for word in re.findall(r"[A-Za-z0-9]{2,}", doc.title)}
-        body_terms = {word.casefold() for word in re.findall(r"[A-Za-z0-9]{2,}", doc.content + " " + " ".join(doc.tags))}
-        score = len(terms & title_terms) * 3 + len(terms & body_terms)
-        if score:
-            ranked.append((score, doc))
-    ranked.sort(key=lambda item: (item[0], item[1].updated_at), reverse=True)
+    if terms:
+        from sqlalchemy import or_, case
+        matches = [KnowledgeDocument.title.ilike(f"%{word}%") | KnowledgeDocument.content.ilike(f"%{word}%") for word in terms]
+        # Filter and rank in storage, so matching older documents remain reachable.
+        relevance = sum(case((KnowledgeDocument.title.ilike(f"%{word}%"), 3), else_=0)
+                        + case((KnowledgeDocument.content.ilike(f"%{word}%"), 1), else_=0) for word in terms)
+        candidates = session.scalars(statement.where(or_(*matches)).order_by(relevance.desc(), KnowledgeDocument.updated_at.desc()).limit(8)).all()
+        ranked = [(1, doc) for doc in candidates]
     sources = [{"document_id": str(doc.id), "title": doc.title, "document_type": doc.document_type,
                 "updated_at": doc.updated_at, "excerpt": doc.content[:1800]} for _, doc in ranked[:8]]
     if not sources:
-        return {"answer": "I couldn't find matching knowledge documents. Try different words or filters.", "citations": [],
+        return {"answer": "I couldn't find matching knowledge documents. Try different words or filters.", "citations": [], "sources": [],
                 "mode": "keyword_only", "limitations": ["Search currently uses keyword matching; semantic retrieval is not available."]}
     if not settings.ai_provider or not settings.ai_model:
         return {"answer": "I found matching records, but AI synthesis is not configured. Review the source excerpts below.",
                 "citations": [{key: value for key, value in source.items() if key != "excerpt"} for source in sources],
                 "sources": sources, "mode": "keyword_only",
-                "limitations": ["Semantic search and conversational synthesis require a configured AI provider."]}
+                "limitations": ["Retrieval uses keyword matching. AI synthesis is not configured."]}
     try:
         provider = create_provider(settings)
         model = ModelSelector(settings.ai_model).select(AITaskType.GENERAL_REASONING)
@@ -598,6 +620,8 @@ def ask_knowledge(data: KnowledgeQuestion, user: User = Depends(get_current_user
 @router.get("/knowledge/reports/weekly")
 def weekly_knowledge_review(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
     """Build a small, factual weekly review with links to the underlying records."""
+    evaluate_knowledge(session, user.id)
+    session.commit()
     now = datetime.now(timezone.utc)
     start = now - timedelta(days=7)
     documents = session.scalars(select(KnowledgeDocument).where(

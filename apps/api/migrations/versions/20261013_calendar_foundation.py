@@ -43,27 +43,19 @@ def upgrade() -> None:
     op.create_index("ix_calendar_events_user_start", "calendar_events", ["user_id", "start_at"])
     op.create_index("ix_calendar_events_user_date", "calendar_events", ["user_id", "start_date"])
 
-    bind = op.get_bind()
-    capability_id = uuid.uuid4()
-    bind.execute(sa.text(
-        "INSERT INTO capabilities (id, code, name, description, is_enabled) "
-        "VALUES (:id, 'calendar', 'Calendar', 'See your commitments and plans', true) "
-        "ON CONFLICT (code) DO NOTHING"
-    ), {"id": str(capability_id)})
-    capability_id = bind.execute(sa.text("SELECT id FROM capabilities WHERE code = 'calendar'")).scalar_one()
-    for user_id in bind.execute(sa.text("SELECT id FROM users")).scalars():
-        bind.execute(sa.text(
-            "INSERT INTO user_capabilities (id, user_id, capability_id, granted, visible, pinned, created_at, updated_at) "
-            "VALUES (:id, :user_id, :capability_id, true, true, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT DO NOTHING"
-        ), {"id": str(uuid.uuid4()), "user_id": user_id, "capability_id": capability_id})
+    op.execute(sa.text("INSERT INTO capabilities (id, code, name, description, is_enabled) "
+        "VALUES ('" + str(uuid.uuid4()) + "', 'calendar', 'Calendar', 'See your commitments and plans', true) "
+        "ON CONFLICT (code) DO NOTHING"))
+    # PostgreSQL generates a unique assignment per user without client-side reads.
+    assignment_id = "lower(hex(randomblob(16)))" if op.get_bind().dialect.name == "sqlite" else "gen_random_uuid()"
+    op.execute(sa.text("INSERT INTO user_capabilities (id, user_id, capability_id, granted, visible, pinned, created_at, updated_at) "
+        "SELECT " + assignment_id + ", u.id, c.id, true, true, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+        "FROM users u CROSS JOIN capabilities c WHERE c.code = 'calendar' ON CONFLICT DO NOTHING"))
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    capability_id = bind.execute(sa.text("SELECT id FROM capabilities WHERE code = 'calendar'")).scalar_one_or_none()
-    if capability_id is not None:
-        bind.execute(sa.text("DELETE FROM user_capabilities WHERE capability_id = :id"), {"id": capability_id})
-        bind.execute(sa.text("DELETE FROM capabilities WHERE id = :id"), {"id": capability_id})
+    op.execute("DELETE FROM user_capabilities WHERE capability_id IN (SELECT id FROM capabilities WHERE code = 'calendar')")
+    op.execute("DELETE FROM capabilities WHERE code = 'calendar'")
     op.drop_index("ix_calendar_events_user_date", table_name="calendar_events")
     op.drop_index("ix_calendar_events_user_start", table_name="calendar_events")
     op.drop_table("calendar_events")

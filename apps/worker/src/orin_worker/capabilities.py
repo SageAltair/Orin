@@ -19,7 +19,7 @@ SCOPES = {
     "run_allowed_command": "process.command.execute",
 }
 ALLOWED_COMMANDS: dict[str, tuple[str, ...]] = {
-    "git_status": ("git", "status", "--short"),
+    "git_status": ("git", "-c", "core.fsmonitor=false", "status", "--short"),
     "git_version": ("git", "--version"),
     "python_tests": (sys.executable, "-m", "pytest", "-q"),
     "npm_tests": ("npm", "test", "--", "--run"),
@@ -48,6 +48,46 @@ def _path(raw: str, roots: tuple[Path, ...]) -> Path:
     if any(part.casefold() in _PROTECTED_NAMES or part.casefold().startswith(".env") for part in candidate.parts):
         raise PermissionError("Access to protected credential locations is blocked")
     return candidate
+
+
+def _run_project_tests(command_key: str, project_root: Path) -> dict[str, Any]:
+    import re
+    import shutil
+    import tempfile
+    image = os.environ.get("ORIN_WORKER_EXECUTION_IMAGE", "")
+    if not image or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9./:@_-]{0,240}", image):
+        raise PermissionError("Project tests require a configured isolated execution image")
+    if os.name != "posix":
+        raise PermissionError("Run project commands on an enrolled Linux sandbox worker")
+    # Never mount the live project: credentials, symlinks and VCS settings stay on the host.
+    with tempfile.TemporaryDirectory(prefix="orin-sandbox-") as temporary:
+        source = Path(temporary) / "source"
+        source.mkdir()
+        total, files = 0, 0
+        ignored = _PROTECTED_NAMES | {".git", "node_modules", ".venv", "venv", "__pycache__"}
+        for folder, directories, names in os.walk(project_root, followlinks=False):
+            base = Path(folder)
+            directories[:] = [name for name in directories if name.casefold() not in ignored
+                               and not name.casefold().startswith(".env") and not (base / name).is_symlink()]
+            destination = source / base.relative_to(project_root)
+            destination.mkdir(parents=True, exist_ok=True)
+            for name in names:
+                path = base / name
+                if name.casefold() in ignored or name.casefold().startswith(".env") or path.is_symlink() or not path.is_file():
+                    continue
+                total += path.stat().st_size; files += 1
+                if total > 50_000_000 or files > 5000:
+                    raise ValueError("Project snapshot exceeds the sandbox size limit")
+                shutil.copyfile(path, destination / name)
+        command = ("python", "-m", "pytest", "-q", "-p", "no:cacheprovider") if command_key == "python_tests" else ("npm", "test", "--", "--run")
+        argv = ("docker", "run", "--rm", "--pull=never", "--network=none", "--read-only",
+                "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128",
+                "--memory=512m", "--cpus=1", "--user", f"{os.getuid() or 10001}:{os.getgid() or 10001}",
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--env", "PYTHONDONTWRITEBYTECODE=1",
+                "--mount", f"type=bind,src={source},dst=/workspace,readonly", "--workdir=/workspace", image, *command)
+        environment = {key: value for key, value in os.environ.items() if key.upper() == "PATH"}
+        completed = subprocess.run(argv, env=environment, capture_output=True, text=True, timeout=120, shell=False, check=False)
+        return {"return_code": completed.returncode, "stdout": completed.stdout[:4000], "stderr": completed.stderr[:1000]}
 
 
 def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ...], now: int) -> dict[str, Any]:
@@ -89,6 +129,8 @@ def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ..
     if not allowed_roots:
         raise PermissionError("No worker command directory is configured")
     project_root = allowed_roots[0].resolve(strict=True)
+    if command_key in {"python_tests", "npm_tests"}:
+        return _run_project_tests(command_key, project_root)
     environment = {key: value for key, value in os.environ.items()
                    if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}}
     completed = subprocess.run(argv, cwd=str(project_root), env=environment,

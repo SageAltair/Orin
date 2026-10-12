@@ -111,3 +111,47 @@ def test_signed_job_executes_through_the_worker_boundary(tmp_path: Path) -> None
     with pytest.raises(PermissionError):
         execute_signed_job({"payload": payload, "signature": signature}, credential=token,
             device_id="another-device", allowed_roots=(tmp_path,), now=50)
+
+
+def test_project_test_commands_fail_closed_without_isolation(tmp_path, monkeypatch):
+    monkeypatch.delenv("ORIN_WORKER_EXECUTION_IMAGE", raising=False)
+    with pytest.raises(PermissionError, match="isolated"):
+        execute_job(job("run_allowed_command", {"command": "python_tests"}, "process.command.execute"),
+                    device_id="d1", allowed_roots=(tmp_path,), now=50)
+
+
+def test_started_worker_job_recovers_as_failed_instead_of_replaying(tmp_path):
+    path = tmp_path / "interrupted.sqlite3"
+    ledger = JobLedger(path)
+    ledger.start_once("interrupted")
+    ledger.mark_started("interrupted")
+    ledger.close()
+    recovered = JobLedger(path)
+    assert recovered.pending_results() == [("interrupted", "failed_pending", None)]
+    assert not recovered.start_once("interrupted")
+    recovered.close()
+
+
+def test_project_sandbox_excludes_credentials_and_live_files(tmp_path, monkeypatch):
+    import os
+    import subprocess
+    if os.name != "posix":
+        pytest.skip("Linux isolation runner")
+    (tmp_path / ".env").write_text("secret-token")
+    (tmp_path / "code.py").write_text("print('test')")
+    (tmp_path / "outside-link").symlink_to(tmp_path / ".env")
+    monkeypatch.setenv("ORIN_WORKER_EXECUTION_IMAGE", "orin-test:verified")
+    def run(argv, **kwargs):
+        assert "--network=none" in argv and "--read-only" in argv and "--cap-drop=ALL" in argv
+        assert kwargs["shell"] is False
+        mount = argv[argv.index("--mount") + 1]
+        source = Path(mount.split("src=", 1)[1].split(",", 1)[0])
+        assert not (source / ".env").exists()
+        assert not (source / "outside-link").exists()
+        assert (source / "code.py").is_file()
+        assert source != tmp_path
+        return subprocess.CompletedProcess(argv, 0, stdout="passed", stderr="")
+    monkeypatch.setattr(subprocess, "run", run)
+    result = execute_job(job("run_allowed_command", {"command": "python_tests"}, "process.command.execute"),
+                         device_id="d1", allowed_roots=(tmp_path,), now=50)
+    assert result["stdout"] == "passed"

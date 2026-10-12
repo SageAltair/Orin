@@ -6,6 +6,11 @@ from starlette.middleware.base import RequestResponseEndpoint
 import logging
 import time
 import uuid
+import threading
+from contextlib import asynccontextmanager
+from orin_api.background import maintenance_loop
+from orin_api.notification_router import router as notification_router
+from orin_api.privacy_router import router as privacy_router
 
 from orin_api.config import get_settings
 from orin_api.auth_router import router as auth_router
@@ -21,7 +26,20 @@ from orin_api.calendar_router import router as calendar_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
-app = FastAPI(title="Orin API", version="0.1.0", description="Orin platform API foundation")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    stop = threading.Event()
+    worker = None
+    if settings.background_worker_enabled:
+        worker = threading.Thread(target=maintenance_loop, args=(stop, settings), daemon=True)
+        worker.start()
+    yield
+    stop.set()
+    if worker:
+        worker.join(timeout=2)
+
+
+app = FastAPI(lifespan=lifespan, title="Orin API", version="0.1.0", description="Orin platform API foundation")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_cors_origins,
@@ -29,6 +47,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Timezone"],
 )
+app.include_router(privacy_router)
+app.include_router(notification_router)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(domain_router)

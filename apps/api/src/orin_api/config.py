@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = Field(default=8000, ge=1, le=65535)
     database_url: PostgresDsn = "postgresql+psycopg://orin:orin@localhost:5432/orin"
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5273"
     auth_secret_key: SecretStr | None = Field(default=None, min_length=64)
     access_token_lifetime_minutes: int = Field(default=15, ge=1, le=60)
     refresh_token_lifetime_days: int = Field(default=30, ge=1, le=90)
@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     github_app_client_id: str | None = None
     github_app_client_secret: SecretStr | None = Field(default=None, repr=False)
     github_app_callback_url: str | None = None
-    web_app_url: str = "http://localhost:5173"
+    web_app_url: str = "http://localhost:5273"
+    background_worker_enabled: bool = False
     attachment_storage_path: str = "data/attachments"
     attachment_max_size_bytes: int = Field(default=10_485_760, ge=1024, le=52_428_800)
 

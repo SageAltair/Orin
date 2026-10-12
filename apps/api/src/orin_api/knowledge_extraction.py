@@ -25,16 +25,27 @@ class KnowledgeExtraction(BaseModel):
     date_mentions: list[str] = Field(max_length=20)
 
 
+def _lock_source_then_job(session, job_id):
+    job = session.get(KnowledgeExtractionJob, job_id)
+    if job is None:
+        return None, None
+    document = session.scalar(select(KnowledgeDocument).where(KnowledgeDocument.id == job.document_id)
+        .with_for_update().execution_options(populate_existing=True))
+    job = session.scalar(select(KnowledgeExtractionJob).where(KnowledgeExtractionJob.id == job_id)
+        .with_for_update().execution_options(populate_existing=True))
+    return job, document
+
+
 def process_extraction_job(job_id: uuid.UUID, settings: Settings) -> None:
     """Run a persisted job with bounded retries; stale source versions are discarded."""
     for attempt in range(1, 4):
         with SessionLocal() as session:
-            job = session.scalar(select(KnowledgeExtractionJob).where(KnowledgeExtractionJob.id == job_id))
+            job, document = _lock_source_then_job(session, job_id)
             if job is None or job.status in {"succeeded", "superseded", "processing"}:
                 return
             document = session.scalar(select(KnowledgeDocument).where(
                 KnowledgeDocument.id == job.document_id, KnowledgeDocument.user_id == job.user_id))
-            if document is None or document.archived or document.exclude_from_ai:
+            if document is None or document.archived or document.exclude_from_ai or document.document_type == "journal":
                 job.status, job.error = "superseded", "Source is unavailable for analysis."
                 session.commit()
                 return
@@ -59,12 +70,12 @@ def process_extraction_job(job_id: uuid.UUID, settings: Settings) -> None:
             extracted = KnowledgeExtraction.model_validate_json(raw, strict=True)
         except (AIProviderError, ValidationError, ValueError, TypeError) as exc:
             with SessionLocal() as session:
-                job = session.scalar(select(KnowledgeExtractionJob).where(KnowledgeExtractionJob.id == job_id))
-                if job is None:
+                job, document = _lock_source_then_job(session, job_id)
+                if job is None or job.status == "superseded":
                     return
                 safe_error = "Provider returned invalid extraction data." if isinstance(exc, (ValidationError, ValueError, TypeError)) else str(exc)[:240]
                 if attempt < 3:
-                    job.status, job.error = "queued", safe_error
+                    job.status, job.error = "retrying", safe_error
                     job.next_retry_at = None
                     session.commit()
                 else:
@@ -78,11 +89,11 @@ def process_extraction_job(job_id: uuid.UUID, settings: Settings) -> None:
                 continue
             return
         with SessionLocal() as session:
-            job = session.scalar(select(KnowledgeExtractionJob).where(KnowledgeExtractionJob.id == job_id))
+            job, document = _lock_source_then_job(session, job_id)
             document = session.scalar(select(KnowledgeDocument).where(KnowledgeDocument.id == job.document_id)) if job else None
             if job is None or document is None:
                 return
-            if document.version != job.document_version or document.archived or document.exclude_from_ai:
+            if job.status == "superseded" or document.version != job.document_version or document.archived or document.exclude_from_ai or document.document_type == "journal":
                 job.status, job.error = "superseded", "Source changed or was excluded during analysis."
                 document.extraction_status = "superseded"
             else:

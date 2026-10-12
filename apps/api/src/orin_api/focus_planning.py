@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 from typing import Sequence
+from zoneinfo import ZoneInfo
 
 from orin_api.models import EnergyLevel, FocusSession, Task, TaskPriority, TaskStatus
 
@@ -20,12 +21,13 @@ def task_rank(
     *,
     today: date | None = None,
     project_priority: TaskPriority | None = None,
+    timezone_name: str = "UTC",
 ) -> tuple[int, int, int, int, int, datetime, int]:
     """Rank using stored priority, real deadlines, status, context, and recent progress."""
     priority_order = {TaskPriority.LOW: 0, TaskPriority.NORMAL: 1, TaskPriority.HIGH: 2, TaskPriority.URGENT: 3}
     due_window = 0
     if task.due_at is not None:
-        due_date = task.due_at.date()
+        due_date = (task.due_at.replace(tzinfo=timezone.utc) if task.due_at.tzinfo is None else task.due_at).astimezone(ZoneInfo(timezone_name)).date()
         days_until_due = (due_date - (today or date.today())).days
         due_window = 3 if days_until_due <= 1 else 2 if days_until_due <= 3 else 1 if days_until_due <= 7 else 0
     context = int(bool(task.first_step)) + int(bool(task.why))
@@ -43,6 +45,7 @@ def select_todays_three(
     blocked_ids: set[uuid.UUID] | None = None,
     project_priorities: dict[uuid.UUID, TaskPriority] | None = None,
     today: date | None = None,
+    timezone_name: str = "UTC",
 ) -> tuple[list[Task], uuid.UUID | None]:
     """Select up to three energy-matched open tasks and an eligible anchor."""
     excluded = excluded_ids or set()
@@ -55,7 +58,7 @@ def select_todays_three(
         and task.energy_level == energy
     ]
     routine_names = tuple(name.casefold() for name in routines)
-    eligible.sort(key=lambda task: (*task_rank(task, today=today, project_priority=priorities.get(task.project_id)),
+    eligible.sort(key=lambda task: (*task_rank(task, today=today, project_priority=priorities.get(task.project_id), timezone_name=timezone_name),
         int(bool(task.trigger and any(name in task.trigger.casefold() for name in routine_names)))), reverse=True)
     anchor_pool = eligible
     if energy == EnergyLevel.LOW:

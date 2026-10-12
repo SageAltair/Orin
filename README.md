@@ -17,14 +17,14 @@ For local development without Docker, see [AGENTS.md](AGENTS.md) and the app REA
 
 - `apps/web` React, TypeScript, Vite, Tailwind CSS, shadcn/ui-compatible primitives.
 - `apps/api` FastAPI modular monolith, Pydantic settings, SQLAlchemy 2, Alembic.
-- `apps/worker` separately deployable worker foundation, currently idle.
+- `apps/worker` enrolled device gateway with approved file/system capabilities and isolated project test execution.
 - `packages/contracts` explicit API contract definitions.
 - `packages/shared` small cross-cutting TypeScript utilities.
 - `docs`, `tests`, `scripts`, `infrastructure/docker` supporting project docs and tooling.
 
 ## Checks
 
-Run `scripts/check.ps1` on Windows or `scripts/check.sh` on Unix. See [AGENTS.md](AGENTS.md) for detailed commands and development rules.
+Run `scripts/check.ps1` on Windows or `scripts/check.sh` on Unix. The GitHub verification workflow also checks PostgreSQL concurrency and migrations. See [AGENTS.md](AGENTS.md) for detailed commands and development rules.
 
 ## AI commands
 
@@ -33,3 +33,17 @@ Run `scripts/check.ps1` on Windows or `scripts/check.sh` on Unix. See [AGENTS.md
 AI is optional. Leave `AI_PROVIDER` empty to run without provider credentials. To enable it, set `AI_PROVIDER` to `openai`, `mistral`, `google`, `openrouter`, `qwen`, `groq`, `cerebras`, or `cloudflare`, set `AI_MODEL`, and supply only the selected provider's API key in `.env`. Cloudflare also requires `CLOUDFLARE_ACCOUNT_ID`. Keep `.env` private; `.env.example` contains placeholders only. Providers are isolated behind adapters; compatible services use the OpenAI chat API format and Google uses its generate-content API.
 
 Commands support safe conversational replies plus `CREATE_TASK`, `UPDATE_TASK`, `COMPLETE_TASK`, `CREATE_PROJECT`, `LIST_PROJECTS`, `LIST_TASKS`, and `GET_ACTIVITY`; other requests fail safely. Responses contain application results, not raw provider output. Unit and route tests use fake providers and need no AI credentials.
+
+## Connected workspace
+
+Home, Tasks/Focus, Projects, Calendar, Writing and Activity share a responsive light/dark design. Writing connects the Markdown notes canvas with Idea Inbox, Connections and Manuscript outlines/cards. Notes are versioned, autosaved and recoverable; AI extraction is explicit and respects exclusion controls. Calendar reminders arrive in the private in-app inbox. Account settings support a complete ZIP export and password-confirmed deletion.
+
+Use `BACKGROUND_WORKER_ENABLED=true` for durable analysis recovery and reminders (enabled in Compose and `.env.example`). The device worker is opt-in: enroll in Settings, configure `ORIN_API_URL`, `ORIN_DEVICE_ID`, `ORIN_WORKER_TOKEN` and explicit allowed roots, then run `orin-worker`. Use `docker compose --profile worker up` only after supplying the enrollment settings. See [repair details and limits](docs/reliability-and-design.md) and [operations](docs/operations.md).
+
+## Verification and production
+
+Install Python dependencies with the resolved `apps/api/requirements-dev.lock`, then install API/worker packages with `--no-deps`. Frontend checks use `npm ci` and the committed npm lockfile. Install Chromium using `npx playwright install chromium` before browser tests.
+
+`ORIN_LIVE_E2E=true` enables live Writing/Studio flows with an isolated API at `http://localhost:8100`. The default browser suite does not require a live API. Optional Docker/provider and real worker tests retain their separate opt-in flags.
+
+`docker-compose.production.yml` is a reviewable deployment template with a built frontend and same-origin API proxy. Configure HTTPS through a host TLS terminator, production origin settings, private secrets, backups and monitoring before exposing it. No deployment is performed by this repository change.

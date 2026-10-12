@@ -29,6 +29,7 @@ class JobLedger:
         columns = {row[1] for row in self.connection.execute("PRAGMA table_info(handled_jobs)")}
         if "result" not in columns:
             self.connection.execute("ALTER TABLE handled_jobs ADD COLUMN result TEXT")
+        self.connection.execute("UPDATE handled_jobs SET status = 'failed_pending', result = NULL WHERE status = 'started'")
         self.connection.commit()
 
     def start_once(self, job_id: str) -> bool:
