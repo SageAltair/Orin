@@ -17,6 +17,14 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByRole("button", { name: "Writing" }).click();
   await page.getByRole("button", { name: /Create Christian storytelling videos/ }).click();
   await expect(page.getByLabel("Content")).toContainText("Explore short stories");
+  await page.locator(".writing-details > summary").click();
+  await page.locator(".writing-details-grid label").filter({ hasText: "Type" }).locator("select").selectOption("idea");
+  await page.getByLabel("Tags, comma separated").fill("story, setting");
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
+  await page.locator(".writing-details > summary").click();
+  await page.getByLabel("Filter notes").selectOption("idea");
+  await expect(page.locator(".writing-documents").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
+  await page.getByLabel("Filter notes").selectOption("");
   let extractionPolls = 0;
   await page.route("**/api/v1/knowledge/documents/*/extract", route => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ status: "queued" }) }));
   await page.route("**/api/v1/knowledge/documents/*/extraction", route => {
@@ -92,6 +100,27 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await expect(page.getByLabel("Document title")).toHaveValue("AI assisted storytelling research", { timeout: 10_000 });
   await page.locator(".writing-details > summary").click();
   await expect(page.locator(".writing-relations").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
+  await expect(page.locator(".writing-manuscript-stats")).toContainText("words");
+  const markdownDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export .md" }).click();
+  expect((await markdownDownload).suggestedFilename()).toMatch(/\.md$/);
+  await page.getByRole("button", { name: "Focus", exact: true }).click();
+  await expect(page.locator(".writing-list")).toBeHidden();
+  await page.getByRole("button", { name: "Exit focus" }).click();
+  await expect(page.locator(".writing-list")).toBeVisible();
+  const restore = page.locator(".writing-history").getByRole("button", { name: "Restore" }).first();
+  await expect(restore).toBeEnabled();
+  await restore.click();
+  await expect(page.locator(".writing-save-status")).toContainText("Restored version", { timeout: 10_000 });
+  await page.getByLabel("Content").fill("A local draft to recover after an interrupted save.");
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).find(key => key.startsWith("orin:writing:draft:")) ?? "")).not.toBe("");
+  await page.reload();
+  await page.getByRole("button", { name: "Writing" }).click();
+  await page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ }).click();
+  await expect(page.getByText("Unsent writing from this browser is available.")).toBeVisible();
+  await page.getByRole("button", { name: "Restore draft" }).click();
+  await expect(page.getByLabel("Content")).toHaveValue("A local draft to recover after an interrupted save.");
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
 });
 
 test("Writing adapts its navigation and editor across desktop, tablet, and narrow phone viewports", async ({ page }) => {

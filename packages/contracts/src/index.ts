@@ -302,3 +302,59 @@ export interface WorkerJobSummary {
   created_at: string;
   finished_at: string | null;
 }
+
+/* Creative Studio: ideas, outlines, document cards, and idea links. */
+
+export type CreativeIdeaStatus = "active" | "archived" | "all";
+
+export interface CreativeIdea {
+  id: string;
+  title: string;
+  content: string | null;
+  document_id: string | null;
+  status: string;
+  linked_document_ids: string[];
+}
+
+export type IdeaLinkType = "inspires" | "contrasts" | "extends" | "supports";
+
+export interface CreativeIdeaLink {
+  idea_id: string;
+  document_id: string;
+  link_type: IdeaLinkType;
+  note: string | null;
+}
+
+export type OutlineItemKind = "section" | "chapter" | "scene" | "verse" | "stanza" | "beat" | "act" | "note";
+export type OutlineItemStatus = "planned" | "drafted" | "revised" | "done";
+
+export interface CreativeOutlineItem {
+  id: string;
+  parent_id: string | null;
+  document_id: string | null;
+  title: string;
+  summary: string | null;
+  kind: OutlineItemKind;
+  status: OutlineItemStatus;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type DocumentCardStatus = "todo" | "drafting" | "revised" | "polished" | "ready" | "published";
+
+export interface CreativeDocumentCard {
+  id: string;
+  project_id: string | null;
+  document_id: string | null;
+  title: string;
+  summary: string | null;
+  purpose: string | null;
+  central_question: string | null;
+  point_of_view: string | null;
+  status: DocumentCardStatus;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+

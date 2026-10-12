@@ -159,6 +159,13 @@ class ActivityType(str, enum.Enum):
     WORKER_DISCONNECTED = "worker_disconnected"
     POLICY_DECISION = "policy_decision"
     INTEGRATION_OPERATION = "integration_operation"
+    IDEA_CREATED = "idea_created"
+    IDEA_LINKED = "idea_linked"
+    IDEA_UNLINKED = "idea_unlinked"
+    OUTLINE_ITEM_CREATED = "outline_item_created"
+    OUTLINE_ITEM_UPDATED = "outline_item_updated"
+    DOCUMENT_CARD_CREATED = "document_card_created"
+    DOCUMENT_CARD_UPDATED = "document_card_updated"
 
 
 def enum_column(enum_class: type[enum.Enum], name: str) -> Enum:
@@ -775,6 +782,80 @@ class KnowledgeInsight(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
     snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+
+
+class IdeaInbox(TimestampMixin, Base):
+    __tablename__ = "idea_inbox"
+    __table_args__ = (
+        Index("ix_idea_inbox_user_updated", "user_id", "updated_at"),
+        Index("ix_idea_inbox_user_status", "user_id", "status"),
+        Index("ix_idea_inbox_linked_documents", "linked_document_ids"),
+        UniqueConstraint("id", name="uq_idea_inbox_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    content: Mapped[str | None] = mapped_column(Text)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="active", server_default="active")
+    linked_document_ids: Mapped[str | None] = mapped_column(Text)
+
+
+class CreativeOutlineItem(TimestampMixin, Base):
+    __tablename__ = "creative_outline_items"
+    __table_args__ = (
+        Index("ix_creative_outline_items_parent", "parent_id"),
+        Index("ix_creative_outline_items_project_updated", "project_id", "updated_at"),
+        UniqueConstraint("id", name="uq_outline_item_id"),
+        CheckConstraint("NOT (parent_id IS NOT NULL AND document_id IS NOT NULL)", name="ck_outline_item_at_most_one_target"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("creative_outline_items.id", ondelete="SET NULL"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False, default="section", server_default="section")
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="planned", server_default="planned")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class CreativeDocumentCard(TimestampMixin, Base):
+    __tablename__ = "creative_document_cards"
+    __table_args__ = (
+        Index("ix_creative_document_cards_project_updated", "project_id", "updated_at"),
+        UniqueConstraint("id", name="uq_card_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    document_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    purpose: Mapped[str | None] = mapped_column(Text)
+    central_question: Mapped[str | None] = mapped_column(Text)
+    point_of_view: Mapped[str | None] = mapped_column(String(240))
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="todo", server_default="todo")
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+
+
+class IdeaDocumentLink(CreatedAtMixin, Base):
+    __tablename__ = "idea_document_links"
+    __table_args__ = (
+        UniqueConstraint("idea_id", "document_id", "link_type", name="uq_idea_document_link"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    idea_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("idea_inbox.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False)
+    link_type: Mapped[str] = mapped_column(String(24), nullable=False, default="inspires", server_default="inspires")
+    note: Mapped[str | None] = mapped_column(Text)
 
 
 class KnowledgeReview(TimestampMixin, Base):

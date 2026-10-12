@@ -26,7 +26,8 @@ describe("Markdown response rendering", () => {
   it("renders the writing workspace and quick capture privacy notice", () => {
     const workspace = renderToStaticMarkup(<KnowledgeWorkspace projects={[]} />);
     const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
-    expect(workspace).toContain("Writing workspace");
+    expect(workspace).toContain('aria-label="Creative Studio"');
+    expect(workspace).toContain("Creative Studio");
     expect(workspace).toContain("Capture thoughts and develop ideas");
     expect(workspace).toContain("New note");
     expect(capture).toContain("Saved to Writing");
