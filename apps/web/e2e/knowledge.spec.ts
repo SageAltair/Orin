@@ -17,21 +17,37 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByRole("button", { name: "Writing" }).click();
   await page.getByRole("button", { name: /Create Christian storytelling videos/ }).click();
   await expect(page.getByLabel("Content")).toContainText("Explore short stories");
+  let extractionPolls = 0;
+  await page.route("**/api/v1/knowledge/documents/*/extract", route => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ status: "queued" }) }));
+  await page.route("**/api/v1/knowledge/documents/*/extraction", route => {
+    extractionPolls += 1;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(extractionPolls < 2
+      ? { status: "queued", extracted_data: null, job: { error: null } }
+      : { status: "succeeded", extracted_data: { summary: "A family storytelling project.", topics: ["storytelling"], entities: [], decisions: [], open_questions: [], candidate_actions: [], date_mentions: [] }, job: { error: null } }) });
+  });
+  await page.locator(".writing-details > summary").click();
+  await page.getByRole("button", { name: "Extract knowledge" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Knowledge extracted" })).toBeVisible({ timeout: 8_000 });
+  await expect(page.getByText("A family storytelling project.")).toBeVisible();
+  await page.unrouteAll();
+  await page.locator(".writing-details > summary").click();
   await page.getByLabel("Content").fill("Create Christian storytelling videos for families, with short stories and a clear audience.");
-  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
 
   await page.getByRole("button", { name: "New note" }).click();
   await page.getByLabel("Document title").fill("AI assisted storytelling research");
   await page.locator(".writing-details > summary").click();
   await page.locator(".writing-details-grid label").filter({ hasText: "Type" }).locator("select").selectOption("research");
+  await page.locator(".writing-details > summary").click();
   await page.getByLabel("Content").fill("Research AI tools for story outlining and narration.");
-  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
   await page.getByRole("button", { name: "Bold" }).click();
   await expect(page.getByLabel("Content")).toContainText("**text**");
   await page.getByRole("button", { name: "Preview formatting" }).click();
   await expect(page.locator(".writing-preview").getByText("text")).toBeVisible();
   await page.getByRole("button", { name: "Edit markdown" }).click();
-  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
+  await page.locator(".writing-details > summary").click();
   await page.getByLabel("Link to").selectOption({ label: "Create Christian storytelling videos" });
   await page.getByRole("button", { name: "Add link" }).click();
   await expect(page.locator(".writing-relations").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
@@ -43,7 +59,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.locator(".writing-details-grid label").filter({ hasText: "Status" }).locator("select").selectOption("developing");
   await page.locator(".writing-details-grid label").filter({ hasText: "Review date" }).locator("input").fill("2020-01-01T10:00");
   await page.getByLabel("Content").fill("Opening scene and narration are not finished.");
-  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
 
   await page.locator(".writing-tools > summary").click();
   await page.getByRole("button", { name: "Weekly report" }).click();
@@ -90,7 +106,7 @@ test("Writing adapts its navigation and editor across desktop, tablet, and narro
   await page.getByRole("button", { name: "New note" }).first().click();
   await page.getByLabel("Document title").fill("Responsive writing note");
   await page.getByLabel("Content").fill("A saved note that remains comfortable to edit at every viewport.");
-  await expect(page.getByRole("status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
 
   const viewports = [
     [1920, 1080], [1440, 900], [1280, 800], [1024, 768], [768, 1024],

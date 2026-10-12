@@ -1108,10 +1108,16 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 .writing-details-grid label { display: grid; gap: 6px; }
 .writing-details-grid select, .writing-details-grid input:not([type=checkbox]), .writing-relations select { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; }
 .writing-details-grid .writing-checkbox { display: flex; align-items: center; }
-.writing-relations, .writing-history { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
-.writing-relations h3, .writing-history h3 { margin: 0; color: var(--text); font-size: 13px; }
+.writing-relations, .writing-extraction, .writing-history { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.writing-relations h3, .writing-extraction h3, .writing-history h3 { margin: 0; color: var(--text); font-size: 13px; }
 .writing-relations > div { display: flex; gap: 8px; }
 .writing-relations button { border: 0; color: var(--writing-accent); background: transparent; cursor: pointer; }
+.writing-extraction > p { margin: 0; }
+.writing-extraction > button { justify-self: start; padding: 8px 12px; border: 0; border-radius: 7px; color: white; background: var(--writing-accent); cursor: pointer; }
+.writing-extraction > button:disabled { opacity: .55; cursor: not-allowed; }
+.writing-extracted-data { display: grid; gap: 8px; padding: 12px; border-radius: 8px; background: var(--surface); color: var(--text); }
+.writing-extracted-data p, .writing-extracted-data ul { margin: 0; }
+.writing-extracted-data ul { padding-left: 20px; }
 .writing-history article { padding: 6px 0; font-size: 12px; }
 .writing-welcome { display: grid; align-content: center; justify-items: center; flex: 1; padding: 35px; text-align: center; }
 .writing-welcome > span { color: var(--writing-accent); font-size: 35px; }
