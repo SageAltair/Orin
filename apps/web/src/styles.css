@@ -1058,3 +1058,158 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 @media (max-width: 760px) { .knowledge-layout { grid-template-columns: 1fr; } .knowledge-documents { max-height: 250px; } .knowledge-properties { grid-template-columns: 1fr; } .knowledge-editor { min-height: 440px; } }
 @media (max-width: 760px) { .knowledge-signal-grid { grid-template-columns: 1fr; } }
 @media (max-width: 760px) { .knowledge-ask { align-items: stretch; flex-direction: column; } }
+
+/* Writing workspace: a quiet note index beside an open, editorial canvas. */
+.orin-shell:has(.writing-workspace) .main-content { width: calc(100% - 264px); max-width: none; min-height: 100vh; margin: 0 0 0 264px; padding: 0; }
+.writing-workspace { --writing-accent: #168a73; display: grid; grid-template-columns: 350px minmax(0, 1fr); height: 100vh; min-height: 620px; margin: 0; color: var(--text); background: var(--bg); }
+.writing-list { display: flex; min-height: 0; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); }
+.writing-list-header { display: grid; gap: 15px; padding: 22px 20px 13px; }
+.writing-brand { display: flex; align-items: center; gap: 12px; }
+.writing-brand > span { font-size: 25px; color: var(--writing-accent); }
+.writing-brand h1 { margin: 0; font-size: 20px; }
+.writing-brand p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+.writing-new { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 14px; border: 0; border-radius: 9px; color: white; background: var(--writing-accent); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.writing-new > span { font-size: 19px; line-height: 1; }
+.writing-new kbd { margin-left: auto; color: #e6f4f0; font: inherit; font-size: 11px; font-weight: 400; }
+.writing-search { display: flex; align-items: center; gap: 9px; padding: 0 11px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); }
+.writing-search input { width: 100%; padding: 10px 0; border: 0; outline: none; color: var(--text); background: transparent; font: inherit; font-size: 13px; }
+.writing-list-tools { display: flex; align-items: center; justify-content: space-between; padding-top: 3px; color: var(--muted); font-size: 12px; }
+.writing-list-tools strong { color: var(--text); font-size: 13px; }
+.writing-list-tools label { display: flex; align-items: center; gap: 5px; }
+.writing-documents { display: grid; align-content: start; gap: 2px; min-height: 0; overflow: auto; padding: 0 9px 16px; }
+.writing-document { display: flex; gap: 12px; width: 100%; padding: 13px 11px; border: 0; border-radius: 8px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.writing-document:hover, .writing-document.selected { background: color-mix(in srgb, var(--writing-accent), var(--surface) 91%); }
+.writing-document-icon { padding-top: 1px; color: #52706d; font-size: 16px; }
+.writing-document-copy { display: grid; min-width: 0; gap: 4px; }
+.writing-document-copy strong { overflow: hidden; font-size: 13px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.writing-document-copy > span { overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.writing-document-copy small { color: var(--muted); font-size: 11px; }
+.writing-empty-list { padding: 8px 12px; color: var(--muted); font-size: 13px; }
+.writing-editor { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: auto; background: var(--bg); }
+.writing-toolbar-top { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; gap: 18px; min-height: 60px; padding: 0 30px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg), transparent 3%); }
+.writing-breadcrumb { display: flex; flex: 1; align-items: center; gap: 12px; overflow: hidden; color: var(--muted); font-size: 12px; }
+.writing-breadcrumb strong { overflow: hidden; color: var(--text); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.writing-save-status { flex: 0 0 auto; color: var(--muted); font-size: 12px; }
+.writing-save-status:not(.is-saving) { color: var(--writing-accent); }
+.writing-quiet-action { padding: 7px; border: 0; color: var(--muted); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.writing-paper { display: flex; flex-direction: column; width: min(100% - 96px, 850px); min-height: 0; flex: 1; margin: 30px auto 10px; }
+.writing-title { width: 100%; margin: 0 0 18px; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: clamp(28px, 3vw, 36px); font-weight: 680; letter-spacing: -.035em; }
+.writing-formatbar { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 28px; padding: 5px; border: 1px solid var(--line); border-radius: 9px; }
+.writing-formatbar button { min-width: 33px; padding: 7px 9px; border: 0; border-radius: 5px; color: var(--text); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.writing-formatbar button:hover { background: var(--hover); }
+.writing-paper > textarea, .writing-preview { display: block; width: 100%; min-height: 0; height: auto; flex: 1; resize: none; padding: 0 2px 40px; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 17px; line-height: 1.75; }
+.writing-paper > textarea::placeholder { color: var(--muted); }
+.writing-preview { overflow: auto; }
+.writing-preview > :first-child { margin-top: 0; }
+.writing-details { width: min(100% - 96px, 850px); margin: 0 auto 35px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.writing-details summary { cursor: pointer; }
+.writing-details:not([open]) > :not(summary) { display: none; }
+.writing-details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; padding: 16px 0; }
+.writing-details-grid label { display: grid; gap: 6px; }
+.writing-details-grid select, .writing-details-grid input:not([type=checkbox]), .writing-relations select { min-width: 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; }
+.writing-details-grid .writing-checkbox { display: flex; align-items: center; }
+.writing-relations, .writing-history { display: grid; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.writing-relations h3, .writing-history h3 { margin: 0; color: var(--text); font-size: 13px; }
+.writing-relations > div { display: flex; gap: 8px; }
+.writing-relations button { border: 0; color: var(--writing-accent); background: transparent; cursor: pointer; }
+.writing-history article { padding: 6px 0; font-size: 12px; }
+.writing-welcome { display: grid; align-content: center; justify-items: center; flex: 1; padding: 35px; text-align: center; }
+.writing-welcome > span { color: var(--writing-accent); font-size: 35px; }
+.writing-welcome h2 { margin: 14px 0 4px; font-size: 27px; }
+.writing-welcome p { margin: 0 0 20px; color: var(--muted); }
+.writing-welcome .writing-new { width: auto; }
+.writing-error { margin: 10px 30px 0; }
+.writing-workspace :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--writing-accent); outline-offset: 2px; }
+@media (max-width: 900px) { .writing-workspace { grid-template-columns: 290px minmax(0, 1fr); } .writing-paper, .writing-details { width: calc(100% - 48px); } .writing-toolbar-top { padding: 0 20px; } }
+@media (max-width: 650px) { .orin-shell:has(.writing-workspace) .main-content { width: calc(100% - 32px); margin-left: 32px; } .writing-workspace { grid-template-columns: minmax(0, 1fr); height: calc(100vh - 58px); min-height: 450px; } .writing-list { display: none; } .writing-paper, .writing-details { width: calc(100% - 36px); margin-top: 20px; } .writing-paper > textarea, .writing-preview { height: calc(100vh - 250px); font-size: 16px; } .writing-toolbar-top { min-height: 52px; gap: 8px; padding: 0 12px; } .writing-breadcrumb { gap: 6px; } }
+/* Compact note rail: reserve the wide column for the writing canvas. */
+.writing-workspace { grid-template-columns: 292px minmax(0, 1fr); }
+.writing-list-header { gap: 10px; padding: 16px 14px 9px; }
+.writing-brand { gap: 9px; }
+.writing-brand > span { font-size: 21px; }
+.writing-brand h1 { font-size: 18px; }
+.writing-brand p { font-size: 11px; }
+.writing-new { padding: 9px 11px; }
+.writing-search input { padding: 8px 0; }
+.writing-documents { gap: 0; padding: 0 6px 8px; }
+.writing-document { gap: 9px; padding: 10px 8px; }
+.writing-document-copy { gap: 3px; }
+.writing-document-copy > span { font-size: 11px; }
+.writing-tools { flex: 0 0 auto; max-height: 48vh; overflow: auto; padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.writing-tools summary { cursor: pointer; }
+.writing-tools:not([open]) > :not(summary) { display: none; }
+.writing-tools summary span { float: right; }
+.writing-tools-content { display: grid; gap: 12px; padding-top: 12px; }
+.writing-tools-content :is(input, select) { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface); font: inherit; }
+.writing-tools-content button { margin: 4px 5px 0 0; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); background: var(--surface); font: inherit; font-size: 11px; cursor: pointer; }
+.writing-ask, .writing-report-controls, .writing-signal-list { display: grid; gap: 6px; }
+.writing-ask label, .writing-report-controls label { color: var(--muted); font-size: 11px; }
+.writing-tool-result, .writing-signal-list article { display: grid; gap: 5px; padding: 8px 0; border-top: 1px solid var(--line); }
+.writing-tool-result p, .writing-signal-list p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+.writing-tool-result small, .writing-signal-list small { color: var(--muted); }
+.writing-signal-list h3 { margin: 8px 0 0; color: var(--text); font-size: 12px; }
+@media (max-width: 900px) { .writing-workspace { grid-template-columns: 260px minmax(0, 1fr); } }
+@media (max-width: 650px) { .writing-workspace { grid-template-columns: minmax(0, 1fr); } }
+/* The main column is already offset by Orin's global sidebar. Writing fills that column. */
+.orin-shell:has(.writing-workspace) .main-content { width: 100%; max-width: none; min-height: calc(100vh - 62px); margin: 0; padding: 0; }
+.orin-shell:has(.writing-workspace) .page-footer,
+.orin-shell:has(.writing-workspace) .ask-fab { display: none; }
+.writing-workspace { height: calc(100dvh - 62px); min-height: 0; }
+.writing-back { display: none; align-items: center; gap: 4px; flex: 0 0 auto; padding: 7px 8px; border: 0; border-radius: 6px; color: var(--text); background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+@media (min-width: 761px) and (max-width: 1023px) {
+  .orin-shell:has(.writing-workspace) .sidebar { width: 64px; padding: 20px 8px; }
+  .orin-shell:has(.writing-workspace) .sidebar .brand { justify-content: center; margin: 0 0 25px; }
+  .orin-shell:has(.writing-workspace) .sidebar .brand > span:last-child,
+  .orin-shell:has(.writing-workspace) .workspace-switch,
+  .orin-shell:has(.writing-workspace) .nav-label,
+  .orin-shell:has(.writing-workspace) .profile strong,
+  .orin-shell:has(.writing-workspace) .profile small,
+  .orin-shell:has(.writing-workspace) .logout-button { display: none; }
+  .orin-shell:has(.writing-workspace) .navigation { margin-top: 8px; }
+  .orin-shell:has(.writing-workspace) .nav-link { justify-content: center; overflow: hidden; padding: 0; font-size: 0; }
+  .orin-shell:has(.writing-workspace) .nav-link .nav-icon { width: 100%; }
+  .orin-shell:has(.writing-workspace) .main-column { width: calc(100% - 64px); margin-left: 64px; }
+  .orin-shell:has(.writing-workspace) .writing-workspace { grid-template-columns: minmax(230px, 29%) minmax(0, 1fr); }
+}
+@media (max-width: 820px) {
+  .orin-shell:has(.writing-workspace) .main-content { width: 100%; margin: 0; }
+  .orin-shell:has(.writing-workspace) .writing-workspace { grid-template-columns: minmax(0, 1fr); }
+  .orin-shell:has(.writing-workspace) .writing-list { display: flex; }
+  .orin-shell:has(.writing-workspace) .writing-editor { display: none; }
+  .orin-shell:has(.writing-workspace) .writing-workspace.writing-mobile-editor .writing-list { display: none; }
+  .orin-shell:has(.writing-workspace) .writing-workspace.writing-mobile-editor .writing-editor { display: flex; }
+  .orin-shell:has(.writing-workspace) .writing-back { display: inline-flex; }
+  .orin-shell:has(.writing-workspace) .writing-toolbar-top { padding-inline: 14px; }
+  .orin-shell:has(.writing-workspace) .writing-breadcrumb { min-width: 0; }
+  .orin-shell:has(.writing-workspace) .writing-breadcrumb > span:first-child { display: none; }
+  .orin-shell:has(.writing-workspace) .writing-paper, .orin-shell:has(.writing-workspace) .writing-details { width: min(100% - 36px, 850px); }
+  .orin-shell:has(.writing-workspace) .writing-paper > textarea, .orin-shell:has(.writing-workspace) .writing-preview { height: auto; min-height: 0; font-size: 16px; }
+}
+@media (max-width: 650px) {
+  .orin-shell:has(.writing-workspace) .main-content { width: 100%; margin: 0; padding: 0; }
+  .orin-shell:has(.writing-workspace) .topbar { padding-inline: 12px; }
+  .orin-shell:has(.writing-workspace) .topbar-capture,
+  .orin-shell:has(.writing-workspace) .topbar-ask,
+  .orin-shell:has(.writing-workspace) .status-indicator { display: none; }
+  .orin-shell:has(.writing-workspace) .writing-workspace { height: calc(100dvh - 58px); }
+  .orin-shell:has(.writing-workspace) .writing-list-header { gap: 12px; padding: 16px 18px 10px; }
+  .orin-shell:has(.writing-workspace) .writing-documents { padding-inline: 10px; }
+  .orin-shell:has(.writing-workspace) .writing-document { min-height: 58px; padding: 11px 10px; }
+  .orin-shell:has(.writing-workspace) .writing-toolbar-top { min-height: 54px; gap: 5px; padding-inline: 8px; }
+  .orin-shell:has(.writing-workspace) .writing-quiet-action { font-size: 11px; }
+  .orin-shell:has(.writing-workspace) .writing-save-status { font-size: 11px; }
+  .orin-shell:has(.writing-workspace) .writing-paper { width: calc(100% - 36px); margin-top: 18px; }
+  .orin-shell:has(.writing-workspace) .writing-title { font-size: clamp(25px, 8vw, 32px); overflow-wrap: anywhere; }
+  .orin-shell:has(.writing-workspace) .writing-formatbar { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; margin-bottom: 18px; }
+  .orin-shell:has(.writing-workspace) .writing-formatbar button { flex: 0 0 auto; min-height: 40px; }
+  .orin-shell:has(.writing-workspace) .writing-paper > textarea, .orin-shell:has(.writing-workspace) .writing-preview { height: auto; min-height: 0; padding-bottom: 28px; }
+  .orin-shell:has(.writing-workspace) .writing-details { width: calc(100% - 36px); margin-bottom: 18px; }
+}
+@media (max-width: 374px) {
+  .orin-shell:has(.writing-workspace) .writing-brand p,
+  .orin-shell:has(.writing-workspace) .writing-new kbd,
+  .orin-shell:has(.writing-workspace) .writing-breadcrumb > span { display: none; }
+  .orin-shell:has(.writing-workspace) .writing-list-header { padding-inline: 14px; }
+  .orin-shell:has(.writing-workspace) .writing-save-status { max-width: 75px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .orin-shell:has(.writing-workspace) .writing-quiet-action { padding-inline: 4px; }
+}

@@ -23,13 +23,13 @@ describe("capability navigation", () => {
 });
 
 describe("Markdown response rendering", () => {
-  it("renders the knowledge capture entry point and privacy notice", () => {
+  it("renders the writing workspace and quick capture privacy notice", () => {
     const workspace = renderToStaticMarkup(<KnowledgeWorkspace projects={[]} />);
     const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
-    expect(workspace).toContain("Ask can synthesize included notes");
-    expect(workspace).toContain("Weekly report");
+    expect(workspace).toContain("Writing workspace");
+    expect(workspace).toContain("Capture thoughts and develop ideas");
     expect(workspace).toContain("New note");
-    expect(capture).toContain("Saved to your Knowledge inbox");
+    expect(capture).toContain("Saved to Writing");
     expect(capture).toContain('aria-modal="true"');
   });
 

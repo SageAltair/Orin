@@ -27,7 +27,7 @@ export const capabilities: Capability[] = [
   { id: "projects", label: "Projects", description: "Organize work by outcome", icon: "▦" },
   { id: "tasks", label: "Tasks", description: "Keep track of next steps", icon: "☑" },
   { id: "activity", label: "Activity", description: "A record of recent changes", icon: "◷" },
-  { id: "memories", label: "Knowledge", description: "Capture, find, and connect your writing", icon: "M" },
+  { id: "memories", label: "Writing", description: "Capture thoughts, take notes, and develop ideas", icon: "M" },
   { id: "focus", label: "Focus sessions", description: "Start and review focused work", icon: "F" },
   { id: "settings", label: "Settings", description: "Shape your Orin workspace", icon: "\u2699" },
 ];
