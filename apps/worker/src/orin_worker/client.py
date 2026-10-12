@@ -100,7 +100,7 @@ def worker_loop(stopping: threading.Event) -> None:
     backoff = 1
     timeout = httpx.Timeout(20, connect=10)
     try:
-        with httpx.Client(base_url=base_url + "/api/v1", headers={"Authorization": f"Bearer {credential}"}, timeout=timeout, follow_redirects=False) as client:
+        with httpx.Client(base_url=base_url + "/api/v1", headers={"Authorization": f"Bearer {credential}"}, timeout=timeout, follow_redirects=False, trust_env=urlparse(base_url).hostname not in {"localhost", "127.0.0.1", "::1"}) as client:
             while not stopping.is_set():
                 try:
                     for pending_id, pending_status, pending_result in ledger.pending_results():

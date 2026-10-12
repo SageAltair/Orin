@@ -304,7 +304,7 @@ class ProjectMember(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_member"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role: Mapped[ProjectRole] = mapped_column(enum_column(ProjectRole, "project_role"), nullable=False, default=ProjectRole.VIEWER, server_default=ProjectRole.VIEWER.value)
 
@@ -456,7 +456,8 @@ class Conversation(TimestampMixin, Base):
 
 class Command(TimestampMixin, Base):
     __tablename__ = "commands"
-    __table_args__ = (Index("ix_commands_user_created", "user_id", "created_at"),
+    __table_args__ = (
+        Index("ix_commands_conversation_created", "conversation_id", "created_at"),Index("ix_commands_user_created", "user_id", "created_at"),
         UniqueConstraint("user_id", "idempotency_key", name="uq_command_user_idempotency"))
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -791,7 +792,6 @@ class IdeaInbox(TimestampMixin, Base):
         Index("ix_idea_inbox_user_updated", "user_id", "updated_at"),
         Index("ix_idea_inbox_user_status", "user_id", "status"),
         Index("ix_idea_inbox_linked_documents", "linked_document_ids"),
-        UniqueConstraint("id", name="uq_idea_inbox_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -808,7 +808,6 @@ class CreativeOutlineItem(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_creative_outline_items_parent", "parent_id"),
         Index("ix_creative_outline_items_project_updated", "project_id", "updated_at"),
-        UniqueConstraint("id", name="uq_outline_item_id"),
         CheckConstraint("NOT (parent_id IS NOT NULL AND document_id IS NOT NULL)", name="ck_outline_item_at_most_one_target"),
     )
 
@@ -828,7 +827,6 @@ class CreativeDocumentCard(TimestampMixin, Base):
     __tablename__ = "creative_document_cards"
     __table_args__ = (
         Index("ix_creative_document_cards_project_updated", "project_id", "updated_at"),
-        UniqueConstraint("id", name="uq_card_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)

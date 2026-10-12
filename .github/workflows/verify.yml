@@ -28,6 +28,7 @@ jobs:
       CORS_ORIGINS: http://localhost:5273,http://127.0.0.1:4173,http://127.0.0.1:4174
       BACKGROUND_WORKER_ENABLED: "true"
       ORIN_LIVE_E2E: "true"
+      ORIN_WORKER_E2E: "true"
       CI: "true"
     steps:
       - uses: actions/checkout@v4
@@ -78,3 +79,36 @@ jobs:
           path: |
             apps/web/test-results/
             /tmp/orin-api.log
+
+  production-containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare isolated production configuration
+        run: |
+          cp .env.example .env
+          python - <<'PYCODE'
+          from pathlib import Path
+          import secrets
+          p = Path('.env')
+          s = p.read_text().replace('AUTH_SECRET_KEY=\n', 'AUTH_SECRET_KEY=' + secrets.token_hex(32) + '\n')
+          s = s.replace('CORS_ORIGINS=http://localhost:5273', 'CORS_ORIGINS=https://orin.invalid')
+          s = s.replace('WEB_APP_URL=http://localhost:5273', 'WEB_APP_URL=https://orin.invalid')
+          s += '\nWEB_PORT=5274\n'
+          p.write_text(s)
+          PYCODE
+      - name: Build and start the production template
+        run: docker compose --project-name orin-production-ci -f docker-compose.production.yml up --build --wait --wait-timeout 180
+      - name: Verify static frontend and database readiness through the proxy
+        run: |
+          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:5274/health/ready
+          curl --fail http://127.0.0.1:5274/health/live
+          curl --fail http://127.0.0.1:5274/ | grep 'id="root"'
+          docker build -f infrastructure/docker/worker.Dockerfile -t orin-worker-ci .
+      - name: Capture container diagnostics
+        if: failure()
+        run: docker compose --project-name orin-production-ci -f docker-compose.production.yml logs
+      - name: Remove only the isolated CI stack and its test volumes
+        if: always()
+        run: docker compose --project-name orin-production-ci -f docker-compose.production.yml down -v

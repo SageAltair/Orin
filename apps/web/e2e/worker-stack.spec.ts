@@ -7,10 +7,11 @@ import { expect, test } from "@playwright/test";
 test.use({ trace: "off" });
 
 test("real API approval releases a signed job to a live worker and reports its result", async ({ page }) => {
-  test.skip(process.env.ORIN_WORKER_E2E !== "true", "set ORIN_WORKER_E2E=true with the Docker stack running to execute a real worker flow");
+  test.skip(process.env.ORIN_WORKER_E2E !== "true", "set ORIN_WORKER_E2E=true with an isolated API running to execute a real worker flow");
   test.setTimeout(120_000);
   const root = await mkdtemp(join(tmpdir(), "orin-worker-e2e-"));
   let worker: ChildProcess | undefined;
+  let workerDiagnostics = "";
   const email = `orin-worker-e2e-${Date.now()}@example.com`;
   const password = "Public-Docker-Worker-Test-Password-2026!";
   try {
@@ -20,7 +21,7 @@ test("real API approval releases a signed job to a live worker and reports its r
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByRole("textbox", { name: "Ask Orin" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Ask Orin", exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Preferences" }).click();
     await page.getByLabel("Device name").fill("E2E-Windows-Worker");
     await page.getByRole("button", { name: "Register", exact: true }).click();
@@ -31,7 +32,7 @@ test("real API approval releases a signed job to a live worker and reports its r
 
     worker = spawn(process.env.ORIN_WORKER_PYTHON ?? "python", ["-m", "orin_worker.main"], {
       cwd: process.cwd(),
-      stdio: "ignore",
+      stdio: ["ignore", "ignore", "pipe"],
       env: {
         ...process.env,
         PYTHONPATH: join(process.cwd(), "..", "..", "apps", "worker", "src"),
@@ -42,7 +43,8 @@ test("real API approval releases a signed job to a live worker and reports its r
         ORIN_WORKER_STATE_PATH: join(root, "worker-state.sqlite3"),
       },
     });
-    await expect(page.getByText("active", { exact: true })).toBeVisible({ timeout: 30_000 });
+    worker.stderr?.on("data", chunk => { workerDiagnostics = (workerDiagnostics + String(chunk)).slice(-2000); });
+    await expect(page.getByText("active", { exact: true }), workerDiagnostics).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Request approval" }).click();
     await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
     await page.getByRole("button", { name: "Approve" }).click();

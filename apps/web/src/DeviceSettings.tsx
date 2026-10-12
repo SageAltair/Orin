@@ -47,7 +47,7 @@ export function DeviceSettings({ onApprovalCreated }: { onApprovalCreated: () =>
 
   return <section className="settings-section" aria-labelledby="devices-heading">
     <div className="section-heading"><div><span className="eyebrow">DEVICES</span><h2 id="devices-heading">Connected workers</h2></div></div>
-    <p>Register each Windows worker separately. Jobs stay on hold until you approve them. Device tokens are credentials: store them securely and revoke a device if one is exposed.</p>
+    <p>Register each device separately. Jobs stay on hold until you approve them. Device tokens are credentials: store them securely and revoke a device if one is exposed.</p>
     {error && <p className="api-error" role="alert">{error}</p>}{notice && <p className="success-message" role="status">{notice}</p>}
     {credential && <div className="device-enrollment" role="region" aria-label="One-time device credential"><strong>Copy this one-time worker token</strong><p>It is not stored in Orin in readable form and cannot be shown again.</p><textarea aria-label="Worker token" readOnly value={credential} /><pre>{`$env:ORIN_API_URL="https://your-orin-host"
 $env:ORIN_DEVICE_ID="${selected}"
