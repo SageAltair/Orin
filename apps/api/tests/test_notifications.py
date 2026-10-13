@@ -188,6 +188,9 @@ def test_snooze_acknowledgement_and_ownership(client, sessions):
     tick(factory, now)
     rows = client.get("/api/v1/notifications").json()
     assert rows[0]["attention_ready"]
+    assert datetime.fromisoformat(
+        rows[0]["due_at"].replace("Z", "+00:00")
+    ).utcoffset() == timedelta(0)
     endpoint = f"/api/v1/notifications/{rows[0]['id']}/action"
     assert (
         client.post(endpoint, json={"action": "snooze", "minutes": 15}).status_code
