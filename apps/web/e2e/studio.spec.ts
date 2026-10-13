@@ -243,6 +243,12 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
       exact: true,
     })
     .click();
+  await expect(
+    page.getByRole("button", {
+      name: "Mark Review notification delivery read",
+      exact: true,
+    }),
+  ).toHaveCount(0);
   const inbox = await (
     await page.request.get("http://localhost:8100/api/v1/notifications", {
       headers,

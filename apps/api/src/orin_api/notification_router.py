@@ -194,6 +194,5 @@ def read_notification(
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
-    return notification_action(
-        notification_id, Action(action="acknowledge"), user, session
-    )
+    notification_action(notification_id, Action(action="acknowledge"), user, session)
+    return {"status": "read"}
