@@ -1,0 +1,2408 @@
+import { AccountPrivacy } from "./AccountPrivacy";
+import {
+  Compass,
+  Home,
+  CalendarDays,
+  FolderOpen,
+  ListTodo,
+  Activity,
+  BookOpen,
+  Timer,
+} from "lucide-react";
+import { lazy, Suspense } from "react";
+const NotificationPreferencesPanel = lazy(() => import("./NotificationPreferences").then(m => ({default:m.NotificationPreferencesPanel})));
+const OpportunityWorkspace = lazy(() => import("./OpportunityWorkspace").then(m => ({default: m.OpportunityWorkspace})));
+const WritingStudio = lazy(() =>
+  import("./WritingStudio").then((module) => ({
+    default: module.WritingStudio,
+  })),
+);
+import { NotificationCenter } from "./NotificationCenter";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import {
+  ArrowUp,
+  ArrowUpRight,
+  Command,
+  Menu,
+  Moon,
+  Pin,
+  Plus,
+  Settings2,
+  Sun,
+  LogOut,
+  Copy,
+  MessageCircle,
+  X,
+  Paperclip,
+  History,
+  Search,
+  ListPlus,
+  MoreHorizontal,
+} from "lucide-react";
+import {
+  ApiError,
+  Approval,
+  Attachment,
+  CommandHistory,
+  CommandResult,
+  Conversation,
+  EnvironmentPreference,
+  Preferences,
+  Project,
+  SearchResult,
+  Task,
+  User,
+  login,
+  logout,
+  register,
+  request,
+  requestBlob,
+  restoreSession,
+} from "./api";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  capabilities,
+  defaultPreferences,
+  getNavigationCapabilities,
+  normalizePreferences,
+  type CapabilityId,
+  type UserPreferences,
+} from "./capabilities";
+import { DeviceSettings } from "./DeviceSettings";
+import { ProjectWorkspace } from "./ProjectWorkspace";
+import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
+import { AccountSecurity } from "./AccountSecurity";
+import { ActivityTimeline } from "./ActivityTimeline";
+import { GitHubSettings } from "./GitHubSettings";
+import { FocusExperience } from "./features/focus/FocusExperience";
+import { LegacyTasks } from "./features/focus/LegacyTasks";
+import { QuickKnowledgeCapture } from "./KnowledgeWorkspace";
+import { FocusSessions } from "./FocusSessions";
+import { CalendarWorkspace } from "./CalendarWorkspace";
+import { QuickCapture } from "./QuickCapture";
+
+const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
+
+const storageKey = "orin.preferences.v1";
+const conversationStorageKey = "orin.activeConversation.v1";
+type Page = CapabilityId;
+type ChatTurn = { prompt: string; result: CommandResult };
+export function mergeCommandHistory(
+  history: CommandHistory[],
+  current: ChatTurn[] = [],
+): ChatTurn[] {
+  const seen = new Set<string>();
+  const restored = [...history].reverse().flatMap((item) => {
+    if (seen.has(item.command_id)) return [];
+    seen.add(item.command_id);
+    return [{ prompt: item.text, result: item }];
+  });
+  return [
+    ...restored.filter(
+      (turn) =>
+        !current.some(
+          (existing) => existing.result.command_id === turn.result.command_id,
+        ),
+    ),
+    ...current,
+  ];
+}
+function readPreferences(): UserPreferences {
+  try {
+    const saved = localStorage.getItem(storageKey);
+    return saved
+      ? normalizePreferences(JSON.parse(saved) as unknown)
+      : defaultPreferences;
+  } catch {
+    return defaultPreferences;
+  }
+}
+function errorText(error: unknown): string {
+  return error instanceof ApiError
+    ? error.message
+    : "Something went wrong. Please try again.";
+}
+function EmptyState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="empty-state">
+      <span className="empty-mark" aria-hidden="true">
+        ○
+      </span>
+      <h3>{title}</h3>
+      <p>{detail}</p>
+    </div>
+  );
+}
+
+export function safeHref(href: string | undefined): string | undefined {
+  if (!href) return undefined;
+  if (/^(https?:|mailto:)/i.test(href) || /^(\/|#)/.test(href)) return href;
+  return undefined;
+}
+
+export function MarkdownResponse({ value }: { value: string }) {
+  const [status, setStatus] = useState("");
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Copied");
+    } catch {
+      setStatus("Copy failed. Check clipboard permissions.");
+    }
+    window.setTimeout(() => setStatus(""), 2200);
+  };
+  return (
+    <div className="response-card">
+      <div className="response-actions">
+        <button
+          type="button"
+          className="copy-button"
+          onClick={() => copy(value)}
+        >
+          <Copy size={14} />
+          {status === "Copied" ? "Copied" : "Copy response"}
+        </button>
+        {status && status !== "Copied" && <span role="status">{status}</span>}
+      </div>
+      <div className="markdown-body">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ href, children, ...props }) => {
+              const safe = safeHref(href);
+              return safe ? (
+                <a
+                  href={safe}
+                  target={safe.startsWith("http") ? "_blank" : undefined}
+                  rel={
+                    safe.startsWith("http") ? "noopener noreferrer" : undefined
+                  }
+                  {...props}
+                >
+                  {children}
+                </a>
+              ) : (
+                <span>{children}</span>
+              );
+            },
+            table: ({ children, ...props }) => (
+              <div className="table-scroll">
+                <table {...props}>{children}</table>
+              </div>
+            ),
+            code: ({ className, children, ...props }) =>
+              className ? (
+                <div className="code-frame">
+                  <span className="code-label">
+                    {className.replace("language-", "") || "code"}
+                  </span>
+                  <button
+                    type="button"
+                    className="code-copy"
+                    onClick={() => copy(String(children).replace(/\n$/, ""))}
+                    aria-label="Copy code"
+                  >
+                    <Copy size={13} />
+                  </button>
+                  <code className={className} {...props}>
+                    {children}
+                  </code>
+                </div>
+              ) : (
+                <code className="inline-code" {...props}>
+                  {children}
+                </code>
+              ),
+          }}
+        >
+          {value}
+        </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+export function CommandAnswer({ result }: { result: CommandResult }) {
+  const response =
+    result.result &&
+    typeof result.result === "object" &&
+    !Array.isArray(result.result) &&
+    typeof result.result.response === "string"
+      ? result.result.response
+      : null;
+  return (
+    <article className="chat-answer">
+      <div className="eyebrow">ORIN · {result.status.replaceAll("_", " ")}</div>
+      {result.execution?.approval_id && (
+        <p>Approval {result.execution.approval_id}</p>
+      )}
+      {response !== null ? (
+        <MarkdownResponse value={response} />
+      ) : (
+        <p>{result.message}</p>
+      )}
+    </article>
+  );
+}
+
+function PreferenceSettings({
+  preferences,
+  onChange,
+  user,
+  approvals,
+  refreshApprovals,
+}: {
+  preferences: UserPreferences;
+  onChange: (value: UserPreferences) => void;
+  user: User;
+  approvals: Approval[];
+  refreshApprovals: () => void;
+}) {
+  const [profileName, setProfileName] = useState(user.display_name);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [securityMessage, setSecurityMessage] = useState("");
+  const toggleCapability = (id: CapabilityId) => {
+    const visible = preferences.visibleCapabilities.includes(id);
+    const next = visible
+      ? preferences.visibleCapabilities.filter((item) => item !== id)
+      : [...preferences.visibleCapabilities, id];
+    onChange({
+      ...preferences,
+      visibleCapabilities: next,
+      hiddenCapabilities: capabilities
+        .map((item) => item.id)
+        .filter((item) => !next.includes(item)),
+      pinnedCapabilities: preferences.pinnedCapabilities.filter((item) =>
+        next.includes(item),
+      ),
+    });
+  };
+  const togglePin = (id: CapabilityId) =>
+    onChange({
+      ...preferences,
+      pinnedCapabilities: preferences.pinnedCapabilities.includes(id)
+        ? preferences.pinnedCapabilities.filter((item) => item !== id)
+        : [...preferences.pinnedCapabilities, id],
+    });
+  return (
+    <div className="settings-content">
+      <section className="settings-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">WORKSPACE</span>
+            <h2>Choose what you see</h2>
+          </div>
+        </div>
+        <div className="capability-list">
+          {capabilities
+            .filter((item) => item.id !== "settings")
+            .map((item) => {
+              const visible = preferences.visibleCapabilities.includes(item.id);
+              return (
+                <div className="capability-row" key={item.id}>
+                  <span>{item.label}</span>
+                  <button
+                    className="pin-button"
+                    onClick={() => togglePin(item.id)}
+                    aria-label={`Pin ${item.label}`}
+                    disabled={!visible}
+                  >
+                    <Pin size={15} />
+                  </button>
+                  <input
+                    aria-label={`Show ${item.label}`}
+                    type="checkbox"
+                    checked={visible}
+                    onChange={() => toggleCapability(item.id)}
+                  />
+                </div>
+              );
+            })}
+        </div>
+      </section>
+      <section className="settings-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">ACCOUNT</span>
+            <h2>Profile</h2>
+          </div>
+        </div>
+        <div className="preference-controls">
+          <label>
+            Display name
+            <input
+              value={profileName}
+              onChange={(e) => setProfileName(e.target.value)}
+              onBlur={async () => {
+                if (profileName.trim() !== user.display_name) {
+                  try {
+                    const updated = await request<User>("/auth/me", {
+                      method: "PATCH",
+                      body: JSON.stringify({
+                        display_name: profileName.trim(),
+                      }),
+                    });
+                    window.dispatchEvent(
+                      new CustomEvent("orin:profile-updated", {
+                        detail: updated,
+                      }),
+                    );
+                    setSecurityMessage("Profile updated.");
+                  } catch (e) {
+                    setSecurityMessage(errorText(e));
+                    setProfileName(user.display_name);
+                  }
+                }
+              }}
+            />
+          </label>
+          <label>
+            Email
+            <input value={user.email} readOnly />
+          </label>
+          <p>
+            Account created {new Date(user.created_at).toLocaleDateString()}.
+            Password changes revoke all active sessions.
+          </p>
+        </div>
+        <form
+          className="preference-controls"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setSecurityMessage("");
+            try {
+              await request<void>("/auth/password", {
+                method: "POST",
+                body: JSON.stringify({
+                  current_password: currentPassword,
+                  new_password: newPassword,
+                }),
+              });
+              setSecurityMessage(
+                "Password changed. Sign in again with your new password.",
+              );
+              setTimeout(() => window.location.reload(), 1000);
+            } catch (error) {
+              setSecurityMessage(errorText(error));
+            }
+          }}
+        >
+          <label>
+            Current password
+            <input
+              type="password"
+              autoComplete="current-password"
+              minLength={1}
+              required
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+            />
+          </label>
+          <label>
+            New password
+            <input
+              type="password"
+              autoComplete="new-password"
+              minLength={15}
+              required
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+          </label>
+          <button className="primary-button">Change password</button>
+        </form>
+        {securityMessage && <p role="status">{securityMessage}</p>}
+        <button
+          className="secondary-button"
+          onClick={() => {
+            logout().finally(() => window.location.reload());
+          }}
+        >
+          Sign out of this session
+        </button>
+      </section>
+      <section className="settings-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">AUTONOMY</span>
+            <h2>Choose how Orin handles actions</h2>
+          </div>
+        </div>
+        <p>
+          Registered action risk and protected actions always take precedence
+          over this preference.
+        </p>
+        <div className="preference-controls">
+          <label>
+            Autonomy mode
+            <select
+              value={preferences.autonomyMode}
+              onChange={(event) =>
+                onChange({
+                  ...preferences,
+                  autonomyMode: event.target
+                    .value as UserPreferences["autonomyMode"],
+                })
+              }
+            >
+              <option value="conservative">
+                Conservative - approve every change
+              </option>
+              <option value="balanced">
+                Balanced - low risk actions run automatically
+              </option>
+              <option value="automatic">
+                Automatic - low and medium risk actions run automatically
+              </option>
+              <option value="custom">Custom - use per action rules</option>
+            </select>
+          </label>
+        </div>
+        {preferences.autonomyMode === "custom" && (
+          <div className="preference-controls">
+            {["create_task", "update_task"].map((action) => (
+              <label key={action}>
+                {action.replaceAll("_", " ")}
+                <select
+                  value={preferences.customAutonomy[action] ?? "approval"}
+                  onChange={(event) =>
+                    onChange({
+                      ...preferences,
+                      customAutonomy: {
+                        ...preferences.customAutonomy,
+                        [action]: event.target.value as
+                          "automatic" | "approval",
+                      },
+                    })
+                  }
+                >
+                  <option value="automatic">Automatic</option>
+                  <option value="approval">Ask for approval</option>
+                </select>
+              </label>
+            ))}
+          </div>
+        )}
+      </section>
+      <section className="settings-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">APPROVALS</span>
+            <h2>Requests and history</h2>
+          </div>
+        </div>
+        {approvals.length ? (
+          <div className="data-list">
+            {approvals.map((item) => (
+              <article className="data-row" key={item.id}>
+                <div className="data-main">
+                  <strong>{item.action ?? "Action"}</strong>
+                  <small>
+                    {item.status} · {item.risk_level} risk ·{" "}
+                    {item.reason ??
+                      "Review requested changes before approving."}
+                  </small>
+                  <code>{JSON.stringify(item.parameters)}</code>
+                </div>
+                {item.status === "pending" && (
+                  <div>
+                    <button
+                      className="primary-button"
+                      onClick={async () => {
+                        await request(`/approvals/${item.id}/decision`, {
+                          method: "POST",
+                          body: JSON.stringify({ approved: true }),
+                        });
+                        refreshApprovals();
+                      }}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={async () => {
+                        await request(`/approvals/${item.id}/decision`, {
+                          method: "POST",
+                          body: JSON.stringify({ approved: false }),
+                        });
+                        refreshApprovals();
+                      }}
+                    >
+                      Reject
+                    </button>
+                    <button
+                      className="secondary-button"
+                      onClick={async () => {
+                        await request(`/approvals/${item.id}/cancel`, {
+                          method: "POST",
+                        });
+                        refreshApprovals();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No approval requests"
+            detail="Requests and their final status will appear here."
+          />
+        )}
+      </section>
+      <section className="settings-section">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">APPEARANCE</span>
+            <h2>Make it yours</h2>
+          </div>
+        </div>
+        <div className="preference-controls">
+          <label>
+            Interface density
+            <select
+              value={preferences.density}
+              onChange={(event) =>
+                onChange({
+                  ...preferences,
+                  density: event.target.value as UserPreferences["density"],
+                })
+              }
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </label>
+          <label>
+            Theme
+            <select
+              value={preferences.theme}
+              onChange={(event) =>
+                onChange({
+                  ...preferences,
+                  theme: event.target.value as UserPreferences["theme"],
+                })
+              }
+            >
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+              <option value="system">System</option>
+            </select>
+          </label>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AuthScreen({
+  onAuthenticated,
+}: {
+  onAuthenticated: (user: User) => void;
+}) {
+  const [isRegister, setIsRegister] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      onAuthenticated(
+        isRegister
+          ? await register(email, password, name)
+          : await login(email, password),
+      );
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <main className="auth-screen">
+      <form className="auth-card" onSubmit={submit}>
+        <span className="brand-mark">
+          <Command size={17} />
+        </span>
+        <h1>{isRegister ? "Create your Orin account" : "Welcome to Orin"}</h1>
+        <p>Sign in to your workspace to continue.</p>
+        {isRegister && (
+          <label>
+            Your name
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoComplete="name"
+            />
+          </label>
+        )}
+        <label>
+          Email
+          <input
+            required
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+        </label>
+        <label>
+          Password
+          <input
+            required
+            type="password"
+            minLength={isRegister ? 15 : 1}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete={isRegister ? "new-password" : "current-password"}
+          />
+          {isRegister && <small>Use at least 15 characters.</small>}
+        </label>
+        {error && (
+          <p className="api-error" role="alert">
+            {error}
+          </p>
+        )}
+        <button className="primary-button" disabled={busy}>
+          {busy ? "Please wait…" : isRegister ? "Create account" : "Sign in"}
+        </button>
+        <button
+          type="button"
+          className="auth-switch"
+          onClick={() => {
+            setIsRegister(!isRegister);
+            setError("");
+          }}
+        >
+          {isRegister
+            ? "Already have an account? Sign in"
+            : "New to Orin? Create an account"}
+        </button>
+      </form>
+    </main>
+  );
+}
+
+const navigationIcons: Record<CapabilityId, typeof Home> = {
+  home: Home,
+  opportunities: Compass,
+  calendar: CalendarDays,
+  projects: FolderOpen,
+  tasks: ListTodo,
+  activity: Activity,
+  memories: BookOpen,
+  focus: Timer,
+  settings: Settings2,
+};
+function NavigationIcon({ id }: { id: CapabilityId }) {
+  const Icon = navigationIcons[id];
+  return <Icon size={18} />;
+}
+
+export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [preferences, setPreferences] =
+    useState<UserPreferences>(readPreferences);
+  const [page, setPage] = useState<Page>(() =>
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("integration")
+      ? "settings"
+      : "home",
+  );
+  const [command, setCommand] = useState("");
+  const [commandMessage, setCommandMessage] = useState("");
+  const [commandBusy, setCommandBusy] = useState(false);
+  const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : window.localStorage.getItem(conversationStorageKey),
+  );
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationTitle, setConversationTitle] = useState("");
+  const [activeProjectId, setActiveProjectId] = useState("");
+  const [activeTaskId, setActiveTaskId] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<Attachment[]>([]);
+  const [savedAttachments, setSavedAttachments] = useState<Attachment[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<Record<string, string>>(
+    {},
+  );
+  const [searchText, setSearchText] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [loadError, setLoadError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [projectToOpen, setProjectToOpen] = useState<string | null>(null);
+  const [taskToOpen, setTaskToOpen] = useState<string | null>(null);
+  const [scheduleTaskId, setScheduleTaskId] = useState<string | null>(null);
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [knowledgeCaptureOpen, setKnowledgeCaptureOpen] = useState(false);
+  const navigation = useMemo(
+    () => getNavigationCapabilities(capabilities, preferences),
+    [preferences],
+  );
+  const commandInputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const captureShortcut = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.code === "Space"
+      ) {
+        event.preventDefault();
+        setCaptureOpen(true);
+      }
+    };
+    window.addEventListener("keydown", captureShortcut);
+    return () => window.removeEventListener("keydown", captureShortcut);
+  }, []);
+  useEffect(() => {
+    restoreSession()
+      .then(setUser)
+      .catch(() => setUser(null))
+      .finally(() => setAuthReady(true));
+  }, []);
+  useEffect(() => {
+    const expire = () => setUser(null);
+    window.addEventListener("orin:session-expired", expire);
+    return () => window.removeEventListener("orin:session-expired", expire);
+  }, []);
+  useEffect(() => {
+    const update = (event: Event) =>
+      setUser((event as CustomEvent<User>).detail);
+    window.addEventListener("orin:profile-updated", update);
+    return () => window.removeEventListener("orin:profile-updated", update);
+  }, []);
+  const refreshApprovals = () => {
+    request<Approval[]>("/approvals")
+      .then(setApprovals)
+      .catch((e) => setLoadError(errorText(e)));
+  };
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    void request("/focus/settings", {
+      headers: {
+        "X-Timezone": Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      },
+    }).catch(() => undefined);
+    Promise.all([
+      request<Task[]>("/tasks?limit=100"),
+      request<Project[]>("/projects"),
+      request<Preferences>("/users/me/preferences"),
+      request<Approval[]>("/approvals"),
+      request<EnvironmentPreference[]>("/environment/preferences"),
+    ])
+      .then(([t, p, prefs, approvalsData, environment]) => {
+        if (!active) return;
+        setTasks(t);
+        setProjects(p);
+        setApprovals(approvalsData);
+        const normalized = normalizePreferences({
+          ...prefs,
+          hiddenCapabilities: prefs.hidden_capabilities,
+          visibleCapabilities: prefs.visible_capabilities,
+          pinnedCapabilities: prefs.pinned_capabilities,
+          autonomyMode: prefs.autonomy_mode,
+          customAutonomy: prefs.custom_autonomy,
+        });
+        setPreferences({
+          ...normalized,
+          minimizedCapabilities: environment
+            .filter(
+              (item) =>
+                item.surface === "navigation" &&
+                item.visibility === "minimized",
+            )
+            .map((item) => item.item as CapabilityId)
+            .filter((id) => capabilities.some((item) => item.id === id)),
+        });
+      })
+      .catch((e) => {
+        if (active) setLoadError(errorText(e));
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    request<Conversation[]>("/conversations")
+      .then(async (sessions) => {
+        if (!active) return;
+        setConversations(sessions);
+        const saved = localStorage.getItem(conversationStorageKey);
+        const selected =
+          sessions.find((item) => item.id === saved) ?? sessions[0];
+        setConversationId(selected?.id ?? null);
+        setConversationTitle(selected?.title ?? "");
+        setActiveProjectId(selected?.project_id ?? "");
+        setActiveTaskId(selected?.task_id ?? "");
+        if (selected) {
+          localStorage.setItem(conversationStorageKey, selected.id);
+          const [history, files] = await Promise.all([
+            request<CommandHistory[]>(
+              `/commands?conversation_id=${selected.id}`,
+            ),
+            request<Attachment[]>(
+              `/attachments?conversation_id=${selected.id}`,
+            ),
+          ]);
+          if (active) {
+            setChatTurns(mergeCommandHistory(history));
+            setSavedAttachments(files);
+          }
+        } else {
+          localStorage.removeItem(conversationStorageKey);
+          setChatTurns([]);
+          setSavedAttachments([]);
+        }
+      })
+      .catch(() => {
+        /* Chat can still be used when history is temporarily unavailable. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
+  useEffect(() => {
+    if (conversationId)
+      localStorage.setItem(conversationStorageKey, conversationId);
+    else localStorage.removeItem(conversationStorageKey);
+  }, [conversationId]);
+  useEffect(() => {
+    let active = true;
+    const urls: string[] = [];
+    setImagePreviews({});
+    const imageFiles = savedAttachments.filter((file) =>
+      file.media_type.startsWith("image/"),
+    );
+    Promise.all(
+      imageFiles.map(async (file) => {
+        try {
+          const blob = await requestBlob(`/attachments/${file.id}/content`);
+          const url = URL.createObjectURL(blob);
+          if (active) urls.push(url);
+          else URL.revokeObjectURL(url);
+          return [file.id, url] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (active)
+        setImagePreviews(
+          Object.fromEntries(
+            entries.filter(
+              (item): item is readonly [string, string] => item !== null,
+            ),
+          ),
+        );
+    });
+    return () => {
+      active = false;
+      urls.forEach(URL.revokeObjectURL);
+    };
+  }, [savedAttachments]);
+  const stagedImagePreviews = useMemo(
+    () =>
+      Object.fromEntries(
+        pendingFiles.flatMap((file, index) =>
+          file.type.startsWith("image/")
+            ? [[String(index), URL.createObjectURL(file)]]
+            : [],
+        ),
+      ),
+    [pendingFiles],
+  );
+  useEffect(
+    () => () => Object.values(stagedImagePreviews).forEach(URL.revokeObjectURL),
+    [stagedImagePreviews],
+  );
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(preferences));
+  }, [preferences]);
+  useEffect(() => {
+    if (page !== "settings" && !preferences.visibleCapabilities.includes(page))
+      setPage("home");
+  }, [page, preferences.visibleCapabilities]);
+  const savePreferences = async (next: UserPreferences) => {
+    setPreferences(next);
+    try {
+      const saved = await request<Preferences>("/users/me/preferences", {
+        method: "PUT",
+        body: JSON.stringify({
+          density: next.density,
+          theme: next.theme,
+          locale: "en",
+          visible_capabilities: next.visibleCapabilities,
+          pinned_capabilities: next.pinnedCapabilities,
+          autonomy_mode: next.autonomyMode,
+          custom_autonomy: next.customAutonomy,
+        }),
+      });
+      setPreferences({
+        ...normalizePreferences({
+          density: saved.density,
+          theme: saved.theme,
+          visibleCapabilities: saved.visible_capabilities,
+          pinnedCapabilities: saved.pinned_capabilities,
+          autonomyMode: saved.autonomy_mode,
+          customAutonomy: saved.custom_autonomy,
+        }),
+        minimizedCapabilities: next.minimizedCapabilities,
+      });
+    } catch (e) {
+      setLoadError(errorText(e));
+    }
+  };
+  const submitCommand = async (event: FormEvent) => {
+    event.preventDefault();
+    const text = command.trim();
+    if (
+      (!text && pendingFiles.length === 0 && uploadedFiles.length === 0) ||
+      commandBusy
+    )
+      return;
+    setCommandBusy(true);
+    setCommandMessage("");
+    try {
+      let files = uploadedFiles;
+      if (pendingFiles.length > files.length) {
+        const form = new FormData();
+        pendingFiles
+          .slice(files.length)
+          .forEach((file) => form.append("files", file));
+        const uploaded = await request<Attachment[]>("/attachments", {
+          method: "POST",
+          body: form,
+        });
+        files = [...files, ...uploaded];
+        setUploadedFiles(files);
+      }
+      const result = await request<CommandResult>("/commands", {
+        method: "POST",
+        body: JSON.stringify({
+          text: text || "Please review the attached files.",
+          conversation_id: conversationId,
+          project_id: activeProjectId || null,
+          task_id: activeTaskId || null,
+          attachment_ids: files.map((file) => file.id),
+        }),
+      });
+      setConversationId(result.conversation_id ?? conversationId);
+      setChatTurns((current) =>
+        current.some((turn) => turn.result.command_id === result.command_id)
+          ? current
+          : [
+              ...current,
+              { prompt: text || "Please review the attached files.", result },
+            ],
+      );
+      setConversations((current) =>
+        result.conversation_id &&
+        !current.some((item) => item.id === result.conversation_id)
+          ? [
+              {
+                id: result.conversation_id,
+                title:
+                  text.slice(0, 80) ||
+                  files.map((file) => file.filename).join(", "),
+                task_id: activeTaskId || null,
+                project_id: activeProjectId || null,
+                objective: text || "Review attached files",
+                updated_at: new Date().toISOString(),
+              },
+              ...current,
+            ]
+          : current,
+      );
+      setCommand("");
+      setConversationTitle(
+        (current) =>
+          current ||
+          text.slice(0, 80) ||
+          files.map((file) => file.filename).join(", "),
+      );
+      setPendingFiles([]);
+      setUploadedFiles([]);
+      if (result.conversation_id) {
+        const [files, sessions] = await Promise.all([
+          request<Attachment[]>(
+            `/attachments?conversation_id=${result.conversation_id}`,
+          ),
+          request<Conversation[]>("/conversations"),
+        ]);
+        setSavedAttachments(files);
+        setConversations(sessions);
+      }
+      if (result.status === "completed") {
+        const [t, p, prefs, environment] = await Promise.all([
+          request<Task[]>("/tasks"),
+          request<Project[]>("/projects"),
+          request<Preferences>("/users/me/preferences"),
+          request<EnvironmentPreference[]>("/environment/preferences"),
+        ]);
+        setTasks(t);
+        setProjects(p);
+        const normalized = normalizePreferences({
+          ...prefs,
+          hiddenCapabilities: prefs.hidden_capabilities,
+          visibleCapabilities: prefs.visible_capabilities,
+          pinnedCapabilities: prefs.pinned_capabilities,
+          autonomyMode: prefs.autonomy_mode,
+          customAutonomy: prefs.custom_autonomy,
+        });
+        setPreferences({
+          ...normalized,
+          minimizedCapabilities: environment
+            .filter(
+              (item) =>
+                item.surface === "navigation" &&
+                item.visibility === "minimized",
+            )
+            .map((item) => item.item as CapabilityId)
+            .filter((id) => capabilities.some((item) => item.id === id)),
+        });
+        window.dispatchEvent(new Event("orin:workspace-preferences-changed"));
+      }
+    } catch (e) {
+      setCommandMessage(errorText(e));
+      if (!conversationId && e instanceof ApiError && e.status === 503) {
+        try {
+          const sessions = await request<Conversation[]>("/conversations");
+          const failed = sessions[0];
+          if (failed) {
+            setConversations(sessions);
+            setConversationId(failed.id);
+            setConversationTitle(failed.title);
+            setActiveProjectId(failed.project_id ?? "");
+            setActiveTaskId(failed.task_id ?? "");
+            setChatTurns(
+              mergeCommandHistory(
+                await request<CommandHistory[]>(
+                  `/commands?conversation_id=${failed.id}`,
+                ),
+              ),
+            );
+          }
+        } catch {
+          /* Keep the original provider error visible. */
+        }
+      }
+    } finally {
+      setCommandBusy(false);
+    }
+  };
+  const startNewConversation = () => {
+    setConversationId(null);
+    setConversationTitle("");
+    setActiveProjectId("");
+    setActiveTaskId("");
+    setChatTurns([]);
+    setSavedAttachments([]);
+    setSearchResults([]);
+    setSearchText("");
+    setHistoryOpen(false);
+    setSearchOpen(false);
+  };
+  const openConversation = async (id: string, commandId?: string) => {
+    setConversationId(id);
+    const selected = conversations.find((item) => item.id === id);
+    setConversationTitle(selected?.title ?? "");
+    setActiveProjectId(selected?.project_id ?? "");
+    setActiveTaskId(selected?.task_id ?? "");
+    setCommandMessage("");
+    try {
+      const [history, files] = await Promise.all([
+        request<CommandHistory[]>(`/commands?conversation_id=${id}`),
+        request<Attachment[]>(`/attachments?conversation_id=${id}`),
+      ]);
+      setChatTurns(mergeCommandHistory(history));
+      setSavedAttachments(files);
+      if (commandId)
+        window.setTimeout(
+          () =>
+            document
+              .getElementById(`command-${commandId}`)
+              ?.scrollIntoView({ block: "center" }),
+          50,
+        );
+    } catch (e) {
+      setCommandMessage(errorText(e));
+    }
+  };
+  const saveConversationTitle = async () => {
+    const title = conversationTitle.trim();
+    if (
+      !conversationId ||
+      !title ||
+      title === conversations.find((item) => item.id === conversationId)?.title
+    )
+      return;
+    try {
+      const updated = await request<Conversation>(
+        `/conversations/${conversationId}`,
+        { method: "PATCH", body: JSON.stringify({ title }) },
+      );
+      setConversations((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setConversationTitle(updated.title);
+    } catch (e) {
+      setCommandMessage(errorText(e));
+    }
+  };
+  useEffect(() => {
+    const query = searchText.trim();
+    if (!searchOpen || query.length < 2) {
+      setSearchResults([]);
+      setSearchError("");
+      setSearchLoading(false);
+      return;
+    }
+    let active = true;
+    setSearchLoading(true);
+    setSearchError("");
+    const timer = window.setTimeout(() => {
+      request<SearchResult[]>(`/search?q=${encodeURIComponent(query)}`)
+        .then((results) => {
+          if (active) setSearchResults(results);
+        })
+        .catch((error) => {
+          if (active) setSearchError(errorText(error));
+        })
+        .finally(() => {
+          if (active) setSearchLoading(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [searchText, searchOpen]);
+  useLayoutEffect(() => {
+    const input = commandInputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+    input.style.overflowY = input.scrollHeight > 160 ? "auto" : "hidden";
+  }, [command, askOpen]);
+  const addFiles = (files: FileList | File[]) => {
+    const selected = Array.from(files);
+    setCommandMessage("");
+    setPendingFiles((current) => [...current, ...selected].slice(0, 5));
+  };
+  const removeFile = async (index: number) => {
+    const uploaded = uploadedFiles[index];
+    if (uploaded) {
+      try {
+        await request<void>(`/attachments/${uploaded.id}`, {
+          method: "DELETE",
+        });
+      } catch (e) {
+        setCommandMessage(errorText(e));
+        return;
+      }
+    }
+    setPendingFiles((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
+    setUploadedFiles((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index),
+    );
+  };
+  const downloadSavedAttachment = async (file: Attachment) => {
+    try {
+      const blob = await requestBlob(`/attachments/${file.id}/content`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file.filename;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setCommandMessage(errorText(e));
+    }
+  };
+  const selectPage = (id: Page) => {
+    setPage(id);
+    setMobileOpen(false);
+  };
+  const title =
+    page === "memories" ? "Writing" : page[0].toUpperCase() + page.slice(1);
+  const openProject = (id: string) => {
+    setProjectToOpen(id);
+    selectPage("projects");
+  };
+  const openTask = (id: string) => {
+    setTaskToOpen(id);
+    selectPage("tasks");
+  };
+  const scheduleTask = (id: string) => {
+    setScheduleTaskId(id);
+    selectPage("calendar");
+  };
+  const homeTasks = tasks
+    .filter((task) => !["done", "cancelled"].includes(task.status))
+    .sort((left, right) => {
+      const rank: Record<Task["priority"], number> = {
+        urgent: 0,
+        high: 1,
+        normal: 2,
+        low: 3,
+      };
+      return (
+        rank[left.priority] - rank[right.priority] ||
+        (left.due_at ? new Date(left.due_at).getTime() : Infinity) -
+          (right.due_at ? new Date(right.due_at).getTime() : Infinity)
+      );
+    })
+    .slice(0, 5);
+  const activeProjects = projects
+    .filter((project) => project.status === "active")
+    .slice(0, 4);
+  useEffect(() => {
+    if (
+      page === "tasks" &&
+      taskToOpen &&
+      tasks.some((task) => task.id === taskToOpen)
+    )
+      document
+        .getElementById(`task-${taskToOpen}`)
+        ?.scrollIntoView({ block: "center" });
+  }, [page, taskToOpen, tasks]);
+  if (!authReady)
+    return (
+      <div className="loading-state">
+        <span className="spinner" />
+        Checking your session…
+      </div>
+    );
+  if (!user) return <AuthScreen onAuthenticated={setUser} />;
+  return (
+    <div
+      className={`orin-shell density-${preferences.density} theme-${preferences.theme}`}
+    >
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <aside
+        className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}
+        aria-label="Main navigation"
+      >
+        <a
+          className="brand"
+          href="#home"
+          onClick={(e) => {
+            e.preventDefault();
+            selectPage("home");
+          }}
+        >
+          <span className="brand-mark">
+            <Command size={17} />
+          </span>
+          <span>orin</span>
+        </a>
+        <div className="workspace-switch">
+          <span className="workspace-avatar">
+            {user.display_name[0]?.toUpperCase()}
+          </span>
+          <span>
+            <strong>My workspace</strong>
+            <small>{user.email}</small>
+          </span>
+        </div>
+        <span className="nav-label">WORKSPACE</span>
+        <nav className="navigation">
+          {navigation.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-link ${preferences.minimizedCapabilities.includes(item.id) ? "minimized " : ""}${page === item.id ? "active" : ""}`}
+              onClick={() => selectPage(item.id)}
+              aria-current={page === item.id ? "page" : undefined}
+            >
+              <span className="nav-icon">
+                <NavigationIcon id={item.id} />
+              </span>
+              {item.label}
+              {preferences.pinnedCapabilities.includes(item.id) &&
+                item.id !== "home" && <Pin className="tiny-pin" size={11} />}
+            </button>
+          ))}
+        </nav>
+        <div className="sidebar-bottom">
+          <button
+            className="nav-link settings-link"
+            type="button"
+            onClick={() => selectPage("settings")}
+          >
+            <Settings2 size={17} />
+            Preferences
+          </button>
+          <div className="profile">
+            <span className="profile-avatar">
+              {user.display_name[0]?.toUpperCase()}
+            </span>
+            <span>
+              <strong>{user.display_name}</strong>
+              <small>{user.email}</small>
+            </span>
+            <button
+              className="logout-button"
+              aria-label="Sign out"
+              onClick={() => {
+                logout().finally(() => setUser(null));
+              }}
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      {mobileOpen && (
+        <button
+          className="mobile-scrim"
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+      <div className="main-column">
+        <header className="topbar">
+          <button
+            className="mobile-menu"
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Menu size={19} />
+          </button>
+          <div className="breadcrumbs">
+            <span>My workspace</span>
+            <span>/</span>
+            <span>{title}</span>
+          </div>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="topbar-capture"
+              title="Quick capture (Ctrl or ? + Shift + Space)"
+              onClick={() => setCaptureOpen(true)}
+            >
+              <Plus size={15} />
+              Capture
+            </button>
+            <button
+              type="button"
+              className="topbar-ask"
+              onClick={() => setAskOpen(true)}
+            >
+              <MessageCircle size={15} />
+              Ask Orin
+            </button>
+            <NotificationCenter onOpen={(category,id) => {if(category === "tasks" && id) openTask(id); else if(category === "projects" && id) openProject(id); else setPage(category === "calendar" || category === "routines" ? "calendar" : category === "opportunities" || category === "risks" ? "opportunities" : category === "writing" ? "memories" : "settings");}} />
+            <span className="status-indicator">
+              <span />
+              {loadError
+                ? "Needs attention"
+                : loading
+                  ? "Connecting"
+                  : "Connected"}
+            </span>
+            <button
+              type="button"
+              className="theme-toggle"
+              aria-label="Toggle light or dark theme"
+              onClick={() =>
+                savePreferences({
+                  ...preferences,
+                  theme: preferences.theme === "dark" ? "light" : "dark",
+                })
+              }
+            >
+              {preferences.theme === "dark" ? (
+                <Moon size={17} />
+              ) : (
+                <Sun size={17} />
+              )}
+            </button>
+          </div>
+        </header>
+        <FocusEnvironment />
+        <main id="main-content" className="main-content" tabIndex={-1}>
+          {loadError && (
+            <p className="api-error" role="alert">
+              {loadError}{" "}
+              <button type="button" onClick={() => setLoadError("")}>
+                Dismiss
+              </button>
+            </p>
+          )}
+          {page === "settings" ? (
+            <>
+              <div className="page-intro">
+                <span className="eyebrow">PREFERENCES</span>
+                <h1>Settings</h1>
+                <p>
+                  Your account, autonomy, approvals, devices, and appearance.
+                </p>
+              </div>
+              <PreferenceSettings
+                preferences={preferences}
+                onChange={savePreferences}
+                user={user}
+                approvals={approvals}
+                refreshApprovals={refreshApprovals}
+              />
+              <AccountSecurity
+                user={user}
+                onUpdated={(updated) => setUser(updated)}
+              />
+              <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
+              <AccountPrivacy userId={user.id} />
+              <DeviceSettings onApprovalCreated={refreshApprovals} />
+              <WorkspaceSettings
+                projects={projects}
+                preferences={preferences}
+                onPreferencesChange={savePreferences}
+              />
+              <GitHubSettings projects={projects} />
+            </>
+          ) : page === "home" ? (
+            <>
+              <div className="greeting">
+                <span className="eyebrow">YOUR WORKSPACE</span>
+                <h1>
+                  What needs your attention, {user.display_name.split(" ")[0]}?
+                </h1>
+                <p>Your projects, open tasks, and recent work in one place.</p>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setKnowledgeCaptureOpen(true)}
+                >
+                  Capture a thought
+                </button>
+                <button
+                  type="button"
+                  className="primary-button home-ask"
+                  onClick={() => setAskOpen(true)}
+                >
+                  <MessageCircle size={16} /> Ask Orin to plan or continue work
+                </button>
+              </div>
+              <div className="home-dashboard">
+                <section className="home-section">
+                  <div className="section-title">
+                    <div>
+                      <span className="eyebrow">NEXT ACTIONS</span>
+                      <h2>What to work on next</h2>
+                    </div>
+                    <button
+                      className="text-action"
+                      onClick={() => selectPage("tasks")}
+                    >
+                      All tasks <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                  {loading ? (
+                    <div className="loading-state">
+                      <span className="spinner" />
+                      Loading tasks…
+                    </div>
+                  ) : homeTasks.length ? (
+                    <div className="home-record-list">
+                      {homeTasks.map((task) => (
+                        <button
+                          className="home-record"
+                          key={task.id}
+                          onClick={() => openTask(task.id)}
+                        >
+                          <span>
+                            <strong>{task.title}</strong>
+                            <small>
+                              {task.priority} priority
+                              {task.due_at
+                                ? ` · Due ${new Date(task.due_at).toLocaleDateString()}`
+                                : ""}
+                            </small>
+                          </span>
+                          <ArrowUpRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="home-empty">
+                      <p>
+                        No open tasks. Capture a next step when you’re ready.
+                      </p>
+                      <button
+                        className="text-action"
+                        onClick={() => selectPage("tasks")}
+                      >
+                        <Plus size={14} /> Add a task
+                      </button>
+                    </div>
+                  )}
+                </section>
+                <section className="home-section">
+                  <div className="section-title">
+                    <div>
+                      <span className="eyebrow">CONTINUE WORKING</span>
+                      <h2>Recent sessions</h2>
+                    </div>
+                    <button
+                      className="text-action"
+                      onClick={() => {
+                        setAskOpen(true);
+                        setHistoryOpen(true);
+                      }}
+                    >
+                      History <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                  {conversations.length ? (
+                    <div className="home-record-list">
+                      {conversations.slice(0, 4).map((conversation) => (
+                        <button
+                          className="home-record"
+                          key={conversation.id}
+                          onClick={() => {
+                            setAskOpen(true);
+                            void openConversation(conversation.id);
+                          }}
+                        >
+                          <span>
+                            <strong>
+                              {conversation.title || "New work session"}
+                            </strong>
+                            <small>
+                              {new Date(
+                                conversation.updated_at,
+                              ).toLocaleDateString()}{" "}
+                              · {conversation.objective || "Open session"}
+                            </small>
+                          </span>
+                          <ArrowUpRight size={15} />
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="home-empty">
+                      <p>Your saved work sessions will appear here.</p>
+                      <button
+                        className="text-action"
+                        onClick={() => setAskOpen(true)}
+                      >
+                        <MessageCircle size={14} /> Start with Ask Orin
+                      </button>
+                    </div>
+                  )}
+                </section>
+                <section className="home-section home-projects">
+                  <div className="section-title">
+                    <div>
+                      <span className="eyebrow">PROJECTS</span>
+                      <h2>Active projects</h2>
+                    </div>
+                    <button
+                      className="text-action"
+                      onClick={() => selectPage("projects")}
+                    >
+                      All projects <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                  {loading ? (
+                    <div className="loading-state">
+                      <span className="spinner" />
+                      Loading projects…
+                    </div>
+                  ) : activeProjects.length ? (
+                    <div className="home-project-grid">
+                      {activeProjects.map((project) => {
+                        const projectTasks = tasks.filter(
+                          (task) => task.project_id === project.id,
+                        );
+                        const remaining = projectTasks.filter(
+                          (task) =>
+                            !["done", "cancelled"].includes(task.status),
+                        ).length;
+                        return (
+                          <button
+                            className="home-project-card"
+                            key={project.id}
+                            onClick={() => openProject(project.id)}
+                          >
+                            <strong>{project.name}</strong>
+                            <p>
+                              {project.objective ||
+                                project.description ||
+                                "No outcome recorded yet."}
+                            </p>
+                            <small>
+                              {remaining} open{" "}
+                              {remaining === 1 ? "task" : "tasks"}
+                            </small>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="home-empty">
+                      <p>
+                        No active projects yet. Create one to group related
+                        tasks and context.
+                      </p>
+                      <button
+                        className="text-action"
+                        onClick={() => selectPage("projects")}
+                      >
+                        <Plus size={14} /> Create a project
+                      </button>
+                    </div>
+                  )}
+                </section>
+              </div>
+            </>
+          ) : (
+            <>
+              {!(page === "tasks" && focusRolloutEnabled) &&
+                page !== "memories" && page !== "opportunities" && (
+                  <div className="page-intro">
+                    <span className="eyebrow">YOUR WORKSPACE</span>
+                    <h1>{title}</h1>
+                    <p>
+                      {
+                        capabilities.find((item) => item.id === page)
+                          ?.description
+                      }
+                      .
+                    </p>
+                  </div>
+                )}
+              {page === "opportunities" ? <Suspense fallback={<p role="status">Loading opportunities…</p>}><OpportunityWorkspace projects={projects} onOpenTask={openTask}/></Suspense> : page === "calendar" ? (
+                <CalendarWorkspace
+                  projects={projects}
+                  scheduleTaskId={scheduleTaskId}
+                  onTaskScheduled={() => setScheduleTaskId(null)}
+                  onOpenTask={openTask}
+                />
+              ) : page === "tasks" ? (
+                focusRolloutEnabled ? (
+                  <FocusExperience
+                    name={user.display_name}
+                    onSignOut={() => {
+                      logout().finally(() => setUser(null));
+                    }}
+                    embedded
+                    onScheduleTask={scheduleTask}
+                  />
+                ) : (
+                  <LegacyTasks
+                    tasks={tasks}
+                    projects={projects}
+                    onChange={setTasks}
+                    onScheduleTask={scheduleTask}
+                  />
+                )
+              ) : page === "projects" ? (
+                <ProjectWorkspace
+                  projects={projects}
+                  initialProjectId={projectToOpen}
+                  onChanged={(project) =>
+                    setProjects((current) =>
+                      current.some((row) => row.id === project.id)
+                        ? current.map((row) =>
+                            row.id === project.id ? project : row,
+                          )
+                        : [project, ...current],
+                    )
+                  }
+                />
+              ) : page === "activity" ? (
+                <ActivityTimeline
+                  onOpenProject={openProject}
+                  onOpenTask={openTask}
+                />
+              ) : page === "memories" ? (
+                <Suspense fallback={<p role="status">Loading Writing…</p>}>
+                  <WritingStudio
+                    projects={projects}
+                    userId={user.id}
+                    onOpenTask={openTask}
+                  />
+                </Suspense>
+              ) : page === "focus" ? (
+                <FocusSessions projects={projects} />
+              ) : null}
+            </>
+          )}
+          <footer className="page-footer">
+            <span>Thoughtfully, at your pace.</span>
+            <a
+              href="#preferences"
+              onClick={(e) => {
+                e.preventDefault();
+                selectPage("settings");
+              }}
+            >
+              Workspace preferences <ArrowUpRight size={13} />
+            </a>
+          </footer>
+        </main>
+      </div>
+      <button
+        type="button"
+        className="ask-fab"
+        onClick={() => setAskOpen(true)}
+        aria-label="Ask Orin"
+      >
+        <MessageCircle size={17} />
+        <span>Ask Orin</span>
+      </button>
+      {knowledgeCaptureOpen && (
+        <QuickKnowledgeCapture
+          onClose={() => setKnowledgeCaptureOpen(false)}
+          onSaved={() => undefined}
+        />
+      )}
+      {captureOpen && (
+        <QuickCapture
+          onClose={() => setCaptureOpen(false)}
+          onSaved={(task) =>
+            setTasks((current) => [
+              task,
+              ...current.filter((item) => item.id !== task.id),
+            ])
+          }
+        />
+      )}
+      {askOpen && (
+        <>
+          <button
+            className="chat-scrim"
+            type="button"
+            aria-label="Close Ask Orin"
+            onClick={() => setAskOpen(false)}
+          />
+          <section
+            className="chat-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chat-title"
+          >
+            <header className="chat-header compact-chat-header">
+              <div className="chat-session-identity">
+                <span className="brand-mark">
+                  <Command size={15} />
+                </span>
+                <label className="sr-only" htmlFor="work-session-title">
+                  Work session title
+                </label>
+                <input
+                  className="work-session-title"
+                  id="work-session-title"
+                  value={conversationTitle}
+                  placeholder="New work session"
+                  onChange={(event) => setConversationTitle(event.target.value)}
+                  onBlur={() => {
+                    void saveConversationTitle();
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                  }}
+                />
+              </div>
+              <div className="chat-toolbar-actions">
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="Conversation history"
+                  title="Conversation history"
+                  aria-expanded={historyOpen}
+                  onClick={(event) => {
+                    event.currentTarget
+                      .closest(".chat-drawer")
+                      ?.querySelector("details.chat-more-actions")
+                      ?.removeAttribute("open");
+                    setSearchOpen(false);
+                    setHistoryOpen((value) => !value);
+                  }}
+                >
+                  <History size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="Search previous work"
+                  title="Search previous work"
+                  onClick={(event) => {
+                    event.currentTarget
+                      .closest(".chat-drawer")
+                      ?.querySelector("details.chat-more-actions")
+                      ?.removeAttribute("open");
+                    setSearchOpen((value) => !value);
+                    setHistoryOpen(false);
+                  }}
+                >
+                  <Search size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="New task"
+                  title="New task"
+                  onClick={startNewConversation}
+                >
+                  <ListPlus size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="New work session"
+                  title="New work session"
+                  onClick={startNewConversation}
+                >
+                  <Plus size={17} />
+                </button>
+                <details className="chat-more-actions">
+                  <summary
+                    aria-label="More session actions"
+                    title="More session actions"
+                  >
+                    <MoreHorizontal size={18} />
+                  </summary>
+                  <div className="chat-more-menu">
+                    <label>
+                      Project
+                      <select
+                        aria-label="Associate with project"
+                        value={activeProjectId}
+                        onChange={(e) => {
+                          setActiveProjectId(e.target.value);
+                          if (
+                            activeTaskId &&
+                            tasks.find((task) => task.id === activeTaskId)
+                              ?.project_id !== (e.target.value || null)
+                          )
+                            setActiveTaskId("");
+                        }}
+                      >
+                        <option value="">No project</option>
+                        {projects.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Task
+                      <select
+                        aria-label="Continue existing task"
+                        value={activeTaskId}
+                        onChange={(e) => {
+                          const task = tasks.find(
+                            (item) => item.id === e.target.value,
+                          );
+                          setActiveTaskId(e.target.value);
+                          if (task?.project_id)
+                            setActiveProjectId(task.project_id);
+                        }}
+                      >
+                        <option value="">New task / general question</option>
+                        {tasks
+                          .filter(
+                            (task) =>
+                              !activeProjectId ||
+                              task.project_id === activeProjectId,
+                          )
+                          .filter(
+                            (task) =>
+                              !["done", "cancelled"].includes(task.status),
+                          )
+                          .map((task) => (
+                            <option key={task.id} value={task.id}>
+                              {task.title}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                  </div>
+                </details>
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="Close Ask Orin"
+                  title="Close Ask Orin"
+                  onClick={() => setAskOpen(false)}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </header>
+            {historyOpen && (
+              <section
+                className="chat-discovery-panel"
+                aria-label="Conversation history"
+              >
+                <div className="discovery-heading">
+                  <strong>Recent work</strong>
+                  <span>{conversations.length} sessions</span>
+                </div>
+                {conversations.length === 0 ? (
+                  <p className="discovery-empty">No saved conversations yet.</p>
+                ) : (
+                  ["Today", "Previous 7 Days", "Older"].map((group) => {
+                    const now = new Date();
+                    const startToday = new Date(
+                      now.getFullYear(),
+                      now.getMonth(),
+                      now.getDate(),
+                    ).getTime();
+                    const week = startToday - 7 * 86400000;
+                    const entries = conversations.filter((item) => {
+                      const date = new Date(item.updated_at).getTime();
+                      return group === "Today"
+                        ? date >= startToday
+                        : group === "Previous 7 Days"
+                          ? date >= week && date < startToday
+                          : date < week;
+                    });
+                    return entries.length ? (
+                      <div className="history-group" key={group}>
+                        <small>{group}</small>
+                        {entries.map((item) => (
+                          <button
+                            type="button"
+                            className="history-entry"
+                            key={item.id}
+                            onClick={async () => {
+                              await openConversation(item.id);
+                              setHistoryOpen(false);
+                            }}
+                          >
+                            <span>{item.title || "New work session"}</span>
+                            <small>
+                              {projects.find(
+                                (project) => project.id === item.project_id,
+                              )?.name || "No project"}{" "}
+                              ? {new Date(item.updated_at).toLocaleString()}
+                            </small>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null;
+                  })
+                )}
+              </section>
+            )}
+            {searchOpen && (
+              <section
+                className="chat-discovery-panel"
+                aria-label="Search previous work"
+              >
+                <label className="sr-only" htmlFor="workspace-search">
+                  Search previous work
+                </label>
+                <div className="search-input-row">
+                  <Search size={16} />
+                  <input
+                    id="workspace-search"
+                    autoFocus
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                    placeholder="Search conversations, tasks, projects"
+                  />
+                  <button
+                    type="button"
+                    aria-label="Close search"
+                    onClick={() => setSearchOpen(false)}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                {searchText.trim().length < 2 ? (
+                  <p className="discovery-empty">
+                    Enter at least two characters to search.
+                  </p>
+                ) : searchLoading ? (
+                  <p className="discovery-empty" role="status">
+                    Searching previous work?
+                  </p>
+                ) : searchError ? (
+                  <p className="api-error" role="alert">
+                    {searchError}
+                  </p>
+                ) : searchResults.length === 0 ? (
+                  <p className="discovery-empty">No matching previous work.</p>
+                ) : (
+                  <div
+                    className="chat-search-results"
+                    aria-label="Search results"
+                  >
+                    {searchResults.map((item) => (
+                      <button
+                        key={`${item.kind}-${item.result_id}`}
+                        type="button"
+                        onClick={async () => {
+                          if (item.conversation_id) {
+                            await openConversation(
+                              item.conversation_id,
+                              item.command_id ?? undefined,
+                            );
+                            setSearchOpen(false);
+                          } else if (item.task_id) {
+                            openTask(item.task_id);
+                            setSearchOpen(false);
+                          } else if (item.project_id) {
+                            openProject(item.project_id);
+                            setSearchOpen(false);
+                          }
+                        }}
+                      >
+                        {item.kind}: {item.title ?? item.text.slice(0, 70)}
+                        <small>
+                          {item.excerpt} ?{" "}
+                          {new Date(item.created_at).toLocaleString()}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+            <details className="task-context-panel">
+              <summary>
+                Session details{" "}
+                <span>
+                  {projects.find((item) => item.id === activeProjectId)?.name ||
+                    "No project"}
+                </span>
+              </summary>
+              <p>
+                {conversations.find((item) => item.id === conversationId)
+                  ?.objective ||
+                  "This is a general work session. Add an objective in your first message."}
+              </p>
+              {conversations.find((item) => item.id === conversationId)
+                ?.summary && (
+                <p>
+                  <strong>Earlier work:</strong>{" "}
+                  {
+                    conversations.find((item) => item.id === conversationId)
+                      ?.summary
+                  }
+                </p>
+              )}
+              <small>
+                Project:{" "}
+                {projects.find((item) => item.id === activeProjectId)?.name ||
+                  "None"}{" "}
+                ? Task:{" "}
+                {tasks.find((item) => item.id === activeTaskId)?.title ||
+                  "None"}
+                {activeTaskId
+                  ? ` ? ${tasks.find((item) => item.id === activeTaskId)?.status.replaceAll("_", " ") || ""}`
+                  : ""}
+              </small>
+              {conversations.find((item) => item.id === conversationId)
+                ?.pending_question?.status === "pending" &&
+                typeof conversations.find((item) => item.id === conversationId)
+                  ?.pending_question?.question === "string" && (
+                  <p className="pending-question">
+                    <strong>Open question:</strong>{" "}
+                    {String(
+                      conversations.find((item) => item.id === conversationId)
+                        ?.pending_question?.question,
+                    )}
+                  </p>
+                )}
+            </details>
+            {savedAttachments.length > 0 && (
+              <section
+                className="saved-attachments"
+                aria-label="Files attached to this work session"
+              >
+                <strong>Files in this session</strong>
+                <div>
+                  {savedAttachments.map((file) => (
+                    <button
+                      key={file.id}
+                      type="button"
+                      onClick={() => downloadSavedAttachment(file)}
+                    >
+                      {imagePreviews[file.id] && (
+                        <img src={imagePreviews[file.id]} alt={file.filename} />
+                      )}
+                      <span>
+                        {file.filename}
+                        <small>{Math.ceil(file.size_bytes / 1024)} KB</small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+            <div className="chat-content" aria-live="polite">
+              {chatTurns.length === 0 && !commandBusy && !commandMessage && (
+                <div className="chat-welcome">
+                  <span className="ask-mark">
+                    <Command size={16} />
+                  </span>
+                  <h3>What would you like to do?</h3>
+                  <p>
+                    Choose an example to get started, or type what you need in
+                    your own words. For task examples, replace{" "}
+                    <strong>[task name]</strong> with your task title.
+                  </p>
+                  <div
+                    className="chat-starters"
+                    role="group"
+                    aria-label="Try an Orin action"
+                  >
+                    {[
+                      {
+                        label: "Create a task",
+                        prompt: "Create a task called [task name]",
+                      },
+                      {
+                        label: "Choose what to do today",
+                        prompt: "Propose my three tasks for today",
+                      },
+                      {
+                        label: "Set my energy",
+                        prompt: "Set my energy to low",
+                      },
+                      {
+                        label: "Make a task smaller",
+                        prompt:
+                          "Break down [task name] into a small first step",
+                      },
+                    ].map((item) => (
+                      <button
+                        type="button"
+                        key={item.label}
+                        onClick={() => {
+                          setCommand(item.prompt);
+                          commandInputRef.current?.focus();
+                        }}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                  <details className="chat-starter-more">
+                    <summary>More things Orin can do</summary>
+                    <div className="chat-starters">
+                      {[
+                        {
+                          label: "Start focusing",
+                          prompt: "Start a focus session for [task name]",
+                        },
+                        {
+                          label: "Switch tasks",
+                          prompt: "Not now; switch me to another task",
+                        },
+                        {
+                          label: "Log a distraction",
+                          prompt: "I got distracted by a thought",
+                        },
+                        {
+                          label: "End my focus session",
+                          prompt: "End my focus session",
+                        },
+                        { label: "Close out today", prompt: "Close out today" },
+                        {
+                          label: "Release a task",
+                          prompt: "Release [task name]",
+                        },
+                      ].map((item) => (
+                        <button
+                          type="button"
+                          key={item.label}
+                          onClick={() => {
+                            setCommand(item.prompt);
+                            commandInputRef.current?.focus();
+                          }}
+                        >
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p>Releasing a task will ask you to approve the change.</p>
+                  </details>
+                </div>
+              )}
+              {chatTurns.map((turn, index) => (
+                <div
+                  className="chat-turn"
+                  id={`command-${turn.result.command_id}`}
+                  key={`${turn.result.command_id}-${index}`}
+                >
+                  <div className="chat-user-message">
+                    <span className="eyebrow">YOU</span>
+                    <p>{turn.prompt}</p>
+                  </div>
+                  <CommandAnswer result={turn.result} />
+                </div>
+              ))}
+              {commandBusy && (
+                <p className="command-message" role="status">
+                  {pendingFiles.length > 0
+                    ? "Uploading attachments and sending"
+                    : "Orin is thinking"}
+                  …
+                </p>
+              )}
+              {commandMessage && (
+                <p className="api-error" role="alert">
+                  {commandMessage}
+                </p>
+              )}
+            </div>
+            <form
+              className="command-form chat-composer"
+              onSubmit={submitCommand}
+              autoComplete="off"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                addFiles(event.dataTransfer.files);
+              }}
+            >
+              <div className="attachment-staging">
+                {pendingFiles.map((file, index) => (
+                  <div
+                    className="pending-attachment"
+                    key={`${file.name}-${index}`}
+                  >
+                    {stagedImagePreviews[String(index)] && (
+                      <img
+                        src={stagedImagePreviews[String(index)]}
+                        alt={`Preview of ${file.name}`}
+                      />
+                    )}
+                    <span>
+                      {uploadedFiles[index]?.filename ?? file.name}
+                      <small>{Math.ceil(file.size / 1024)} KB</small>
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${file.name}`}
+                      onClick={() => {
+                        void removeFile(index);
+                      }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <input
+                className="sr-only attachment-input"
+                id="attachment-input"
+                type="file"
+                multiple
+                accept=".png,.jpg,.jpeg,.webp,.pdf,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.jsx,.html,.css,.sql,.sh,.toml,.xml,.log,.c,.h,.cpp,.rs,.go,.java,.kt,.swift"
+                onChange={(event) => {
+                  if (event.currentTarget.files)
+                    addFiles(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <label
+                className="attach-file-button"
+                htmlFor="attachment-input"
+                title="Add attachment"
+              >
+                <Paperclip size={17} />
+                <span className="sr-only">Add attachment</span>
+              </label>
+              <label className="sr-only" htmlFor="ask-input">
+                Ask Orin
+              </label>
+              <textarea
+                ref={commandInputRef}
+                id="ask-input"
+                name="orin-command"
+                rows={1}
+                autoComplete="off"
+                aria-autocomplete="none"
+                spellCheck={false}
+                value={command}
+                onChange={(event) => {
+                  setCommand(event.target.value);
+                  setCommandMessage("");
+                }}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="Ask Orin what you need"
+              />
+              <button
+                type="submit"
+                aria-label="Send message"
+                title="Send message"
+                disabled={
+                  (!command.trim() &&
+                    pendingFiles.length === 0 &&
+                    uploadedFiles.length === 0) ||
+                  commandBusy
+                }
+              >
+                {commandBusy ? (
+                  <span className="spinner" />
+                ) : (
+                  <ArrowUp size={17} />
+                )}
+              </button>
+            </form>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
