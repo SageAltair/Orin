@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { request } from "./api";
 import {
   defaultNotificationPolicy,
@@ -13,15 +13,33 @@ export function NotificationPreferencesPanel() {
   });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
-  const refresh = () =>
-    request<NotificationPolicy>("/notifications/preferences").then((p) => {
-      if (p && typeof p.enabled === "boolean") setPolicy(p);
-    });
+  const loadGeneration = useRef(0);
+  const refresh = async (): Promise<void> => {
+    const generation = ++loadGeneration.current;
+    setLoading(true);
+    setError("");
+    try {
+      const p = await request<NotificationPolicy>("/notifications/preferences");
+      if (generation !== loadGeneration.current) return;
+      if (!p || typeof p.enabled !== "boolean")
+        throw Error("Invalid preferences");
+      setPolicy(p);
+      setLoaded(true);
+    } catch {
+      if (generation === loadGeneration.current)
+        setError("Notification preferences could not be loaded.");
+    } finally {
+      if (generation === loadGeneration.current) setLoading(false);
+    }
+  };
   useEffect(() => {
-    void refresh().catch(() =>
-      setError("Notification preferences could not be loaded."),
-    );
+    void refresh();
+    return () => {
+      loadGeneration.current++;
+    };
   }, []);
   return (
     <section
@@ -36,18 +54,14 @@ export function NotificationPreferencesPanel() {
       {error && (
         <p role="alert">
           {error}
-          <button
-            className="text-action"
-            onClick={() =>
-              void refresh()
-                .then(() => setError(""))
-                .catch(() => setError("Could not reload."))
-            }
-          >
-            Retry
-          </button>
+          {!loaded && (
+            <button className="text-action" onClick={() => void refresh()}>
+              Retry
+            </button>
+          )}
         </p>
       )}
+      {loading && <p role="status">Loading notification preferences…</p>}
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -70,7 +84,10 @@ export function NotificationPreferencesPanel() {
           }
         }}
       >
-        <fieldset disabled={busy} style={{ border: 0, padding: 0 }}>
+        <fieldset
+          disabled={busy || loading || !loaded}
+          style={{ border: 0, padding: 0 }}
+        >
           <label>
             <input
               type="checkbox"
@@ -266,7 +283,10 @@ export function NotificationPreferencesPanel() {
             overridden here. Background push and native critical alerts are not
             configured.
           </p>
-          <button className="primary-button" disabled={busy}>
+          <button
+            className="primary-button"
+            disabled={busy || loading || !loaded}
+          >
             {busy ? "Saving…" : "Save notification preferences"}
           </button>
         </fieldset>

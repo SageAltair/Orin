@@ -110,15 +110,32 @@ def list_notifications(
     ).all()
     result = []
     for row in rows:
-        if row.read_at is None and not relevant(session, row):
+        if row.read_at is None and (
+            not relevant(session, row)
+            or (
+                row.category in {"calendar", "routines"}
+                and utc(row.due_at) + timedelta(hours=2) < now
+            )
+        ):
             row.read_at = now
+        lead = (
+            10
+            if row.delivery_key.startswith("task-block:")
+            else (
+                30
+                if row.category == "tasks" and row.delivery_key.startswith("task:")
+                else 0
+            )
+        )
         ready = bool(
             allowed
             and row.category in prefs.categories
             and row.read_at is None
-            and row.attention_at is not None
+            and now >= utc(row.due_at) - timedelta(minutes=lead)
             and (row.snoozed_until is None or utc(row.snoozed_until) <= now)
         )
+        if ready and row.attention_at is None:
+            row.attention_at = now
         result.append(
             {
                 "id": row.id,

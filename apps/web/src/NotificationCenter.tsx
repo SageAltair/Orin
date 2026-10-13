@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Bell, Check, X } from "lucide-react";
 import {
   defaultNotificationPolicy,
@@ -33,22 +33,33 @@ export function NotificationCenter({
   const [items, setItems] = useState<Reminder[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
-  const refresh = () =>
-    request<Reminder[]>("/notifications")
+  const inboxGeneration = useRef(0);
+  const policyGeneration = useRef(0);
+  const refresh = (): Promise<void> => {
+    const generation = ++inboxGeneration.current;
+    return request<Reminder[]>("/notifications")
       .then((rows) => {
+        if (generation !== inboxGeneration.current) return;
         setItems(Array.isArray(rows) ? rows : []);
         setError("");
       })
-      .catch(() => setError("Reminders could not be refreshed."));
+      .catch(() => {
+        if (generation === inboxGeneration.current)
+          setError("Reminders could not be refreshed.");
+      });
+  };
   useEffect(() => {
     void refresh();
-    const preferences = () =>
-      request<NotificationPolicy>("/notifications/preferences")
+    const preferences = () => {
+      const generation = ++policyGeneration.current;
+      return request<NotificationPolicy>("/notifications/preferences")
         .then((p) => {
+          if (generation !== policyGeneration.current) return;
           if (p && typeof p.enabled === "boolean") setPolicy(p);
           void refresh();
         })
         .catch(() => undefined);
+    };
     void preferences();
     window.addEventListener("orin-notification-preferences", preferences);
     const timer = window.setInterval(() => {
@@ -56,6 +67,8 @@ export function NotificationCenter({
       void refresh();
     }, 30000);
     return () => {
+      inboxGeneration.current++;
+      policyGeneration.current++;
       window.clearInterval(timer);
       window.removeEventListener("orin-notification-preferences", preferences);
     };

@@ -195,7 +195,8 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
           })
         ).json();
         return rows.some(
-          (r: { title: string }) => r.title === "Review notification delivery",
+          (r: { title: string; attention_ready: boolean }) =>
+            r.title === "Review notification delivery" && r.attention_ready,
         );
       },
       { timeout: 25000 },
@@ -217,6 +218,16 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   await notificationSettings
     .getByRole("button", { name: "Save notification preferences", exact: true })
     .click();
+  await expect(
+    notificationSettings.getByText("Notification preferences saved."),
+  ).toBeVisible();
+  const savedNotificationPolicy = await (
+    await page.request.get(
+      "http://localhost:8100/api/v1/notifications/preferences",
+      { headers },
+    )
+  ).json();
+  expect(savedNotificationPolicy.persistent).toBe(true);
   const followup = page.getByRole("complementary", {
     name: "Persistent follow-up",
   });

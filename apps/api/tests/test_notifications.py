@@ -332,3 +332,33 @@ def test_foreign_notification_cannot_be_read_or_snoozed(client, sessions):
         ).status_code
         == 404
     )
+
+
+def test_saved_reminder_becomes_ready_immediately_when_quiet_hours_end(
+    client, sessions
+):
+    factory, owner = sessions
+    now = datetime.now(timezone.utc)
+    item = task(factory, owner, now)
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.quiet_enabled = True
+        prefs.quiet_start = prefs.quiet_end = "00:00"
+        session.add(
+            Notification(
+                user_id=owner,
+                source_id=item,
+                category="tasks",
+                delivery_key="task:quiet-test",
+                title="Ready after quiet",
+                message="A next step",
+                due_at=now,
+            )
+        )
+    assert not client.get("/api/v1/notifications").json()[0]["attention_ready"]
+    prefs = client.get("/api/v1/notifications/preferences").json()
+    prefs["quiet_enabled"] = False
+    assert (
+        client.put("/api/v1/notifications/preferences", json=prefs).status_code == 200
+    )
+    assert client.get("/api/v1/notifications").json()[0]["attention_ready"]
