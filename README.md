@@ -40,6 +40,10 @@ Home, Tasks/Focus, Projects, Calendar, Writing and Activity share a responsive l
 
 Use `BACKGROUND_WORKER_ENABLED=true` for durable analysis recovery and reminders (enabled in Compose and `.env.example`). The device worker is opt-in: enroll in Settings, configure `ORIN_API_URL`, `ORIN_DEVICE_ID`, `ORIN_WORKER_TOKEN` and explicit allowed roots, then run `orin-worker`. Use `docker compose --profile worker up` only after supplying the enrollment settings. See [repair details and limits](docs/reliability-and-design.md) and [operations](docs/operations.md).
 
+## Opportunities, risks and routines
+
+Opportunities captures possibilities, tracks decisions and links practical next actions to Tasks. Its Risk register records warning signs and response plans. Calendar routines repeat on chosen weekdays with timezone-aware schedules, in-app reminders, minimum versions and reversible check-ins. See [feature details and evidence](docs/opportunities-and-routines.md).
+
 ## Verification and production
 
 Install Python dependencies with the resolved `apps/api/requirements-dev.lock`, then install API/worker packages with `--no-deps`. Frontend checks use `npm ci` and the committed npm lockfile. Install Chromium using `npx playwright install chromium` before browser tests.

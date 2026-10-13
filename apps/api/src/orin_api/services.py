@@ -40,6 +40,7 @@ def _safe_activity_metadata(value: dict[str, object] | None) -> dict[str, object
 
 CAPABILITY_CATALOG = (
     ("home", "Home", "Your current priorities"),
+    ("opportunities", "Opportunities", "Explore possibilities and manage risks"),
     ("calendar", "Calendar", "See your commitments and plans"),
     ("projects", "Projects", "Organize work by outcome"),
     ("tasks", "Tasks", "Keep track of next steps"),
@@ -85,7 +86,7 @@ def ensure_user_preferences(session: Session, user: User) -> UserPreferences:
     }
     for capability in catalog:
         if capability.id not in assigned:
-            visible = capability.is_enabled and capability.code in {"home", "calendar", "tasks", "projects", "activity", "memories", "focus"}
+            visible = capability.is_enabled and capability.code in {"home", "calendar", "opportunities", "tasks", "projects", "activity", "memories", "focus"}
             session.add(UserCapability(
                 user_id=user.id,
                 capability_id=capability.id,

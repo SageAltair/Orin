@@ -1,5 +1,6 @@
 import { AccountPrivacy } from "./AccountPrivacy";
 import {
+  Compass,
   Home,
   CalendarDays,
   FolderOpen,
@@ -9,6 +10,7 @@ import {
   Timer,
 } from "lucide-react";
 import { lazy, Suspense } from "react";
+const OpportunityWorkspace = lazy(() => import("./OpportunityWorkspace").then(m => ({default: m.OpportunityWorkspace})));
 const WritingStudio = lazy(() =>
   import("./WritingStudio").then((module) => ({
     default: module.WritingStudio,
@@ -699,6 +701,7 @@ function AuthScreen({
 
 const navigationIcons: Record<CapabilityId, typeof Home> = {
   home: Home,
+  opportunities: Compass,
   calendar: CalendarDays,
   projects: FolderOpen,
   tasks: ListTodo,
@@ -1697,7 +1700,7 @@ export default function App() {
           ) : (
             <>
               {!(page === "tasks" && focusRolloutEnabled) &&
-                page !== "memories" && (
+                page !== "memories" && page !== "opportunities" && (
                   <div className="page-intro">
                     <span className="eyebrow">YOUR WORKSPACE</span>
                     <h1>{title}</h1>
@@ -1710,7 +1713,7 @@ export default function App() {
                     </p>
                   </div>
                 )}
-              {page === "calendar" ? (
+              {page === "opportunities" ? <Suspense fallback={<p role="status">Loading opportunities…</p>}><OpportunityWorkspace projects={projects} onOpenTask={openTask}/></Suspense> : page === "calendar" ? (
                 <CalendarWorkspace
                   projects={projects}
                   scheduleTaskId={scheduleTaskId}

@@ -11,9 +11,10 @@ from sqlalchemy.exc import IntegrityError
 
 from orin_api.config import Settings
 from orin_api.database import SessionLocal
+from orin_api.planning_domain import occurrence, dates
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
-from orin_api.models import ActivityType, CalendarEvent, KnowledgeExtractionJob, Notification, WorkerJob, WorkerJobStatus
+from orin_api.models import ActivityType, CalendarEvent, KnowledgeExtractionJob, Notification, Routine, RoutineCheckin, WorkerJob, WorkerJobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,28 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                     session.flush()
             except IntegrityError:
                 pass  # Another API instance delivered the same reminder.
+        routines = session.scalars(select(Routine).where(Routine.paused.is_(False), Routine.reminder_minutes.is_not(None))).all()
+        for routine in routines:
+            local_day = current.astimezone(ZoneInfo(routine.timezone)).date()
+            for day in dates(local_day - timedelta(days=1), local_day + timedelta(days=1)):
+                start = occurrence(routine, day)
+                if start is None:
+                    continue
+                due = start - timedelta(minutes=routine.reminder_minutes)
+                if not due <= current < start + timedelta(hours=1):
+                    continue
+                if session.scalar(select(RoutineCheckin.id).where(RoutineCheckin.routine_id == routine.id, RoutineCheckin.day == day)):
+                    continue
+                key = f"routine:{routine.id}:{start.isoformat()}:{routine.reminder_minutes}"
+                if session.scalar(select(Notification.id).where(Notification.delivery_key == key)):
+                    continue
+                try:
+                    with session.begin_nested():
+                        session.add(Notification(user_id=routine.user_id, delivery_key=key, title=routine.title,
+                            message=routine.cue or "Your routine is ready. The minimum version counts.", due_at=due))
+                        session.flush()
+                except IntegrityError:
+                    pass
         jobs = session.scalars(select(KnowledgeExtractionJob.id).where(
             KnowledgeExtractionJob.status == "queued"
         ).order_by(KnowledgeExtractionJob.created_at).limit(4)).all()

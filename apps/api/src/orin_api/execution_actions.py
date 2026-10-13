@@ -349,7 +349,7 @@ class StartFocusInput(StrictActionInput):
 
 
 class SetToolVisibilityInput(StrictActionInput):
-    tool: Literal["home", "projects", "tasks", "activity", "memories", "focus"]
+    tool: Literal["home", "calendar", "opportunities", "projects", "tasks", "activity", "memories", "focus"]
     visibility: Literal["visible", "hidden", "minimized", "prioritized"]
 
 

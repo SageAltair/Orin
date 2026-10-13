@@ -358,3 +358,26 @@ export interface CreativeDocumentCard {
   updated_at: string;
 }
 
+
+export interface OpportunityRecord {
+  id: string; title: string; project_id: string | null; task_id: string | null;
+  category: "job" | "business" | "learning" | "creative" | "ministry" | "other";
+  stage: "inbox" | "exploring" | "pursuing" | "waiting" | "won" | "closed";
+  description: string; source_url: string; contact: string; next_action: string; decision_notes: string;
+  deadline: string | null; review_on: string | null; value: number; fit: number; effort: number;
+}
+export interface RiskRecord {
+  id: string; title: string; opportunity_id: string | null; project_id: string | null;
+  likelihood: number; impact: number; status: "open" | "watching" | "resolved" | "occurred";
+  response: "reduce" | "avoid" | "accept" | "transfer"; trigger: string; mitigation: string; review_on: string | null;
+}
+export interface RoutineRecord {
+  id: string; title: string; timezone: string; weekdays: number[]; start_date: string; end_date: string | null;
+  time_of_day: string; duration_minutes: number; minimum_minutes: number; cue: string; steps: string;
+  minimum_action: string; reward: string; reminder_minutes: number | null; paused: boolean;
+}
+export interface RoutineOccurrence {
+  routine_id: string; day: string; title: string; start_at: string; end_at: string;
+  status: "pending" | "done" | "minimum" | "skipped"; cue: string; minimum_action: string;
+  duration_minutes: number; minimum_minutes: number;
+}

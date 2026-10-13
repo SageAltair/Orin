@@ -96,6 +96,87 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   ).toBe(true);
   await page.getByLabel("Toggle light or dark theme").click();
   await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page
+    .getByRole("button", { name: "Open navigation", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Opportunities", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Capture opportunity", exact: true })
+    .click();
+  await page.getByLabel("Opportunity title").fill("Creative collaboration");
+  await page.getByLabel("Small next action").fill("Read the brief");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Creative collaboration", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath("opportunities-mobile.png"),
+  });
+  await page
+    .getByRole("button", { name: "Consider a risk", exact: true })
+    .click();
+  await page.getByLabel("Risk title").fill("Capacity clash");
+  await page
+    .getByLabel("Response plan")
+    .fill("Agree a smaller first deliverable");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await page.getByRole("tab", { name: "Risk register" }).click();
+  await expect(
+    page.getByRole("button", { name: "Capacity clash", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Open navigation", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "Routines", exact: true }).click();
+  await page.getByRole("button", { name: "New routine", exact: true }).click();
+  await page.getByLabel("Routine title").fill("Gentle beginning");
+  await page.getByLabel("Minimum action").fill("Open my notebook");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "Save", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Gentle beginning", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Minimum counts", exact: true })
+    .click();
+  await expect(
+    page.getByText("Minimum version counts. You showed up."),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath("routines-mobile.png"),
+  });
+  await page
+    .getByRole("button", { name: "Show calendar", exact: true })
+    .click();
+  await expect(
+    page
+      .getByRole("button", {
+        name: "Open routine ↻ Gentle beginning",
+        exact: true,
+      })
+      .first(),
+  ).toBeVisible();
 });
 
 test("unsaved notes flush on switching and conflicts retain a recoverable local draft", async ({
@@ -121,7 +202,9 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("Initial text");
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+    "Initial text",
+  );
   await page
     .getByLabel("Content", { exact: true })
     .fill("Saved before navigation.");
@@ -129,7 +212,9 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /Second note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("A second thought");
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+    "A second thought",
+  );
   const saved = await (
     await page.request.get(
       `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
@@ -141,7 +226,9 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("Saved before navigation.");
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+    "Saved before navigation.",
+  );
   await page.request.patch(
     `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
     {

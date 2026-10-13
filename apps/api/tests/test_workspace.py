@@ -123,7 +123,7 @@ def test_knowledge_documents_versions_links_search_and_exclusion(client: TestCli
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["pinned_capabilities"]
     assert client.delete("/api/v1/environment/preferences").status_code == 204
     assert client.get("/api/v1/environment/preferences").json() == []
-    assert client.get("/api/v1/users/me/preferences").json()["visible_capabilities"] == ["activity", "calendar", "focus", "home", "memories", "projects", "tasks"]
+    assert client.get("/api/v1/users/me/preferences").json()["visible_capabilities"] == ["activity", "calendar", "focus", "home", "memories", "opportunities", "projects", "tasks"]
 
 
 def test_knowledge_intelligence_is_evidence_linked_filtered_and_actionable(client: TestClient) -> None:

@@ -1051,3 +1051,70 @@ class Notification(CreatedAtMixin, Base):
     message: Mapped[str] = mapped_column(String(500), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Opportunity(TimestampMixin, Base):
+    __tablename__ = "opportunities"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    task_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240))
+    category: Mapped[str] = mapped_column(String(32), default="other")
+    stage: Mapped[str] = mapped_column(String(24), default="inbox")
+    description: Mapped[str] = mapped_column(Text, default="")
+    source_url: Mapped[str] = mapped_column(String(2000), default="")
+    contact: Mapped[str] = mapped_column(String(240), default="")
+    next_action: Mapped[str] = mapped_column(String(240), default="")
+    decision_notes: Mapped[str] = mapped_column(Text, default="")
+    deadline: Mapped[date | None] = mapped_column(Date)
+    review_on: Mapped[date | None] = mapped_column(Date)
+    value: Mapped[int] = mapped_column(Integer, default=3)
+    fit: Mapped[int] = mapped_column(Integer, default=3)
+    effort: Mapped[int] = mapped_column(Integer, default=3)
+
+
+class Risk(TimestampMixin, Base):
+    __tablename__ = "risks"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    opportunity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("opportunities.id", ondelete="SET NULL"))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
+    title: Mapped[str] = mapped_column(String(240))
+    likelihood: Mapped[int] = mapped_column(Integer, default=3)
+    impact: Mapped[int] = mapped_column(Integer, default=3)
+    status: Mapped[str] = mapped_column(String(24), default="open")
+    response: Mapped[str] = mapped_column(String(24), default="reduce")
+    trigger: Mapped[str] = mapped_column(String(500), default="")
+    mitigation: Mapped[str] = mapped_column(Text, default="")
+    review_on: Mapped[date | None] = mapped_column(Date)
+
+
+class Routine(TimestampMixin, Base):
+    __tablename__ = "routines"
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(240))
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    weekdays: Mapped[list[int]] = mapped_column(JSON, default=lambda: list(range(7)))
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    time_of_day: Mapped[str] = mapped_column(String(5), default="09:00")
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    minimum_minutes: Mapped[int] = mapped_column(Integer, default=2)
+    cue: Mapped[str] = mapped_column(String(500), default="")
+    steps: Mapped[str] = mapped_column(Text, default="")
+    minimum_action: Mapped[str] = mapped_column(String(500), default="")
+    reward: Mapped[str] = mapped_column(String(500), default="")
+    reminder_minutes: Mapped[int | None] = mapped_column(Integer)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class RoutineCheckin(TimestampMixin, Base):
+    __tablename__ = "routine_checkins"
+    __table_args__ = (UniqueConstraint("routine_id", "day", name="uq_routine_checkin_day"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    routine_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("routines.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(16))
