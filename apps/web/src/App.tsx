@@ -10,6 +10,7 @@ import {
   Timer,
 } from "lucide-react";
 import { lazy, Suspense } from "react";
+const NotificationPreferencesPanel = lazy(() => import("./NotificationPreferences").then(m => ({default:m.NotificationPreferencesPanel})));
 const OpportunityWorkspace = lazy(() => import("./OpportunityWorkspace").then(m => ({default: m.OpportunityWorkspace})));
 const WritingStudio = lazy(() =>
   import("./WritingStudio").then((module) => ({
@@ -1434,7 +1435,7 @@ export default function App() {
               <MessageCircle size={15} />
               Ask Orin
             </button>
-            <NotificationCenter />
+            <NotificationCenter onOpen={(category,id) => {if(category === "tasks" && id) openTask(id); else if(category === "projects" && id) openProject(id); else setPage(category === "calendar" || category === "routines" ? "calendar" : category === "opportunities" || category === "risks" ? "opportunities" : category === "writing" ? "memories" : "settings");}} />
             <span className="status-indicator">
               <span />
               {loadError
@@ -1492,6 +1493,7 @@ export default function App() {
                 user={user}
                 onUpdated={(updated) => setUser(updated)}
               />
+              <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
               <AccountPrivacy userId={user.id} />
               <DeviceSettings onApprovalCreated={refreshApprovals} />
               <WorkspaceSettings

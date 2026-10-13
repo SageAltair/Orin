@@ -44,6 +44,10 @@ Use `BACKGROUND_WORKER_ENABLED=true` for durable analysis recovery and reminders
 
 Opportunities captures possibilities, tracks decisions and links practical next actions to Tasks. Its Risk register records warning signs and response plans. Calendar routines repeat on chosen weekdays with timezone-aware schedules, in-app reminders, minimum versions and reversible check-ins. See [feature details and evidence](docs/opportunities-and-routines.md).
 
+## Intelligent notifications
+
+Settings → Notifications & follow-up controls automatic reminders for tasks, scheduled work, project/milestone dates, calendar/routines, reviews, approvals and failures. Optional persistent follow-up has quiet hours, snooze, acknowledgement and repeat limits. Browser alerts/audio require explicit opt-in and Orin open; device silent/DND settings remain in control. See [notification behavior and limits](docs/intelligent-notifications.md).
+
 ## Verification and production
 
 Install Python dependencies with the resolved `apps/api/requirements-dev.lock`, then install API/worker packages with `--no-deps`. Frontend checks use `npm ci` and the committed npm lockfile. Install Chromium using `npx playwright install chromium` before browser tests.

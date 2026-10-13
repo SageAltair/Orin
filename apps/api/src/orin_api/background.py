@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from orin_api.config import Settings
 from orin_api.database import SessionLocal
+from orin_api.notifications import emit, notification_tick
 from orin_api.planning_domain import occurrence, dates
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
@@ -56,8 +57,7 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 continue
             try:
                 with session.begin_nested():
-                    session.add(Notification(user_id=event.user_id, event_id=event.id, delivery_key=key,
-                        title=event.title, message="Your calendar event is coming up.", due_at=due))
+                    emit(session, user_id=event.user_id, event_id=event.id, source_id=event.id, key=key, category="calendar", title=event.title, message="Your calendar event is coming up.", due=due)
                     session.flush()
             except IntegrityError:
                 pass  # Another API instance delivered the same reminder.
@@ -78,11 +78,11 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                     continue
                 try:
                     with session.begin_nested():
-                        session.add(Notification(user_id=routine.user_id, delivery_key=key, title=routine.title,
-                            message=routine.cue or "Your routine is ready. The minimum version counts.", due_at=due))
+                        emit(session, user_id=routine.user_id, source_id=routine.id, key=key, category="routines", title=routine.title, message=routine.cue or "Your routine is ready. The minimum version counts.", due=due)
                         session.flush()
                 except IntegrityError:
                     pass
+        notification_tick(session, current)
         jobs = session.scalars(select(KnowledgeExtractionJob.id).where(
             KnowledgeExtractionJob.status == "queued"
         ).order_by(KnowledgeExtractionJob.created_at).limit(4)).all()

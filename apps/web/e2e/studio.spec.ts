@@ -29,6 +29,7 @@ async function account(page: Page) {
 test("Writing connects ideas, notes, outlines and cards across reload and phone layouts", async ({
   page,
 }) => {
+  test.setTimeout(90000);
   const headers = await account(page);
   const project = await (
     await page.request.post("http://localhost:8100/api/v1/projects", {
@@ -177,6 +178,70 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
       })
       .first(),
   ).toBeVisible();
+  // A real due task triggers a durable reminder. Persistent mode requires an explicit saved choice.
+  await page.request.post("http://localhost:8100/api/v1/tasks", {
+    headers,
+    data: {
+      title: "Review notification delivery",
+      due_at: new Date().toISOString(),
+    },
+  });
+  await expect
+    .poll(
+      async () => {
+        const rows = await (
+          await page.request.get("http://localhost:8100/api/v1/notifications", {
+            headers,
+          })
+        ).json();
+        return rows.some(
+          (r: { title: string }) => r.title === "Review notification delivery",
+        );
+      },
+      { timeout: 25000 },
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole("complementary", { name: "Persistent follow-up" }),
+  ).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Open navigation", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const notificationSettings = page.getByRole("region", {
+    name: "Notification preferences",
+  });
+  await notificationSettings
+    .getByRole("checkbox", { name: /Enable stubborn mode/ })
+    .check();
+  await notificationSettings
+    .getByRole("button", { name: "Save notification preferences", exact: true })
+    .click();
+  const followup = page.getByRole("complementary", {
+    name: "Persistent follow-up",
+  });
+  await expect(followup).toContainText("Review notification delivery");
+  await followup
+    .getByRole("button", { name: "Snooze 15 min", exact: true })
+    .click();
+  await expect(followup).toHaveCount(0);
+  await page.getByRole("button", { name: /^Reminders/ }).click();
+  await page
+    .getByRole("button", {
+      name: "Mark Review notification delivery read",
+      exact: true,
+    })
+    .click();
+  const inbox = await (
+    await page.request.get("http://localhost:8100/api/v1/notifications", {
+      headers,
+    })
+  ).json();
+  expect(
+    inbox.find(
+      (r: { title: string }) => r.title === "Review notification delivery",
+    ).read_at,
+  ).toBeTruthy();
 });
 
 test("unsaved notes flush on switching and conflicts retain a recoverable local draft", async ({

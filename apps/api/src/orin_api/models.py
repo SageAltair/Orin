@@ -1052,6 +1052,32 @@ class Notification(CreatedAtMixin, Base):
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    category: Mapped[str] = mapped_column(String(32), default="calendar", server_default="calendar")
+    source_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True))
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attention_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    repeats: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class NotificationPreferences(TimestampMixin, Base):
+    __tablename__ = "notification_preferences"
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    categories: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["calendar","routines","tasks","projects","opportunities","risks","approvals","jobs","writing"])
+    persistent: Mapped[bool] = mapped_column(Boolean, default=False)
+    repeat_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    max_repeats: Mapped[int] = mapped_column(Integer, default=3)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+    quiet_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    quiet_start: Mapped[str] = mapped_column(String(5), default="22:00")
+    quiet_end: Mapped[str] = mapped_column(String(5), default="07:00")
+    respect_focus: Mapped[bool] = mapped_column(Boolean, default=True)
+    browser_alerts: Mapped[bool] = mapped_column(Boolean, default=False)
+    sound: Mapped[bool] = mapped_column(Boolean, default=False)
+    repeat_day: Mapped[date | None] = mapped_column(Date)
+    repeats_today: Mapped[int] = mapped_column(Integer, default=0)
+
 
 class Opportunity(TimestampMixin, Base):
     __tablename__ = "opportunities"
