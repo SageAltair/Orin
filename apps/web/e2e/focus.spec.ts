@@ -13,6 +13,7 @@ async function setupFocus(page: Page) {
   ];
   let settings: Record<string, unknown> = { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false, check_in_interval: 15 };
   const plan = () => ({ day_key: "2026-10-10", energy_level: null, tasks: task ? [{ ...task, is_anchor: true, today_position: 0 }] : [] });
+  let workspaceTheme = "light";
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
@@ -54,7 +55,7 @@ async function setupFocus(page: Page) {
     }
     if (pathname === "/api/v1/focus/now/drift" && method === "POST") return route.fulfill({ status: 201, json: { id: "drift-1" } });
     if (pathname === "/api/v1/focus/now/complete" && method === "POST") { task = null; session = null; return route.fulfill({ json: { task: null, focus_session: null, day_key: "2026-10-10", energy_level: "medium", empty_state: true } }); }
-    if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
+    if (pathname === "/api/v1/users/me/preferences") { if (method === "PUT" || method === "PATCH") workspaceTheme = (await route.request().postDataJSON()).theme ?? workspaceTheme; return route.fulfill({ json: { density: "comfortable", theme: workspaceTheme, locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } }); }
     if (pathname.endsWith("/tasks") || pathname.endsWith("/projects") || pathname.endsWith("/commands") || pathname.endsWith("/conversations")) return route.fulfill({ json: [] });
     if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname === "/api/v1/memories" || pathname === "/api/v1/approvals" || pathname === "/api/v1/devices") return route.fulfill({ json: [] });
@@ -251,7 +252,7 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
   await setupFocus(page); await page.goto("/"); await signIn(page);
   const focusNav = page.getByRole("navigation", { name: "Focus navigation" });
   await focusNav.getByRole("button", { name: "Browse" }).click();
-  await expect(page.getByRole("heading", { name: "Find what you need." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your tasks, in view." })).toBeVisible();
   await expect(page.getByText("Ask the team about the venue")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
   await expect(page.getByText("Review the project outline")).toBeVisible();
@@ -260,4 +261,15 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
   await expect(page.getByText("Prepare next week's notes")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
   await expect(page.getByText("Send the approved update")).toBeVisible();
+  await expect(page.locator(".task-workspace-heading").getByRole("heading", {name:"Tasks", exact:true})).toBeVisible();
+  expect(await focusNav.evaluate(el => getComputedStyle(el).position)).toBe("static");
+  await page.screenshot({path:test.info().outputPath("tasks-desktop.png")});
+  await page.emulateMedia({reducedMotion:"reduce"});
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByLabel("Toggle light or dark theme").click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.screenshot({path:test.info().outputPath("tasks-mobile-dark.png")});
+
 });

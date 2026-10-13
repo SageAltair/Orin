@@ -29,7 +29,7 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
     finally { setBusyId(""); }
   };
   return <section className="focus-card focus-task-collection" aria-labelledby="task-collection-heading">
-    <span className="focus-eyebrow">YOUR TASKS</span><h1 id="task-collection-heading">Find what you need.</h1>
+    <span className="focus-eyebrow">YOUR TASKS</span><h1 id="task-collection-heading">Your tasks, in view.</h1>
     <nav className="focus-task-views" aria-label="Task views">{views.map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>{label}<span>{filterTasksForView(tasks, id, "").length}</span></button>)}</nav>
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label><input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Retry</button></p>}
