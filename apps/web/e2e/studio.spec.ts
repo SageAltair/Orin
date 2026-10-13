@@ -121,6 +121,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("Initial text");
   await page
     .getByLabel("Content", { exact: true })
     .fill("Saved before navigation.");
@@ -128,6 +129,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /Second note/ })
     .click();
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("A second thought");
   const saved = await (
     await page.request.get(
       `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
@@ -139,6 +141,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
+  await expect(page.getByLabel("Content", { exact: true })).toHaveValue("Saved before navigation.");
   await page.request.patch(
     `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
     {
