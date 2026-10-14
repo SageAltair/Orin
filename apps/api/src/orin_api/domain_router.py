@@ -15,10 +15,11 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
-from orin_api.ai import AITaskType, AIInterpreter, AIProviderError, IntentName, ModelSelector, create_provider
+from orin_api.ai import AITaskType, AIInterpreter, AIProviderError, IntentName, ModelSelector, create_provider, create_provider_from_config
 from orin_api.config import Settings, get_settings
 from orin_api.product_context import needs_product_context, product_context_for_prompt
 from orin_api.database import get_session
+from orin_api.integration_secrets import IntegrationSecretError, decrypt_credential
 from orin_api.models import (
     Activity,
     ActivityType,
@@ -33,6 +34,8 @@ from orin_api.models import (
     CommandStatus,
     Approval,
     ApprovalStatus,
+    AIModelConfiguration,
+    AIProviderConnection,
     EnvironmentPreference,
     ExecutionAudit,
     FocusSession,
@@ -288,10 +291,35 @@ def submit_command(
             activity_type=ActivityType.COMMAND_RECEIVED, summary="Command received",
             command_id=command.id, correlation_id=str(command.id), source="command_api",
             idempotency_key=f"command.received:{command.id}")
-        if not settings.ai_provider or not settings.ai_model:
-            raise AIProviderError("AI command interpretation is not configured")
-        model = ModelSelector(settings.ai_model).select(AITaskType.COMMAND_INTERPRETATION)
-        interpreter = AIInterpreter(create_provider(settings), model)
+        configured_model = None
+        if data.model_configuration_id is not None:
+            configured_model = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
+                AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
+                AIModelConfiguration.id == data.model_configuration_id, AIModelConfiguration.user_id == user.id,
+                AIModelConfiguration.enabled.is_(True), AIProviderConnection.enabled.is_(True))).first()
+            if configured_model is None:
+                raise AIProviderError("The selected AI model is unavailable", category="model_unavailable")
+        else:
+            configured_model = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
+                AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
+                AIModelConfiguration.user_id == user.id, AIModelConfiguration.enabled.is_(True),
+                AIModelConfiguration.is_default.is_(True), AIProviderConnection.enabled.is_(True))).first()
+        if configured_model is not None:
+            model_row, connection = configured_model
+            if settings.integration_encryption_key is None:
+                raise AIProviderError("Secure AI settings are unavailable", category="configuration")
+            try:
+                credential = decrypt_credential(settings.integration_encryption_key.get_secret_value(), connection.credential_ciphertext)
+            except IntegrationSecretError as exc:
+                raise AIProviderError("Stored AI credentials cannot be decrypted", category="configuration") from exc
+            model = model_row.model_id
+            interpreter = AIInterpreter(create_provider_from_config(
+                connection.provider, credential, model, account_id=connection.account_id), model)
+        else:
+            if not settings.ai_provider or not settings.ai_model:
+                raise AIProviderError("AI command interpretation is not configured")
+            model = ModelSelector(settings.ai_model).select(AITaskType.COMMAND_INTERPRETATION)
+            interpreter = AIInterpreter(create_provider(settings), model)
         prior_commands = session.scalars(select(Command).where(
             Command.user_id == user.id, Command.conversation_id == conversation.id,
             Command.id != command.id
@@ -354,6 +382,11 @@ def submit_command(
             "conversation_history": [{"user": row.text, "assistant": row.response_message}
                                     for row in prior_commands],
         }
+        if data.interface_context is not None:
+            active_context["interface"] = {
+                **data.interface_context.model_dump(),
+                "trust": "User-interface state only; re-check authorization and records before every action.",
+            }
         if _needs_calendar_context(data.text):
             active_context["calendar"] = _calendar_context(session, user, datetime.now(timezone.utc))
         recent_user_messages = [row.text for row in prior_commands]

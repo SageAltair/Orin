@@ -210,12 +210,23 @@ class ActivityRead(BaseModel):
     created_at: datetime
 
 
+class InterfaceContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+    active_dialog: Annotated[str, StringConstraints(strip_whitespace=True, max_length=80)] | None = None
+    visible_controls: list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=80)]] = Field(default_factory=list, max_length=12)
+    unsaved_changes: bool = False
+
+
 class CommandCreate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
     conversation_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
+    model_configuration_id: uuid.UUID | None = None
+    interface_context: InterfaceContext | None = None
 
 
 class CommandResult(BaseModel):

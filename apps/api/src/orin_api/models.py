@@ -1000,6 +1000,43 @@ class IntegrationConnection(TimestampMixin, Base):
     last_successful_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class AIProviderConnection(TimestampMixin, Base):
+    """A user-owned AI credential. The plaintext credential is never persisted."""
+    __tablename__ = "ai_provider_connections"
+    __table_args__ = (
+        UniqueConstraint("user_id", "provider", name="uq_ai_provider_connection_user_provider"),
+        Index("ix_ai_provider_connections_user_enabled", "user_id", "enabled"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    credential_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_hint: Mapped[str] = mapped_column(String(16), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String(160))
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_test_status: Mapped[str | None] = mapped_column(String(24))
+
+
+class AIModelConfiguration(TimestampMixin, Base):
+    __tablename__ = "ai_model_configurations"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "model_id", name="uq_ai_model_connection_model"),
+        Index("ix_ai_model_configurations_user_default", "user_id", "is_default"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    connection_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("ai_provider_connections.id", ondelete="CASCADE"), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(240), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    capabilities: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+
+
 class IntegrationOAuthState(CreatedAtMixin, Base):
     __tablename__ = "integration_oauth_states"
     __table_args__ = (
