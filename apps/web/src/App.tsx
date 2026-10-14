@@ -790,7 +790,7 @@ export default function App() {
       .finally(() => setAuthReady(true));
   }, []);
   useEffect(() => {
-    const expire = () => setUser(null);
+    const expire = () => window.location.reload();
     window.addEventListener("orin:session-expired", expire);
     return () => window.removeEventListener("orin:session-expired", expire);
   }, []);
@@ -1386,7 +1386,7 @@ export default function App() {
               className="logout-button"
               aria-label="Sign out"
               onClick={() => {
-                logout().finally(() => setUser(null));
+                logout().finally(() => window.location.reload());
               }}
             >
               <LogOut size={15} />
@@ -1727,7 +1727,7 @@ export default function App() {
                   <FocusExperience
                     name={user.display_name}
                     onSignOut={() => {
-                      logout().finally(() => setUser(null));
+                      logout().finally(() => window.location.reload());
                     }}
                     embedded
                     onScheduleTask={scheduleTask}

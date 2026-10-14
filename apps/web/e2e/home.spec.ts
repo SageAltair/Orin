@@ -282,6 +282,16 @@ test("home shows the personal dashboard and offers Ask Orin", async ({ page }) =
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("placeholder", "Ask Orin what you need");
 });
 
+test("signing out reloads the workspace before another account can authenticate", async ({ page }) => {
+  await mockApi(page, true, true);
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.getByText("Write project brief").first()).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).first().click();
+  await expect(page.getByRole("heading", { name: "Welcome to Orin" })).toBeVisible();
+  await expect(page.getByText("Write project brief")).toHaveCount(0);
+});
+
 test("workspace preferences control visible capabilities", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
