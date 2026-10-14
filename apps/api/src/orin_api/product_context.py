@@ -25,6 +25,7 @@ PRODUCT_INVENTORY = {
     },
     "screens": [
         {"name": "Home", "status": "implemented", "evidence": "App.tsx: workspace greeting, open tasks, recent sessions, active projects, empty states"},
+        {"name": "Orin Workspace", "status": "implemented", "evidence": "OrinWorkspace.tsx; persistent conversations, live context, templates, model selection"},
         {"name": "Projects", "status": "implemented", "evidence": "ProjectWorkspace.tsx; project API routes"},
         {"name": "Tasks", "status": "implemented", "evidence": "App.tsx task list/editor; task API routes"},
         {"name": "Activity", "status": "implemented", "evidence": "ActivityTimeline.tsx; activity API routes"},

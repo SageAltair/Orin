@@ -80,6 +80,7 @@ import {
 import { DeviceSettings } from "./DeviceSettings";
 import { AIModelsSettings, type AIModel } from "./AIModelsSettings";
 import { TemplateLibrary } from "./TemplateLibrary";
+import { OrinWorkspace } from "./OrinWorkspace";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -705,6 +706,7 @@ function AuthScreen({
 
 const navigationIcons: Record<CapabilityId, typeof Home> = {
   home: Home,
+  orin: MessageCircle,
   opportunities: Compass,
   calendar: CalendarDays,
   projects: FolderOpen,
@@ -1165,6 +1167,7 @@ export default function App() {
     setSearchText("");
     setHistoryOpen(false);
     setSearchOpen(false);
+    setTemplateOpen(false);
   };
   const openConversation = async (id: string, commandId?: string) => {
     setConversationId(id);
@@ -1531,6 +1534,32 @@ export default function App() {
               <GitHubSettings projects={projects} />
               <AIModelsSettings />
             </>
+          ) : page === "orin" ? (
+            <OrinWorkspace
+              command={command}
+              setCommand={setCommand}
+              submitCommand={submitCommand}
+              busy={commandBusy}
+              message={commandMessage}
+              turns={chatTurns}
+              conversations={conversations}
+              conversationId={conversationId}
+              openConversation={openConversation}
+              newConversation={startNewConversation}
+              projects={projects}
+              tasks={tasks}
+              projectId={activeProjectId}
+              setProjectId={setActiveProjectId}
+              taskId={activeTaskId}
+              setTaskId={setActiveTaskId}
+              models={aiModels}
+              modelId={selectedModelId}
+              setModelId={setSelectedModelId}
+              starters={contextualStarters}
+              templatesOpen={templateOpen}
+              setTemplatesOpen={setTemplateOpen}
+              renderAnswer={(result) => <CommandAnswer result={result} />}
+            />
           ) : page === "home" ? (
             <>
               <div className="greeting">

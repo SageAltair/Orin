@@ -1,4 +1,4 @@
-export type CapabilityId = "home" | "opportunities" | "calendar" | "projects" | "tasks" | "activity" | "memories" | "focus" | "settings";
+export type CapabilityId = "home" | "orin" | "opportunities" | "calendar" | "projects" | "tasks" | "activity" | "memories" | "focus" | "settings";
 export type Density = "comfortable" | "compact";
 export type Theme = "light" | "dark" | "system";
 
@@ -23,6 +23,7 @@ export interface Capability {
 // Only capabilities currently implemented in this foundation are granted.
 export const capabilities: Capability[] = [
   { id: "home", label: "Home", description: "Your current priorities", icon: "⌂" },
+  { id: "orin", label: "Orin", description: "Plan, ask, and continue work", icon: "✦" },
   { id: "calendar", label: "Calendar", description: "See your commitments and plans", icon: "▦" },
   { id: "opportunities", label: "Opportunities", description: "Explore possibilities and manage risks", icon: "O" },
   { id: "projects", label: "Projects", description: "Organize work by outcome", icon: "▦" },
@@ -34,7 +35,7 @@ export const capabilities: Capability[] = [
 ];
 
 export const defaultPreferences: UserPreferences = {
-  visibleCapabilities: ["home", "calendar", "opportunities", "tasks", "projects", "activity", "memories", "focus"],
+  visibleCapabilities: ["home", "orin", "calendar", "opportunities", "tasks", "projects", "activity", "memories", "focus"],
   hiddenCapabilities: ["settings"],
   minimizedCapabilities: [],
   pinnedCapabilities: ["home", "tasks"],

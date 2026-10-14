@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import App, { CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
 import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
+import { OrinWorkspace } from "./OrinWorkspace";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
-    expect(getNavigationCapabilities(capabilities, defaultPreferences).map(({ id }) => id)).toEqual(["home", "tasks", "calendar", "opportunities", "projects", "activity", "memories", "focus"]);
+    expect(getNavigationCapabilities(capabilities, defaultPreferences).map(({ id }) => id)).toEqual(["home", "tasks", "orin", "calendar", "opportunities", "projects", "activity", "memories", "focus"]);
   });
 
   it("orders pinned capabilities first and never exposes ungranted capabilities", () => {
@@ -19,6 +20,14 @@ describe("capability navigation", () => {
     const markup = renderToStaticMarkup(<App />);
     expect(markup).toContain("Checking your session");
     expect(markup).not.toContain("Morgan");
+  });
+
+  it("renders the full Orin workspace with session and context controls", () => {
+    const markup = renderToStaticMarkup(<OrinWorkspace command="" setCommand={() => undefined} submitCommand={() => undefined} busy={false} message="" turns={[]} conversations={[]} conversationId={null} openConversation={async () => undefined} newConversation={() => undefined} projects={[]} tasks={[]} projectId="" setProjectId={() => undefined} taskId="" setTaskId={() => undefined} models={[]} modelId="" setModelId={() => undefined} starters={[{ label: "Plan today", prompt: "Plan today" }]} templatesOpen={false} setTemplatesOpen={() => undefined} renderAnswer={() => null} />);
+    expect(markup).toContain('aria-label="Orin Workspace"');
+    expect(markup).toContain("Recent work");
+    expect(markup).toContain("Workspace context");
+    expect(markup).toContain("Plan today");
   });
 });
 
