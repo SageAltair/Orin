@@ -42,6 +42,7 @@ PRODUCT_INVENTORY = {
         {"name": "GitHub connection", "status": "implemented, configuration-dependent", "evidence": "GitHubSettings.tsx and integration_router.py; requires configured OAuth credentials and user connection"},
         {"name": "Computer worker actions", "status": "implemented, permission and device-dependent", "evidence": "worker_router.py and worker app; queued actions use approval and an enrolled worker"},
         {"name": "AI interpretation", "status": "implemented, configuration-dependent", "evidence": "AI providers in ai.py; requires valid provider credentials and model"},
+        {"name": "Contextual workflow templates", "status": "implemented", "evidence": "TemplateLibrary.tsx and template_router.py; built-in and user-authored page-aware workflows"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",
