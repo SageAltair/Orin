@@ -1037,6 +1037,26 @@ class AIModelConfiguration(TimestampMixin, Base):
     capabilities: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
 
+class AssistantTemplate(TimestampMixin, Base):
+    __tablename__ = "assistant_templates"
+    __table_args__ = (
+        UniqueConstraint("user_id", "slug", name="uq_assistant_template_user_slug"),
+        Index("ix_assistant_templates_user_category", "user_id", "category"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[str] = mapped_column(String(500), nullable=False)
+    category: Mapped[str] = mapped_column(String(40), nullable=False)
+    prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    compatible_pages: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
 class IntegrationOAuthState(CreatedAtMixin, Base):
     __tablename__ = "integration_oauth_states"
     __table_args__ = (

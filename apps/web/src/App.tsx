@@ -45,6 +45,7 @@ import {
   Search,
   ListPlus,
   MoreHorizontal,
+  Library,
 } from "lucide-react";
 import {
   ApiError,
@@ -78,6 +79,8 @@ import {
 } from "./capabilities";
 import { DeviceSettings } from "./DeviceSettings";
 import { AIModelsSettings, type AIModel } from "./AIModelsSettings";
+import { TemplateLibrary } from "./TemplateLibrary";
+import { OrinWorkspace } from "./OrinWorkspace";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -703,6 +706,7 @@ function AuthScreen({
 
 const navigationIcons: Record<CapabilityId, typeof Home> = {
   home: Home,
+  orin: MessageCircle,
   opportunities: Compass,
   calendar: CalendarDays,
   projects: FolderOpen,
@@ -755,6 +759,7 @@ export default function App() {
   const [searchError, setSearchError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -1162,6 +1167,7 @@ export default function App() {
     setSearchText("");
     setHistoryOpen(false);
     setSearchOpen(false);
+    setTemplateOpen(false);
   };
   const openConversation = async (id: string, commandId?: string) => {
     setConversationId(id);
@@ -1528,6 +1534,32 @@ export default function App() {
               <GitHubSettings projects={projects} />
               <AIModelsSettings />
             </>
+          ) : page === "orin" ? (
+            <OrinWorkspace
+              command={command}
+              setCommand={setCommand}
+              submitCommand={submitCommand}
+              busy={commandBusy}
+              message={commandMessage}
+              turns={chatTurns}
+              conversations={conversations}
+              conversationId={conversationId}
+              openConversation={openConversation}
+              newConversation={startNewConversation}
+              projects={projects}
+              tasks={tasks}
+              projectId={activeProjectId}
+              setProjectId={setActiveProjectId}
+              taskId={activeTaskId}
+              setTaskId={setActiveTaskId}
+              models={aiModels}
+              modelId={selectedModelId}
+              setModelId={setSelectedModelId}
+              starters={contextualStarters}
+              templatesOpen={templateOpen}
+              setTemplatesOpen={setTemplateOpen}
+              renderAnswer={(result) => <CommandAnswer result={result} />}
+            />
           ) : page === "home" ? (
             <>
               <div className="greeting">
@@ -1925,6 +1957,16 @@ export default function App() {
                 >
                   <Plus size={17} />
                 </button>
+                <button
+                  type="button"
+                  className="toolbar-icon"
+                  aria-label="Template library"
+                  title="Template library"
+                  aria-expanded={templateOpen}
+                  onClick={() => { setTemplateOpen(value => !value); setHistoryOpen(false); setSearchOpen(false); }}
+                >
+                  <Library size={17} />
+                </button>
                 <details className="chat-more-actions">
                   <summary
                     aria-label="More session actions"
@@ -2001,6 +2043,7 @@ export default function App() {
                 </button>
               </div>
             </header>
+            {templateOpen && <TemplateLibrary page={page} onClose={() => setTemplateOpen(false)} onUse={(prompt) => { setCommand(prompt); setTemplateOpen(false); window.setTimeout(() => commandInputRef.current?.focus(), 0); }} />}
             {historyOpen && (
               <section
                 className="chat-discovery-panel"
