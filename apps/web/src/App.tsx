@@ -77,6 +77,7 @@ import {
   type UserPreferences,
 } from "./capabilities";
 import { DeviceSettings } from "./DeviceSettings";
+import { AIModelsSettings, type AIModel } from "./AIModelsSettings";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -730,6 +731,8 @@ export default function App() {
   const [command, setCommand] = useState("");
   const [commandMessage, setCommandMessage] = useState("");
   const [commandBusy, setCommandBusy] = useState(false);
+  const [aiModels, setAiModels] = useState<AIModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(() =>
     typeof window === "undefined"
@@ -768,6 +771,12 @@ export default function App() {
     () => getNavigationCapabilities(capabilities, preferences),
     [preferences],
   );
+  const contextualStarters = useMemo(() => {
+    if (page === "projects") return [{ label: "Review this project", prompt: "Summarize this project's status and suggest the next action" }, { label: "Find project risks", prompt: "Review this project for blockers and risks" }, { label: "Plan next steps", prompt: "Propose the next three steps for this project" }];
+    if (page === "tasks") return [{ label: "Choose what to do", prompt: "Propose my three tasks for today" }, { label: "Make a task smaller", prompt: "Break down the selected task into a small first step" }, { label: "Review overdue work", prompt: "Review my overdue tasks and recommend what to do" }];
+    if (page === "calendar") return [{ label: "Find free time", prompt: "Find free time on my calendar" }, { label: "Plan today", prompt: "Help me plan today's tasks around my calendar" }, { label: "Review conflicts", prompt: "Check my calendar for conflicts" }];
+    return [{ label: "Create a task", prompt: "Create a task called [task name]" }, { label: "Choose what to do today", prompt: "Propose my three tasks for today" }, { label: "Set my energy", prompt: "Set my energy to low" }];
+  }, [page]);
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     const captureShortcut = (event: KeyboardEvent) => {
@@ -783,6 +792,14 @@ export default function App() {
     window.addEventListener("keydown", captureShortcut);
     return () => window.removeEventListener("keydown", captureShortcut);
   }, []);
+  useEffect(() => {
+    const syncModels = (event?: Event) => {
+      const supplied = (event as CustomEvent<AIModel[]> | undefined)?.detail;
+      const load = supplied ? Promise.resolve(supplied) : request<AIModel[]>("/intelligence/models");
+      void load.then(items => { const available = items.filter(item => item.enabled && item.provider_enabled); setAiModels(available); setSelectedModelId(current => available.some(item => item.id === current) ? current : available.find(item => item.is_default)?.id || available[0]?.id || ""); }).catch(() => setAiModels([]));
+    };
+    syncModels(); window.addEventListener("orin:ai-models-changed", syncModels); return () => window.removeEventListener("orin:ai-models-changed", syncModels);
+  }, [user?.id]);
   useEffect(() => {
     restoreSession()
       .then(setUser)
@@ -1021,6 +1038,13 @@ export default function App() {
           project_id: activeProjectId || null,
           task_id: activeTaskId || null,
           attachment_ids: files.map((file) => file.id),
+          model_configuration_id: selectedModelId || null,
+          interface_context: {
+            page,
+            active_dialog: askOpen ? "ask_orin" : null,
+            visible_controls: ["navigation", "ask_orin", activeProjectId ? "project_context" : "", activeTaskId ? "task_context" : ""].filter(Boolean),
+            unsaved_changes: Boolean(command.trim() || pendingFiles.length),
+          },
         }),
       });
       setConversationId(result.conversation_id ?? conversationId);
@@ -1502,6 +1526,7 @@ export default function App() {
                 onPreferencesChange={savePreferences}
               />
               <GitHubSettings projects={projects} />
+              <AIModelsSettings />
             </>
           ) : page === "home" ? (
             <>
@@ -2196,25 +2221,7 @@ export default function App() {
                     role="group"
                     aria-label="Try an Orin action"
                   >
-                    {[
-                      {
-                        label: "Create a task",
-                        prompt: "Create a task called [task name]",
-                      },
-                      {
-                        label: "Choose what to do today",
-                        prompt: "Propose my three tasks for today",
-                      },
-                      {
-                        label: "Set my energy",
-                        prompt: "Set my energy to low",
-                      },
-                      {
-                        label: "Make a task smaller",
-                        prompt:
-                          "Break down [task name] into a small first step",
-                      },
-                    ].map((item) => (
+                    {contextualStarters.map((item) => (
                       <button
                         type="button"
                         key={item.label}
@@ -2354,6 +2361,14 @@ export default function App() {
                 <Paperclip size={17} />
                 <span className="sr-only">Add attachment</span>
               </label>
+              {aiModels.length > 0 && (
+                <label className="sr-only" htmlFor="ask-model">AI model</label>
+              )}
+              {aiModels.length > 0 && (
+                <select id="ask-model" aria-label="AI model" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)}>
+                  {aiModels.map((model) => <option key={model.id} value={model.id}>{model.display_name}</option>)}
+                </select>
+              )}
               <label className="sr-only" htmlFor="ask-input">
                 Ask Orin
               </label>

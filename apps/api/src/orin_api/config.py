@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ai_provider: str = ""
     ai_model: str = ""
     openai_api_key: str | None = Field(default=None, repr=False)
+    anthropic_api_key: str | None = Field(default=None, repr=False)
     mistral_api_key: str | None = Field(default=None, repr=False)
     google_api_key: str | None = Field(default=None, repr=False)
     openrouter_api_key: str | None = Field(default=None, repr=False)

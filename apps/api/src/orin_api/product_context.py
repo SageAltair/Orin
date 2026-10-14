@@ -74,3 +74,10 @@ def product_context_for_prompt() -> str:
     import json
 
     return json.dumps(PRODUCT_INVENTORY, ensure_ascii=True, separators=(",", ":"))
+
+
+def product_capabilities() -> dict[str, object]:
+    """Return a safe copy for the authenticated capability API."""
+    import copy
+
+    return copy.deepcopy(PRODUCT_INVENTORY)

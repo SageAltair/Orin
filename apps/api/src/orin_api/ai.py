@@ -243,6 +243,7 @@ class AIProvider(Protocol):
 
 class ProviderName(StrEnum):
     OPENAI = "openai"
+    ANTHROPIC = "anthropic"
     MISTRAL = "mistral"
     GOOGLE = "google"
     OPENROUTER = "openrouter"
@@ -325,6 +326,40 @@ class CerebrasProvider(_OpenAICompatibleProvider): pass
 class CloudflareWorkersAIProvider(_OpenAICompatibleProvider): pass
 
 
+class AnthropicProvider:
+    def __init__(self, config: ProviderConfig):
+        self.config = config
+        self.capabilities = {"streaming": False, "structured_output": True, "json_schema": False, "tool_calling": False}
+
+    def supports_vision(self, model: str) -> bool:
+        return "claude-3" in model.casefold() or "claude-4" in model.casefold()
+
+    def generate(self, *, system: str, user: str, model: str, temperature: float = 0.0, max_tokens: int = 512, images: list[dict[str, str]] | None = None) -> str:
+        content: list[dict[str, Any]] = [{"type": "text", "text": user}]
+        if images:
+            content.extend({"type": "image", "source": {"type": "base64", "media_type": image["mime_type"], "data": image["data"]}} for image in images)
+        response = _post_with_retry(
+            f"{self.config.base_url}/messages", provider="anthropic", model=model, api_key=self.config.api_key,
+            headers={"x-api-key": self.config.api_key, "anthropic-version": "2023-06-01"},
+            json={"model": model, "system": system, "messages": [{"role": "user", "content": content}],
+                  "temperature": temperature, "max_tokens": max_tokens}, timeout=30.0,
+        )
+        try:
+            value = response.json()["content"][0]["text"]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("empty model content")
+            return value
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise _provider_failure("anthropic", model, exc, 1, self.config.api_key) from exc
+
+    def stream(self, *, system: str, user: str, model: str):
+        yield self.generate(system=system, user=user, model=model)
+
+    def structured_output(self, *, system: str, user: str, model: str, schema: dict[str, Any], images: list[dict[str, str]] | None = None) -> str:
+        instruction = f"Return JSON matching this schema exactly: {json.dumps(schema, separators=(',', ':'))}"
+        return self.generate(system=f"{system}\n{instruction}", user=user, model=model, max_tokens=2048, images=images)
+
+
 class GoogleProvider:
     def __init__(self, config: ProviderConfig):
         self.config = config
@@ -381,6 +416,7 @@ class GoogleProvider:
 
 PROVIDER_TYPES = {
     ProviderName.OPENAI: OpenAIProvider,
+    ProviderName.ANTHROPIC: AnthropicProvider,
     ProviderName.MISTRAL: MistralProvider,
     ProviderName.GOOGLE: GoogleProvider,
     ProviderName.OPENROUTER: OpenRouterProvider,
@@ -390,6 +426,28 @@ PROVIDER_TYPES = {
     ProviderName.CLOUDFLARE: CloudflareWorkersAIProvider,
 }
 
+PROVIDER_BASE_URLS = {
+    "openai": "https://api.openai.com/v1", "anthropic": "https://api.anthropic.com/v1",
+    "mistral": "https://api.mistral.ai/v1", "google": "https://generativelanguage.googleapis.com/v1beta",
+    "openrouter": "https://openrouter.ai/api/v1", "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "groq": "https://api.groq.com/openai/v1", "cerebras": "https://api.cerebras.ai/v1",
+}
+
+
+def create_provider_from_config(provider: str, api_key: str, model: str, *, account_id: str | None = None) -> AIProvider:
+    try:
+        name = ProviderName(provider.lower())
+    except ValueError as exc:
+        raise AIProviderError("Configured AI provider is unsupported") from exc
+    if name == ProviderName.CLOUDFLARE:
+        if not account_id:
+            raise AIProviderError("Cloudflare account ID is required for the configured AI provider")
+        base_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1"
+    else:
+        base_url = PROVIDER_BASE_URLS[name.value]
+    MODEL_REGISTRY[f"{name.value}:{model}"] = ModelInfo(provider=name.value, model=model)
+    return PROVIDER_TYPES[name](ProviderConfig(api_key, base_url, model, account_id))
+
 
 def create_provider(settings: Settings) -> AIProvider:
     try:
@@ -397,29 +455,17 @@ def create_provider(settings: Settings) -> AIProvider:
     except ValueError as exc:
         raise AIProviderError("Configured AI provider is unsupported") from exc
     key_by_name = {
-        "openai": settings.openai_api_key, "mistral": settings.mistral_api_key,
+        "openai": settings.openai_api_key, "anthropic": settings.anthropic_api_key, "mistral": settings.mistral_api_key,
         "google": settings.google_api_key, "openrouter": settings.openrouter_api_key,
         "qwen": settings.qwen_api_key, "groq": settings.groq_api_key,
         "cerebras": settings.cerebras_api_key, "cloudflare": settings.cloudflare_api_key,
-    }
-    urls = {
-        "openai": "https://api.openai.com/v1", "mistral": "https://api.mistral.ai/v1",
-        "google": "https://generativelanguage.googleapis.com/v1beta", "openrouter": "https://openrouter.ai/api/v1",
-        "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", "groq": "https://api.groq.com/openai/v1",
-        "cerebras": "https://api.cerebras.ai/v1",
-        "cloudflare": f"https://api.cloudflare.com/client/v4/accounts/{settings.cloudflare_account_id}/ai/v1",
     }
     key = key_by_name[name.value]
     if not key:
         raise AIProviderError("Credentials for the configured AI provider are missing")
     if name == ProviderName.CLOUDFLARE and not settings.cloudflare_account_id:
         raise AIProviderError("Cloudflare account ID is required for the configured AI provider")
-    model = settings.ai_model
-    MODEL_REGISTRY[f"{name.value}:{model}"] = ModelInfo(
-        provider=name.value, model=model, supports_streaming=False,
-        supports_structured_output=True, supports_json_schema=False,
-    )
-    return PROVIDER_TYPES[name](ProviderConfig(key, urls[name.value], model, settings.cloudflare_account_id))
+    return create_provider_from_config(name.value, key, settings.ai_model, account_id=settings.cloudflare_account_id)
 
 
 class IntentName(StrEnum):
