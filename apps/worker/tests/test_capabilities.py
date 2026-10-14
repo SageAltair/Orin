@@ -2,12 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from orin_worker.capabilities import WorkerJob, execute_job
+from orin_worker import capabilities
+from orin_worker.capabilities import WorkerJob, _run_bounded, execute_job
 from orin_worker.client import JobLedger, _verify_signed, _api_url_is_secure, execute_signed_job
 import hashlib
 import hmac
 import json
 import subprocess
+import sys
 
 
 def job(action: str, parameters: dict[str, object], scope: str, **changes: object) -> WorkerJob:
@@ -63,16 +65,25 @@ def test_worker_protects_env_variants_and_symlink_escapes(tmp_path: Path) -> Non
 def test_allowlisted_process_uses_fixed_args_bounded_timeout_and_clean_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setenv("ORIN_WORKER_TOKEN", "must-not-reach-child")
-    def fake_run(argv: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(argv: tuple[str, ...], **kwargs: object) -> dict[str, object]:
         captured.update(argv=argv, **kwargs)
-        return subprocess.CompletedProcess(argv, 0, "clean", "")
-    monkeypatch.setattr(subprocess, "run", fake_run)
+        return {"return_code": 0, "stdout": "clean", "stderr": ""}
+    monkeypatch.setattr(capabilities, "_run_bounded", fake_run)
     output = execute_job(job("run_allowed_command", {"command": "git_status"}, "process.command.execute"), device_id="d1", allowed_roots=(tmp_path,), now=10)
     assert output["stdout"] == "clean"
-    assert captured["shell"] is False
-    assert captured["timeout"] == 120
     assert captured["cwd"] == str(tmp_path.resolve())
     assert "must-not-reach-child" not in captured["env"].values()
+
+
+def test_command_output_and_runtime_are_bounded() -> None:
+    noisy = (sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'x' * 1_100_000)")
+    with pytest.raises(ValueError, match="output exceeds"):
+        _run_bounded(noisy, timeout=10)
+    sleeper = (sys.executable, "-c", "import time; time.sleep(5)")
+    with pytest.raises(TimeoutError, match="time limit"):
+        _run_bounded(sleeper, timeout=0.05)
+    invalid = (sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'good\\xffbad')")
+    assert _run_bounded(invalid, timeout=10)["stdout"] == "good�bad"
 
 
 def test_signed_jobs_tls_requirement_and_durable_replay_ledger(tmp_path: Path) -> None:
@@ -143,15 +154,14 @@ def test_project_sandbox_excludes_credentials_and_live_files(tmp_path, monkeypat
     monkeypatch.setenv("ORIN_WORKER_EXECUTION_IMAGE", "orin-test:verified")
     def run(argv, **kwargs):
         assert "--network=none" in argv and "--read-only" in argv and "--cap-drop=ALL" in argv
-        assert kwargs["shell"] is False
         mount = argv[argv.index("--mount") + 1]
         source = Path(mount.split("src=", 1)[1].split(",", 1)[0])
         assert not (source / ".env").exists()
         assert not (source / "outside-link").exists()
         assert (source / "code.py").is_file()
         assert source != tmp_path
-        return subprocess.CompletedProcess(argv, 0, stdout="passed", stderr="")
-    monkeypatch.setattr(subprocess, "run", run)
+        return {"return_code": 0, "stdout": "passed", "stderr": ""}
+    monkeypatch.setattr(capabilities, "_run_bounded", run)
     result = execute_job(job("run_allowed_command", {"command": "python_tests"}, "process.command.execute"),
                          device_id="d1", allowed_roots=(tmp_path,), now=50)
     assert result["stdout"] == "passed"

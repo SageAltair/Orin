@@ -162,7 +162,7 @@ class ExecutionEngine:
             decide_approval(definition.name, definition.risk_level.value, context.autonomy_mode,
                             definition.requires_approval, context.custom_autonomy).requires_approval
         )
-        if requires_approval:
+        if requires_approval or context.approval_id is not None:
             approval = context.session.get(Approval, context.approval_id) if context.approval_id else None
             valid_approval = (
                 approval is not None
@@ -174,7 +174,7 @@ class ExecutionEngine:
                 and (approval.expires_at is None or (approval.expires_at.replace(tzinfo=timezone.utc) if approval.expires_at.tzinfo is None else approval.expires_at) > datetime.now(timezone.utc))
             )
             if not valid_approval:
-                if approval is not None:
+                if context.approval_id is not None:
                     return self._audit(context, definition.name, definition, inputs, ActionStatus.DENIED, "Approval is invalid or does not match this action.")
                 approval = Approval(
                     command_id=context.command_id,

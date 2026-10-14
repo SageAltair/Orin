@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
+import uuid
 from itertools import islice
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,56 @@ ALLOWED_COMMANDS: dict[str, tuple[str, ...]] = {
 }
 
 _PROTECTED_NAMES = {".ssh", ".aws", ".azure", ".config", "credentials", "secrets", "program files", "program files (x86)", "programdata", "windows", "id_rsa", "id_ed25519"}
+_MAX_COMMAND_OUTPUT_BYTES = 1_000_000
+
+
+def _run_bounded(argv: tuple[str, ...], *, cwd: str | None = None,
+                 env: dict[str, str] | None = None, timeout: float = 120) -> dict[str, Any]:
+    """Run a fixed argv while bounding combined output retained by the host."""
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, shell=False)
+    chunks: dict[str, bytearray] = {"stdout": bytearray(), "stderr": bytearray()}
+    total = 0
+    lock = threading.Lock()
+    overflow = threading.Event()
+
+    def drain(name: str, stream: Any) -> None:
+        nonlocal total
+        while True:
+            chunk = stream.read(8192)
+            if not chunk:
+                return
+            with lock:
+                previous_total = total
+                total += len(chunk)
+                remaining = max(0, _MAX_COMMAND_OUTPUT_BYTES - previous_total)
+                chunks[name].extend(chunk[:remaining])
+                if total > _MAX_COMMAND_OUTPUT_BYTES:
+                    overflow.set()
+                    try:
+                        process.kill()
+                    except OSError:
+                        pass
+                    return
+
+    threads = [threading.Thread(target=drain, args=(name, stream), daemon=True)
+               for name, stream in (("stdout", process.stdout), ("stderr", process.stderr))]
+    for thread in threads:
+        thread.start()
+    try:
+        return_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.wait()
+        raise TimeoutError("Command exceeded the execution time limit") from exc
+    finally:
+        for thread in threads:
+            thread.join(timeout=2)
+    if overflow.is_set():
+        raise ValueError("Command output exceeds the 1 MB limit")
+    return {"return_code": return_code,
+            "stdout": bytes(chunks["stdout"]).decode("utf-8", errors="replace")[:4000],
+            "stderr": bytes(chunks["stderr"]).decode("utf-8", errors="replace")[:1000]}
 
 
 class WorkerJob(BaseModel):
@@ -80,14 +132,20 @@ def _run_project_tests(command_key: str, project_root: Path) -> dict[str, Any]:
                     raise ValueError("Project snapshot exceeds the sandbox size limit")
                 shutil.copyfile(path, destination / name)
         command = ("python", "-m", "pytest", "-q", "-p", "no:cacheprovider") if command_key == "python_tests" else ("npm", "test", "--", "--run")
-        argv = ("docker", "run", "--rm", "--pull=never", "--network=none", "--read-only",
+        container_name = f"orin-job-{uuid.uuid4().hex}"
+        argv = ("docker", "run", "--name", container_name, "--rm", "--pull=never", "--network=none", "--read-only",
                 "--cap-drop=ALL", "--security-opt=no-new-privileges", "--pids-limit=128",
                 "--memory=512m", "--cpus=1", "--user", f"{os.getuid() or 10001}:{os.getgid() or 10001}",
                 "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m", "--env", "PYTHONDONTWRITEBYTECODE=1",
                 "--mount", f"type=bind,src={source},dst=/workspace,readonly", "--workdir=/workspace", image, *command)
         environment = {key: value for key, value in os.environ.items() if key.upper() == "PATH"}
-        completed = subprocess.run(argv, env=environment, capture_output=True, text=True, timeout=120, shell=False, check=False)
-        return {"return_code": completed.returncode, "stdout": completed.stdout[:4000], "stderr": completed.stderr[:1000]}
+        try:
+            return _run_bounded(argv, env=environment)
+        except (TimeoutError, ValueError):
+            subprocess.run(("docker", "rm", "-f", container_name), env=environment,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+                shell=False, check=False)
+            raise
 
 
 def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ...], now: int) -> dict[str, Any]:
@@ -133,6 +191,4 @@ def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ..
         return _run_project_tests(command_key, project_root)
     environment = {key: value for key, value in os.environ.items()
                    if key.upper() in {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}}
-    completed = subprocess.run(argv, cwd=str(project_root), env=environment,
-        capture_output=True, text=True, timeout=120, check=False, shell=False)
-    return {"return_code": completed.returncode, "stdout": completed.stdout[:4000], "stderr": completed.stderr[:1000]}
+    return _run_bounded(argv, cwd=str(project_root), env=environment)

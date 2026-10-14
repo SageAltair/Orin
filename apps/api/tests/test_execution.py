@@ -13,7 +13,7 @@ from orin_api.auth import get_current_user
 from orin_api.database import Base, get_session
 from orin_api.execution import ActionContext, ActionDefinition, ActionRegistry, ActionRequest, ActionStatus, ExecutionEngine, Reversibility, RiskLevel, StrictActionInput
 from orin_api.main import app
-from orin_api.models import Approval, ApprovalStatus, Command, ExecutionAudit, User
+from orin_api.models import Approval, ApprovalStatus, Command, ExecutionAudit, User, UserPreferences
 from orin_api.approval_policy import decide_approval
 from orin_api.config import Settings, get_settings
 
@@ -160,6 +160,20 @@ def test_routes_execute_registered_actions_and_approval_decisions(world: tuple[T
     with sessions() as session:
         approval = session.get(Approval, uuid.UUID(approval_id))
         assert approval and approval.status == ApprovalStatus.REJECTED
+    with sessions.begin() as session:
+        preferences = session.scalar(select(UserPreferences))
+        assert preferences is not None
+        preferences.autonomy_mode = "conservative"
+    policy_pending = client.post("/api/v1/actions", json={"action": "create_project", "inputs": {"name": "Must stay rejected"}})
+    assert policy_pending.json()["status"] == "awaiting_approval"
+    policy_approval_id = policy_pending.json()["execution"]["approval_id"]
+    with sessions.begin() as session:
+        preferences = session.scalar(select(UserPreferences))
+        assert preferences is not None
+        preferences.autonomy_mode = "automatic"
+    policy_rejected = client.post(f"/api/v1/approvals/{policy_approval_id}/decision", json={"approved": False})
+    assert policy_rejected.json()["status"] == "denied"
+    assert all(project["name"] != "Must stay rejected" for project in client.get("/api/v1/projects").json())
     approved_request = client.post("/api/v1/actions", json={"action": "send_notification", "inputs": {"recipient": "user@example.test", "message": "not sent"}})
     approved_id = approved_request.json()["execution"]["approval_id"]
     delivery = client.post(f"/api/v1/approvals/{approved_id}/decision", json={"approved": True})

@@ -621,7 +621,7 @@ def _commit_execution_result(session: Session, command: Command, intent: str | N
         elif result.result.get("entity_type") == "project":
             command.project_id = entity_id
     activity_status = "partial_success" if partial_batch else statuses[result.status]
-    if result.approval_id:
+    if result.status == ActionStatus.PENDING_APPROVAL and result.approval_id:
         add_activity(session, user_id=command.user_id, actor_user_id=command.user_id,
             activity_type=ActivityType.APPROVAL_REQUESTED, summary="Approval requested",
             command_id=command.id, approval_id=result.approval_id, intent=intent,
@@ -895,6 +895,13 @@ def decide_approval(approval_id: uuid.UUID, decision: ApprovalDecision, user: Us
         return CommandResult(command_id=command.id, conversation_id=command.conversation_id, status="approved" if decision.approved else "denied",
             intent="WORKER_ACTION", result={"job_id": str(worker_job.id), "status": worker_job.status.value},
             message="Approved worker job is queued for its registered device." if decision.approved else "Worker job rejected; no work was sent.")
+    if not decision.approved:
+        result = EXECUTION_ENGINE._audit(
+            ActionContext(session=session, user_id=user.id, command_id=command.id,
+                permissions=frozenset(), approval_id=approval.id, command_text=command.text),
+            approval.action_name, None, None, ActionStatus.DENIED, "Action rejected.",
+            approval_id=approval.id)
+        return _commit_execution_result(session, command, approval.action_name.upper(), result)
     ensure_user_preferences(session, user)
     autonomy = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
     result = EXECUTION_ENGINE.execute(ActionRequest(action=approval.action_name, inputs=approval.action_payload),
