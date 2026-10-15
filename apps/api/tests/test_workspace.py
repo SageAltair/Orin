@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,6 +115,26 @@ def test_inferred_memory_requires_evidence_and_retrieval_explains_relevance(clie
     confirmed = client.patch(f"/api/v1/memories/{created.json()['id']}", json={"confirmed": True})
     assert confirmed.json()["provenance"] == "verified"
     assert confirmed.json()["confidence"] == 1.0
+
+
+def test_proactive_briefing_chooses_one_move_and_reports_recovery_evidence(client: TestClient) -> None:
+    project = _project(client, name="Documentary")
+    now = datetime.now(timezone.utc)
+    dated = client.post("/api/v1/tasks", json={
+        "title": "Confirm interview", "project_id": project["id"], "priority": "urgent",
+        "due_at": (now - timedelta(days=1)).isoformat(), "first_step": "Open the contact list",
+    }).json()
+    blocked = client.post("/api/v1/tasks", json={
+        "title": "Edit footage", "project_id": project["id"], "status": "blocked",
+    }).json()
+    briefing = client.get("/api/v1/intelligence/briefing")
+    assert briefing.status_code == 200
+    payload = briefing.json()
+    assert payload["one_move"]["task_id"] == dated["id"]
+    assert payload["one_move"]["first_step"] == "Open the contact list"
+    assert any(item["kind"] == "recovery" and item["evidence"][0]["task_id"] == dated["id"] for item in payload["findings"])
+    assert any(item["kind"] == "blockers" and item["evidence"][0]["task_id"] == blocked["id"] for item in payload["findings"])
+    assert payload["scope"]["open_tasks_reviewed"] == 2
 
 
 def test_environment_preferences_are_explicit_and_resettable(client: TestClient) -> None:
