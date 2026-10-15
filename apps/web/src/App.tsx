@@ -81,6 +81,7 @@ import { DeviceSettings } from "./DeviceSettings";
 import { AIModelsSettings, type AIModel } from "./AIModelsSettings";
 import { TemplateLibrary } from "./TemplateLibrary";
 import { OrinWorkspace } from "./OrinWorkspace";
+import { QuickOrin } from "./QuickOrin";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -760,6 +761,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [quickOrinOpen, setQuickOrinOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -796,6 +798,14 @@ export default function App() {
     };
     window.addEventListener("keydown", captureShortcut);
     return () => window.removeEventListener("keydown", captureShortcut);
+  }, []);
+  useEffect(() => {
+    const openQuickOrin = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setQuickOrinOpen(true); }
+      if (event.key === "Escape") setQuickOrinOpen(false);
+    };
+    window.addEventListener("keydown", openQuickOrin);
+    return () => window.removeEventListener("keydown", openQuickOrin);
   }, []);
   useEffect(() => {
     const syncModels = (event?: Event) => {
@@ -2461,6 +2471,21 @@ export default function App() {
           </section>
         </>
       )}
+      <QuickOrin
+        open={quickOrinOpen}
+        onClose={() => setQuickOrinOpen(false)}
+        command={command}
+        setCommand={setCommand}
+        submitCommand={submitCommand}
+        onSent={() => { setQuickOrinOpen(false); setAskOpen(true); }}
+        onCaptureIdea={() => setKnowledgeCaptureOpen(true)}
+        navigate={selectPage}
+        capabilities={navigation}
+        page={page}
+        projectName={projects.find(item => item.id === activeProjectId)?.name}
+        taskName={tasks.find(item => item.id === activeTaskId)?.title}
+        busy={commandBusy}
+      />
     </div>
   );
 }

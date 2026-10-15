@@ -4,6 +4,7 @@ import App, { CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } f
 import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
 import { OrinWorkspace } from "./OrinWorkspace";
+import { QuickOrin } from "./QuickOrin";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
@@ -28,6 +29,14 @@ describe("capability navigation", () => {
     expect(markup).toContain("Recent work");
     expect(markup).toContain("Workspace context");
     expect(markup).toContain("Plan today");
+  });
+
+  it("renders Quick Orin with contextual actions and navigation", () => {
+    const markup = renderToStaticMarkup(<QuickOrin open onClose={() => undefined} command="" setCommand={() => undefined} submitCommand={async () => undefined} onSent={() => undefined} onCaptureIdea={() => undefined} navigate={() => undefined} capabilities={capabilities} page="projects" projectName="Documentary" taskName="Draft outline" busy={false} />);
+    expect(markup).toContain('aria-label="Quick Orin command"');
+    expect(markup).toContain("Capture an idea");
+    expect(markup).toContain("Current context: projects · Documentary · Draft outline");
+    expect(markup).toContain("Ctrl");
   });
 });
 
