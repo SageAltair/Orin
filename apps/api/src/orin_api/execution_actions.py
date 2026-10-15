@@ -316,7 +316,7 @@ class WorkerActionInput(StrictActionInput):
 
 
 class SaveMemoryInput(StrictActionInput):
-    memory_type: Literal["preference", "decision", "fact", "commitment", "workflow", "project_context"]
+    memory_type: Literal["identity", "working_style", "project", "commitment", "knowledge", "interaction", "pattern", "preference", "decision", "fact", "workflow", "project_context"]
     memory_title: str = Field(min_length=1, max_length=180)
     memory_content: str = Field(min_length=1, max_length=5000)
     project_reference: str | None = Field(default=None, max_length=160)
@@ -380,14 +380,14 @@ def _save_memory(context: ActionContext, raw: SaveMemoryInput) -> dict[str, Any]
         memory = Memory(user_id=context.user_id, project_id=project.id if project else None,
             memory_type=data.memory_type, title=title, content=data.memory_content.strip(),
             source="explicit user command", confidence=0.9,
-            metadata_json={"timing": data.memory_timing, "status": data.memory_status,
+            metadata_json={"provenance": "explicit", "timing": data.memory_timing, "status": data.memory_status,
                 "acceptance_criteria": data.memory_acceptance_criteria,
                 "completion_rule": data.memory_completion_rule})
         context.session.add(memory)
     else:
         memory.content = data.memory_content.strip()
         memory.source = "explicit user command"
-        memory.metadata_json = {"timing": data.memory_timing, "status": data.memory_status,
+        memory.metadata_json = {"provenance": "explicit", "timing": data.memory_timing, "status": data.memory_status,
             "acceptance_criteria": data.memory_acceptance_criteria,
             "completion_rule": data.memory_completion_rule}
     context.session.flush()

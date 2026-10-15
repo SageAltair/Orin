@@ -94,6 +94,28 @@ def test_memory_lifecycle_is_owned_searchable_and_rejects_secret_like_content(cl
     assert client.get(f"/api/v1/memories?project_id={uuid.uuid4()}").status_code == 404
 
 
+def test_inferred_memory_requires_evidence_and_retrieval_explains_relevance(client: TestClient) -> None:
+    invalid = client.post("/api/v1/memories", json={
+        "memory_type": "pattern", "title": "Afternoon rescheduling",
+        "content": "Tasks scheduled after lunch are often moved.", "source": "inferred", "confidence": 0.8,
+    })
+    assert invalid.status_code == 422
+    created = client.post("/api/v1/memories", json={
+        "memory_type": "pattern", "title": "Afternoon rescheduling",
+        "content": "Tasks scheduled after lunch are often moved.", "source": "inferred", "confidence": 0.8,
+        "evidence": ["Three afternoon tasks were rescheduled"],
+    })
+    assert created.status_code == 201
+    assert created.json()["provenance"] == "inferred"
+    context = client.get("/api/v1/memories/context", params={"query": "Why do I often reschedule afternoon tasks?"})
+    assert context.status_code == 200
+    assert context.json()[0]["id"] == created.json()["id"]
+    assert "inferred pattern" in context.json()[0]["reasons"]
+    confirmed = client.patch(f"/api/v1/memories/{created.json()['id']}", json={"confirmed": True})
+    assert confirmed.json()["provenance"] == "verified"
+    assert confirmed.json()["confidence"] == 1.0
+
+
 def test_environment_preferences_are_explicit_and_resettable(client: TestClient) -> None:
     saved = client.put("/api/v1/environment/preferences", json={"surface": "navigation", "item": "projects", "visibility": "hidden", "priority": 0})
     assert saved.status_code == 200 and saved.json()["source"] == "explicit"

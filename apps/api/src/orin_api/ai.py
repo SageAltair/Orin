@@ -641,7 +641,7 @@ class AIIntent(BaseModel):
             if action == "write_file" and (not isinstance(values.get("content"), str) or len(values["content"].encode("utf-8")) > 1_000_000):
                 raise ValueError("Worker file content is invalid")
         if self.intent == IntentName.SAVE_MEMORY:
-            if self.parameters.memory_type not in {"preference", "decision", "fact", "commitment", "workflow", "project_context"} or not self.parameters.memory_title or not self.parameters.memory_content:
+            if self.parameters.memory_type not in {"identity", "working_style", "project", "commitment", "knowledge", "interaction", "pattern", "preference", "decision", "fact", "workflow", "project_context"} or not self.parameters.memory_title or not self.parameters.memory_content:
                 raise ValueError("Memory fields are invalid")
             if self.parameters.memory_status not in {None, "not_started", "in_progress", "completed"}:
                 raise ValueError("Memory status is invalid")
@@ -682,6 +682,8 @@ For a comprehensive Orin UI/UX review, return a prioritized, actionable audit ra
 For multi-workstream planning, respond concisely in Markdown: summarize the situation, give an actionable table with workstream, desired outcome, next concrete action, real dependencies, and provisional priority; explain the rationale and uncertainty; name important unknowns; then ask at most one high-value follow-up question, only when its answer could change the next decision. Identify priority for each row with a plain-language level, short rationale, and qualitative confidence. Do not use numerical scores or claim a firm ranking when key evidence is missing. Let verified obligations, deadlines, financial urgency when stated, impact, effort/resources, dependencies, blockers, and explicit user preferences drive the order. Never assume ministry outranks income or vice versa. Say which unknown could change the order. Provide one immediate next step.
 
 Clearly separate user-stated or workspace-verified facts from recommendations and unknowns. Never turn a proposal into the user's goal or commitment. Do not invent deadlines, schedules, budgets, income targets, quantities, equipment, people, activities, requirements, or completion status. Label optional targets as suggestions and explain their purpose. Use project records, task status, due dates, priorities, dependencies, and relevant saved decisions to avoid repeating completed work and to choose the next action from the actual state. The workspace snapshot is bounded; when it says it may be truncated, do not treat missing records as proof that none exist. If the available context does not answer something, say so and make a provisional plan. Never imply that unavailable sources were reviewed.
+
+Memory context includes provenance. Treat explicit and user-verified memories as user-owned context. Label inferred memories as patterns rather than facts, consider their confidence and evidence, and never turn an inference into a psychological judgment.
 
 Distinguish broad goals, bounded projects, ongoing workstreams, actionable tasks, actual dependencies, and commitments. Do not force every area into a project. A next action must start with a clear verb and produce an observable result; prefer a small high-value action grounded in available status over generic planning exercises. A dependency must be supported by workspace data or a clear prerequisite; otherwise say none is known or mark it uncertain.
 

@@ -23,9 +23,9 @@ from orin_api.ai import AITaskType, AIProviderError, ModelSelector, create_provi
 from orin_api.config import Settings, get_settings
 from orin_api.services import add_activity
 from orin_api.services import ensure_user_preferences
+from orin_api.memory_context import MEMORY_TYPES, MemoryContextService, memory_provenance
 
 router = APIRouter(prefix="/api/v1", tags=["project intelligence and personal workspace"])
-MEMORY_TYPES = {"preference", "decision", "fact", "commitment", "workflow", "project_context"}
 SECRET_TEXT = re.compile(r"(?i)(?:api[_-]?key|password|secret|token|authorization)\s*[:=]\s*\S+")
 
 
@@ -35,8 +35,19 @@ class MemoryCreate(BaseModel):
     memory_type: str = Field(min_length=1, max_length=24)
     title: str = Field(min_length=1, max_length=180)
     content: str = Field(min_length=1, max_length=5000)
-    source: str = Field(min_length=1, max_length=240)
+    source: Literal["user", "inferred", "system"] = "user"
     confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_provenance(self) -> "MemoryCreate":
+        if any(not isinstance(item, str) or not item.strip() or len(item) > 500 for item in self.evidence):
+            raise ValueError("Memory evidence entries must be between 1 and 500 characters")
+        if self.source == "inferred" and (self.confidence is None or not self.evidence):
+            raise ValueError("Inferred memories require confidence and supporting evidence")
+        if self.source != "inferred" and self.evidence:
+            raise ValueError("Evidence is only accepted for inferred memories")
+        return self
 
     @field_validator("content")
     @classmethod
@@ -51,6 +62,7 @@ class MemoryUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=180)
     content: str | None = Field(default=None, min_length=1, max_length=5000)
     archived: bool | None = None
+    confirmed: bool | None = None
 
     @field_validator("content")
     @classmethod
@@ -167,7 +179,8 @@ def _document_view(row: KnowledgeDocument) -> dict[str, object]:
 
 def _memory_view(row: Memory) -> dict[str, object]:
     return {"id": row.id, "project_id": row.project_id, "type": row.memory_type, "title": row.title,
-            "content": row.content, "source": row.source, "confidence": row.confidence,
+            "content": row.content, "source": row.source, "provenance": memory_provenance(row),
+            "confidence": row.confidence,
             "archived": row.archived, "metadata": row.metadata_json, "created_at": row.created_at,
             "updated_at": row.updated_at}
 
@@ -246,7 +259,11 @@ def create_memory(data: MemoryCreate, user: User = Depends(get_current_user), se
         raise HTTPException(status_code=422, detail="Memory type is invalid")
     if data.project_id:
         _own_project(session, data.project_id, user.id)
-    row = Memory(user_id=user.id, **data.model_dump())
+    values = data.model_dump(exclude={"evidence"})
+    row = Memory(user_id=user.id, **values, metadata_json={
+        "provenance": "inferred" if data.source == "inferred" else "explicit",
+        "evidence": data.evidence,
+    })
     session.add(row)
     session.flush()
     add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=row.project_id, activity_type=ActivityType.MEMORY_CHANGED, summary=f"Saved memory: {row.title}")
@@ -260,13 +277,35 @@ def update_memory(memory_id: uuid.UUID, data: MemoryUpdate, user: User = Depends
     row = session.scalar(select(Memory).where(Memory.id == memory_id, Memory.user_id == user.id))
     if row is None:
         raise HTTPException(status_code=404, detail="Memory not found")
-    for key, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    confirmed = updates.pop("confirmed", None)
+    for key, value in updates.items():
         if value is not None:
             setattr(row, key, value)
+    if confirmed is True:
+        row.source = "user"
+        row.confidence = 1.0
+        row.metadata_json = {**(row.metadata_json or {}), "provenance": "verified", "verified_by": "user"}
+    elif any(key in updates for key in {"title", "content"}):
+        row.source = "user"
+        row.confidence = 1.0
+        row.metadata_json = {**(row.metadata_json or {}), "provenance": "explicit", "corrected_by": "user"}
     add_activity(session, user_id=user.id, actor_user_id=user.id, project_id=row.project_id, activity_type=ActivityType.MEMORY_CHANGED, summary=f"Updated memory: {row.title}")
     session.commit()
     session.refresh(row)
     return _memory_view(row)
+
+
+@router.get("/memories/context")
+def relevant_memory_context(query: str = Query(min_length=2, max_length=500),
+                            project_id: uuid.UUID | None = None, limit: int = Query(default=10, ge=1, le=20),
+                            user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[dict[str, object]]:
+    project_ids = None
+    if project_id:
+        _own_project(session, project_id, user.id)
+        project_ids = {project_id}
+    ranked = MemoryContextService(session, user.id).relevant(query, project_ids=project_ids, limit=limit)
+    return [{**_memory_view(item.memory), "relevance": item.score, "reasons": list(item.reasons)} for item in ranked]
 
 
 @router.delete("/memories/{memory_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response, response_model=None)
