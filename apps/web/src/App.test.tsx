@@ -6,6 +6,7 @@ import { capabilities, defaultPreferences, getNavigationCapabilities, type UserP
 import { OrinWorkspace } from "./OrinWorkspace";
 import { QuickOrin } from "./QuickOrin";
 import { GuidedMode, GUIDES } from "./GuidedMode";
+import { IntelligenceExplorer } from "./IntelligenceExplorer";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
@@ -46,6 +47,13 @@ describe("capability navigation", () => {
     expect(markup).toContain("Configure an AI provider");
     expect(markup).toContain("Plan time on your calendar");
     expect(GUIDES.flatMap(guide => guide.steps).every(step => step.control.length > 0)).toBe(true);
+  });
+
+  it("renders the advanced intelligence entry points", () => {
+    const markup = renderToStaticMarkup(<IntelligenceExplorer projects={[]} />);
+    expect(markup).toContain("Personal Radar");
+    expect(markup).toContain("Life Graph");
+    expect(markup).toContain("Decision Simulator");
   });
 });
 

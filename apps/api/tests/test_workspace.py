@@ -137,6 +137,32 @@ def test_proactive_briefing_chooses_one_move_and_reports_recovery_evidence(clien
     assert payload["scope"]["open_tasks_reviewed"] == 2
 
 
+def test_advanced_intelligence_radar_graph_and_simulation_are_evidence_based(client: TestClient) -> None:
+    project = _project(client, name="Documentary")
+    first = client.post("/api/v1/tasks", json={"title": "Record interview", "project_id": project["id"],
+        "due_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()}).json()
+    second = client.post("/api/v1/tasks", json={"title": "Edit interview", "project_id": project["id"]}).json()
+    assert client.post(f"/api/v1/tasks/{second['id']}/dependencies", json={"depends_on_task_id": first["id"]}).status_code == 201
+    client.post("/api/v1/memories", json={"memory_type": "identity", "title": "Tell meaningful stories",
+        "content": "Create documentaries that help people grow.", "source": "user", "project_id": project["id"]})
+    risk = client.post("/api/v1/risks", json={"title": "Interview cancellation", "project_id": project["id"],
+        "likelihood": 4, "impact": 4, "status": "open", "response": "reduce"})
+    assert risk.status_code == 201
+    radar = client.get("/api/v1/intelligence/radar").json()
+    assert any(item["kind"] == "risk" and item["title"] == "Interview cancellation" for item in radar["items"])
+    graph = client.get("/api/v1/intelligence/graph").json()
+    assert any(node["kind"] == "goal" and node["label"] == "Tell meaningful stories" for node in graph["nodes"])
+    assert any(edge["relationship"] == "depends_on" for edge in graph["edges"])
+    simulation = client.post("/api/v1/intelligence/simulate", json={
+        "question": "What happens if I delay this project?", "project_id": project["id"], "delay_days": 14,
+    })
+    assert simulation.status_code == 200
+    payload = simulation.json()
+    assert payload["changes_applied"] is False
+    assert any("2 open tasks" in item["fact"] for item in payload["known_facts"])
+    assert payload["estimates"] and payload["estimates"][0]["assumption"]
+
+
 def test_environment_preferences_are_explicit_and_resettable(client: TestClient) -> None:
     saved = client.put("/api/v1/environment/preferences", json={"surface": "navigation", "item": "projects", "visibility": "hidden", "priority": 0})
     assert saved.status_code == 200 and saved.json()["source"] == "explicit"
