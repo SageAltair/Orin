@@ -8,6 +8,7 @@ from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from orin_api.models import KnowledgeDocument, Memory, Project, ProjectStatus, Task, TaskDependency, TaskStatus
+from orin_api.memory_context import MemoryContextService, memory_provenance
 
 
 class ProjectContextService:
@@ -47,16 +48,13 @@ class ProjectContextService:
             phrase in normalized for phrase in workspace_phrases
         )
         if not matches and not is_workspace_request:
-            preferences = self.session.scalars(
-                select(Memory).where(Memory.user_id == self.user_id, Memory.project_id.is_(None),
-                                     Memory.memory_type == "preference", Memory.archived.is_(False))
-                .order_by(Memory.updated_at.desc()).limit(20)
-            ).all()
-            relevant_preferences = [memory for memory in preferences if words.intersection(
-                re.findall(r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))][:3]
-            return ({"writing_sources": note_context, "user_preferences": [{"title": item.title, "content": item.content}
-                                            for item in relevant_preferences]}
-                    if relevant_preferences or note_context else None)
+            relevant = MemoryContextService(self.session, self.user_id).relevant(normalized, limit=3)
+            return ({"writing_sources": note_context, "relevant_memories": [
+                {"id": str(item.memory.id), "type": item.memory.memory_type, "title": item.memory.title,
+                 "content": item.memory.content, "provenance": memory_provenance(item.memory),
+                 "confidence": item.memory.confidence, "relevance_reasons": list(item.reasons)}
+                for item in relevant]}
+                    if relevant or note_context else None)
         inventory_request = any(phrase in command.casefold() for phrase in (
             "all my projects", "all projects", "my existing projects", "review my workspace",
             "review all my tasks", "what tasks do i have", "list my projects", "list my tasks",
@@ -98,21 +96,10 @@ class ProjectContextService:
         dependency_names: dict[uuid.UUID, list[dict[str, str]]] = {}
         for task_id, title, status, _ in dependencies:
             dependency_names.setdefault(task_id, []).append({"task": title, "status": status.value})
-        personal = self.session.scalars(
-            select(Memory).where(Memory.user_id == self.user_id, Memory.archived.is_(False))
-            .order_by(Memory.updated_at.desc()).limit(30)
-        ).all()
-        asks_decisions = bool({"decision", "decisions"} & words)
-        planning_request = bool({"plan", "planning", "prioritize", "priority", "organize",
-                                 "competing", "workstreams", "schedule"} & words)
-        relevant_memories = [memory for memory in personal if
-            memory.memory_type in {"decision", "fact", "workflow", "project_context", "commitment", "preference"}
-            and (not words or words.intersection(re.findall(
-                r"[a-z0-9]+", f"{memory.title} {memory.content}".casefold()))
-                 or (asks_decisions and memory.memory_type == "decision")
-                 or (memory.project_id in selected_ids and memory.memory_type == "decision")
-                 or (planning_request and inventory_request and memory.memory_type == "commitment"))
-            and (memory.project_id is None or memory.project_id in selected_ids)][:10]
+        ranked_memories = MemoryContextService(self.session, self.user_id).relevant(
+            normalized, project_ids=selected_ids, limit=10)
+        relevant_memories = [item.memory for item in ranked_memories
+            if item.memory.project_id is None or item.memory.project_id in selected_ids]
         if not selected_projects and not selected_tasks and not relevant_memories and not note_context:
             return None
 
@@ -135,7 +122,7 @@ class ProjectContextService:
             "writing_sources": note_context,
             "snapshot_scope": "Named matching projects, or recent active owned projects for planning/workspace questions; active and urgent tasks are prioritized.",
             "may_be_truncated": (len(projects) == 30 or len(selected_projects) == 15
-                                 or len(selected_tasks) == 60 or len(personal) == 30
+                                 or len(selected_tasks) == 60
                                  or any(len([task for task in selected_tasks if task.project_id == project.id]) > 12
                                         for project in selected_projects)),
             "projects": project_data,
@@ -146,5 +133,8 @@ class ProjectContextService:
                                  for task in selected_tasks if task.project_id is None],
             "memories_and_commitments": [{"id": str(item.id), "type": item.memory_type,
                                          "title": item.title, "content": item.content,
+                                         "provenance": memory_provenance(item),
+                                         "confidence": item.confidence,
+                                         "relevance_reasons": list(next((ranked.reasons for ranked in ranked_memories if ranked.memory.id == item.id), ())),
                                          "metadata": item.metadata_json} for item in relevant_memories],
         }

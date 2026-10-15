@@ -48,6 +48,7 @@ PRODUCT_INVENTORY = {
         {"name": "Contextual workflow templates", "status": "implemented", "evidence": "TemplateLibrary.tsx and template_router.py; built-in and user-authored page-aware workflows"},
         {"name": "Guided interface assistance", "status": "implemented", "evidence": "GuidedMode.tsx; walkthroughs for navigation, AI setup, notifications, projects, tasks, calendar, and templates"},
         {"name": "Cross-module action plans", "status": "implemented", "evidence": "action_plan_router.py; validated previews, dependencies, trusted actions, approvals, partial outcomes, and history"},
+        {"name": "Personal intelligence memory", "status": "implemented", "evidence": "memory_context.py and workspace_router.py; categorized explicit/inferred memory, explainable relevance retrieval, correction, export, and deletion"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",
