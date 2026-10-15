@@ -47,6 +47,7 @@ PRODUCT_INVENTORY = {
         {"name": "AI interpretation", "status": "implemented, configuration-dependent", "evidence": "AI providers in ai.py; requires valid provider credentials and model"},
         {"name": "Contextual workflow templates", "status": "implemented", "evidence": "TemplateLibrary.tsx and template_router.py; built-in and user-authored page-aware workflows"},
         {"name": "Guided interface assistance", "status": "implemented", "evidence": "GuidedMode.tsx; walkthroughs for navigation, AI setup, notifications, projects, tasks, calendar, and templates"},
+        {"name": "Cross-module action plans", "status": "implemented", "evidence": "action_plan_router.py; validated previews, dependencies, trusted actions, approvals, partial outcomes, and history"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",
