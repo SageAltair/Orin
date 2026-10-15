@@ -375,6 +375,23 @@ button:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid
 .orin-workspace-context p { color: var(--muted); font-size: 12px; line-height: 1.55; }
 @media (max-width: 1050px) { .orin-workspace { grid-template-columns: 200px minmax(0, 1fr); } .orin-workspace-context { grid-column: 1 / -1; border-top: 1px solid var(--line); border-left: 0; } }
 @media (max-width: 720px) { .orin-workspace { grid-template-columns: 1fr; } .orin-workspace-sidebar { border-right: 0; border-bottom: 1px solid var(--line); } .orin-session-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .orin-workspace-main > header { align-items: flex-start; } }
+.quick-orin-layer { position: fixed; z-index: 30; inset: 0; display: grid; place-items: start center; padding: min(14vh, 110px) 16px 24px; }
+.quick-orin-scrim { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(10 14 12 / .48); backdrop-filter: blur(4px); }
+.quick-orin { position: relative; width: min(680px, 100%); max-height: min(76vh, 720px); overflow: hidden; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: 0 24px 80px rgb(0 0 0 / .24); }
+.quick-orin > header { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 16px 18px 10px; }
+.quick-orin h2 { margin: 2px 0; font-size: 17px; }
+.quick-orin > form { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 8px; margin: 8px 16px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; }
+.quick-orin > form input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; }
+.quick-orin > form button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 7px; color: white; background: var(--accent); }
+.quick-orin-context { margin: 0 18px 8px; color: var(--muted); font-size: 11px; }
+.quick-orin-results { max-height: min(52vh, 470px); padding: 5px 10px 14px; overflow-y: auto; }
+.quick-orin-results h3 { margin: 12px 9px 5px; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.quick-orin-results section > button { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 10px; width: 100%; padding: 9px; border: 0; border-radius: 8px; text-align: left; color: var(--text); background: transparent; cursor: pointer; }
+.quick-orin-results section > button:hover { background: var(--hover); }
+.quick-orin-results section > button span { display: grid; gap: 2px; }
+.quick-orin-results small { color: var(--muted); }
+.quick-orin > footer { display: flex; justify-content: space-between; padding: 9px 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.quick-orin kbd { padding: 2px 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
 .chat-starters button { min-height: 44px; padding: 9px 11px; color: var(--text); text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
 .chat-starters button:hover { border-color: var(--accent); background: var(--hover); }
 .chat-starter-more { width: 100%; margin-top: 12px; color: var(--muted); font-size: 12px; }
