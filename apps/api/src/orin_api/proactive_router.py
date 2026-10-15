@@ -4,16 +4,28 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
-from orin_api.models import CalendarEvent, Project, Task, TaskReturnPoint, TaskSchedule, TaskStatus, User, UserSettings
+from orin_api.memory_context import memory_provenance
+from orin_api.models import (CalendarEvent, Memory, Opportunity, Project, Risk, Task, TaskDependency,
+                             TaskReturnPoint, TaskSchedule, TaskStatus, User, UserSettings)
 
 
 router = APIRouter(prefix="/api/v1/intelligence", tags=["personal intelligence"])
+
+
+class DecisionScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=3, max_length=1000)
+    project_id: uuid.UUID
+    delay_days: int = Field(default=0, ge=0, le=365)
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -108,3 +120,108 @@ def proactive_briefing(user: User = Depends(get_current_user),
         "progress": {"completed_tasks": len(completed), "advanced_projects": list(project_names)[:5]},
         "scope": {"open_tasks_reviewed": len(tasks), "scheduled_blocks_reviewed": len(schedules),
                   "calendar_events_reviewed": len(timed_events)}}
+
+
+@router.get("/radar")
+def personal_radar(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    now = datetime.now(timezone.utc); today = now.date(); horizon = today + timedelta(days=14)
+    risks = session.scalars(select(Risk).where(
+        Risk.user_id == user.id, Risk.status.in_(["open", "watching"]),
+    ).order_by((Risk.likelihood * Risk.impact).desc()).limit(20)).all()
+    opportunities = session.scalars(select(Opportunity).where(
+        Opportunity.user_id == user.id, Opportunity.stage.notin_(["won", "closed"]),
+    ).order_by(Opportunity.deadline.asc().nulls_last()).limit(50)).all()
+    commitments = session.scalars(select(Memory).where(
+        Memory.user_id == user.id, Memory.memory_type == "commitment", Memory.archived.is_(False),
+    ).order_by(Memory.updated_at.asc()).limit(50)).all()
+    items: list[dict[str, object]] = []
+    for row in risks:
+        if row.likelihood * row.impact >= 12 or (row.review_on and row.review_on <= horizon):
+            items.append({"kind": "risk", "id": str(row.id), "title": row.title,
+                "why": f"Open risk rated {row.likelihood} likelihood × {row.impact} impact.",
+                "project_id": str(row.project_id) if row.project_id else None,
+                "date": row.review_on.isoformat() if row.review_on else None, "confidence": "confirmed"})
+    for row in opportunities:
+        if (row.deadline and row.deadline <= horizon) or (row.review_on and row.review_on <= today):
+            items.append({"kind": "opportunity", "id": str(row.id), "title": row.title,
+                "why": "A recorded deadline is approaching." if row.deadline else "Its review date has arrived.",
+                "project_id": str(row.project_id) if row.project_id else None,
+                "date": (row.deadline or row.review_on).isoformat(), "confidence": "confirmed"})
+    for row in commitments:
+        metadata = row.metadata_json or {}
+        if metadata.get("status") != "completed" and _aware(row.updated_at) < now - timedelta(days=14):
+            items.append({"kind": "commitment", "id": str(row.id), "title": row.title,
+                "why": "This open commitment has not been updated in fourteen days.",
+                "project_id": str(row.project_id) if row.project_id else None, "date": None,
+                "confidence": memory_provenance(row)})
+    order = {"risk": 0, "commitment": 1, "opportunity": 2}
+    items.sort(key=lambda item: (order.get(str(item["kind"]), 9), str(item.get("date") or "9999")))
+    return {"items": items[:12], "scope": {"risks": len(risks), "opportunities": len(opportunities),
+        "commitments": len(commitments)}, "generated_at": now.isoformat()}
+
+
+@router.get("/graph")
+def life_graph(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    projects = session.scalars(select(Project).where(Project.owner_id == user.id).limit(100)).all()
+    tasks = session.scalars(select(Task).where(Task.owner_id == user.id).limit(300)).all()
+    memories = session.scalars(select(Memory).where(Memory.user_id == user.id, Memory.archived.is_(False)).limit(150)).all()
+    opportunities = session.scalars(select(Opportunity).where(Opportunity.user_id == user.id).limit(100)).all()
+    risks = session.scalars(select(Risk).where(Risk.user_id == user.id).limit(100)).all()
+    dependencies = session.scalars(select(TaskDependency).where(
+        TaskDependency.task_id.in_([task.id for task in tasks]))).all() if tasks else []
+    nodes = ([{"id": f"project:{row.id}", "kind": "project", "label": row.name, "status": row.status.value} for row in projects]
+        + [{"id": f"task:{row.id}", "kind": "task", "label": row.title, "status": row.status.value} for row in tasks]
+        + [{"id": f"memory:{row.id}", "kind": "goal" if row.memory_type == "identity" else "memory",
+            "label": row.title, "status": memory_provenance(row)} for row in memories]
+        + [{"id": f"opportunity:{row.id}", "kind": "opportunity", "label": row.title, "status": row.stage} for row in opportunities]
+        + [{"id": f"risk:{row.id}", "kind": "risk", "label": row.title, "status": row.status} for row in risks])
+    edges = ([{"from": f"task:{row.id}", "to": f"project:{row.project_id}", "relationship": "contributes_to"}
+              for row in tasks if row.project_id]
+        + [{"from": f"memory:{row.id}", "to": f"project:{row.project_id}", "relationship": "informs"}
+           for row in memories if row.project_id]
+        + [{"from": f"opportunity:{row.id}", "to": f"project:{row.project_id}", "relationship": "supports"}
+           for row in opportunities if row.project_id]
+        + [{"from": f"opportunity:{row.id}", "to": f"task:{row.task_id}", "relationship": "next_action"}
+           for row in opportunities if row.task_id]
+        + [{"from": f"risk:{row.id}", "to": f"project:{row.project_id}", "relationship": "may_affect"}
+           for row in risks if row.project_id]
+        + [{"from": f"risk:{row.id}", "to": f"opportunity:{row.opportunity_id}", "relationship": "may_affect"}
+           for row in risks if row.opportunity_id]
+        + [{"from": f"task:{row.task_id}", "to": f"task:{row.depends_on_task_id}", "relationship": "depends_on"}
+           for row in dependencies])
+    return {"nodes": nodes, "edges": edges, "scope": {"truncated": any((len(projects) == 100, len(tasks) == 300,
+        len(memories) == 150, len(opportunities) == 100, len(risks) == 100))}}
+
+
+@router.post("/simulate")
+def simulate_decision(data: DecisionScenario, user: User = Depends(get_current_user),
+                      session: Session = Depends(get_session)) -> dict[str, object]:
+    project = session.scalar(select(Project).where(Project.id == data.project_id, Project.owner_id == user.id))
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found.")
+    tasks = session.scalars(select(Task).where(Task.owner_id == user.id, Task.project_id == project.id,
+        Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED]))).all()
+    task_ids = {task.id for task in tasks}
+    dependencies = session.scalars(select(TaskDependency).where(
+        TaskDependency.depends_on_task_id.in_(task_ids))).all() if task_ids else []
+    schedules = session.scalars(select(TaskSchedule).where(
+        TaskSchedule.user_id == user.id, TaskSchedule.task_id.in_(task_ids))).all() if task_ids else []
+    known = [{"fact": f"{len(tasks)} open tasks belong to {project.name}.", "source": "workspace"},
+        {"fact": f"{len(dependencies)} downstream task dependencies reference its open tasks.", "source": "workspace"},
+        {"fact": f"{len(schedules)} calendar blocks are reserved for its open tasks.", "source": "workspace"}]
+    estimates: list[dict[str, str]] = []
+    if data.delay_days:
+        affected_due = sum(bool(task.due_at) for task in tasks)
+        estimates.append({"estimate": f"A {data.delay_days}-day delay may put {affected_due} dated open tasks under more schedule pressure.",
+            "assumption": "The task dates and scope remain unchanged."})
+        if dependencies:
+            estimates.append({"estimate": f"Up to {len(dependencies)} dependent tasks may also move later.",
+                "assumption": "Dependencies remain active and cannot proceed in parallel."})
+    if schedules:
+        estimates.append({"estimate": f"{len(schedules)} reserved calendar blocks may need review.",
+            "assumption": "The current blocks are project-specific and cannot be repurposed."})
+    return {"question": data.question, "project": {"id": str(project.id), "name": project.name},
+        "known_facts": known, "estimates": estimates,
+        "unknowns": ["Available people, budget, and scope changes are not represented in this workspace."],
+        "recommendation": "Review the affected tasks and calendar blocks before deciding. This simulation did not change any records.",
+        "changes_applied": False}
