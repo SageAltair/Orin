@@ -5,6 +5,7 @@ import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace"
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
 import { OrinWorkspace } from "./OrinWorkspace";
 import { QuickOrin } from "./QuickOrin";
+import { GuidedMode, GUIDES } from "./GuidedMode";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
@@ -37,6 +38,14 @@ describe("capability navigation", () => {
     expect(markup).toContain("Capture an idea");
     expect(markup).toContain("Current context: projects · Documentary · Draft outline");
     expect(markup).toContain("Ctrl");
+  });
+
+  it("renders Guided Mode with reusable walkthroughs and server-safe progress", () => {
+    const markup = renderToStaticMarkup(<GuidedMode open onClose={() => undefined} navigate={() => undefined} />);
+    expect(markup).toContain('aria-labelledby="guided-title"');
+    expect(markup).toContain("Configure an AI provider");
+    expect(markup).toContain("Plan time on your calendar");
+    expect(GUIDES.flatMap(guide => guide.steps).every(step => step.control.length > 0)).toBe(true);
   });
 });
 

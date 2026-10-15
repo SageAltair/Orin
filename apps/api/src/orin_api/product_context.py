@@ -27,6 +27,7 @@ PRODUCT_INVENTORY = {
         {"name": "Home", "status": "implemented", "evidence": "App.tsx: workspace greeting, open tasks, recent sessions, active projects, empty states"},
         {"name": "Orin Workspace", "status": "implemented", "evidence": "OrinWorkspace.tsx; persistent conversations, live context, templates, model selection"},
         {"name": "Quick Orin", "status": "implemented", "evidence": "QuickOrin.tsx; global keyboard access, navigation, pinned workflows, and contextual commands"},
+        {"name": "Guided Mode", "status": "implemented", "evidence": "GuidedMode.tsx; page-aware walkthroughs, highlighted controls, action completion, and local progress"},
         {"name": "Projects", "status": "implemented", "evidence": "ProjectWorkspace.tsx; project API routes"},
         {"name": "Tasks", "status": "implemented", "evidence": "App.tsx task list/editor; task API routes"},
         {"name": "Activity", "status": "implemented", "evidence": "ActivityTimeline.tsx; activity API routes"},
@@ -45,6 +46,7 @@ PRODUCT_INVENTORY = {
         {"name": "Computer worker actions", "status": "implemented, permission and device-dependent", "evidence": "worker_router.py and worker app; queued actions use approval and an enrolled worker"},
         {"name": "AI interpretation", "status": "implemented, configuration-dependent", "evidence": "AI providers in ai.py; requires valid provider credentials and model"},
         {"name": "Contextual workflow templates", "status": "implemented", "evidence": "TemplateLibrary.tsx and template_router.py; built-in and user-authored page-aware workflows"},
+        {"name": "Guided interface assistance", "status": "implemented", "evidence": "GuidedMode.tsx; walkthroughs for navigation, AI setup, notifications, projects, tasks, calendar, and templates"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",
