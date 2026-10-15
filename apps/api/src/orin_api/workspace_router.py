@@ -35,7 +35,7 @@ class MemoryCreate(BaseModel):
     memory_type: str = Field(min_length=1, max_length=24)
     title: str = Field(min_length=1, max_length=180)
     content: str = Field(min_length=1, max_length=5000)
-    source: Literal["user", "inferred", "system"] = "user"
+    source: str = Field(default="user", min_length=1, max_length=240)
     confidence: float | None = Field(default=None, ge=0, le=1)
     evidence: list[str] = Field(default_factory=list, max_length=20)
 
