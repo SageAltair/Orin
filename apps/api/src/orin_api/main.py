@@ -26,6 +26,7 @@ from orin_api.planning_router import router as planning_router
 from orin_api.calendar_router import router as calendar_router
 from orin_api.ai_settings_router import router as ai_settings_router
 from orin_api.template_router import router as template_router
+from orin_api.action_plan_router import router as action_plan_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
@@ -64,6 +65,7 @@ app.include_router(calendar_router)
 app.include_router(planning_router)
 app.include_router(ai_settings_router)
 app.include_router(template_router)
+app.include_router(action_plan_router)
 
 app.include_router(creative_router)
 
