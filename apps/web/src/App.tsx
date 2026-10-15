@@ -46,6 +46,7 @@ import {
   ListPlus,
   MoreHorizontal,
   Library,
+  Map,
 } from "lucide-react";
 import {
   ApiError,
@@ -82,6 +83,7 @@ import { AIModelsSettings, type AIModel } from "./AIModelsSettings";
 import { TemplateLibrary } from "./TemplateLibrary";
 import { OrinWorkspace } from "./OrinWorkspace";
 import { QuickOrin } from "./QuickOrin";
+import { GuidedMode } from "./GuidedMode";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -762,6 +764,7 @@ export default function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [quickOrinOpen, setQuickOrinOpen] = useState(false);
+  const [guidedOpen, setGuidedOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -1392,6 +1395,7 @@ export default function App() {
             <button
               key={item.id}
               type="button"
+              data-orin-control={`nav-${item.id}`}
               className={`nav-link ${preferences.minimizedCapabilities.includes(item.id) ? "minimized " : ""}${page === item.id ? "active" : ""}`}
               onClick={() => selectPage(item.id)}
               aria-current={page === item.id ? "page" : undefined}
@@ -1458,6 +1462,16 @@ export default function App() {
             <span>{title}</span>
           </div>
           <div className="topbar-actions">
+            <button
+              type="button"
+              className="topbar-guide"
+              aria-label="Open Guided Mode"
+              title="Guided Mode"
+              onClick={() => setGuidedOpen(true)}
+            >
+              <Map size={15} />
+              Guide
+            </button>
             <button
               type="button"
               className="topbar-capture"
@@ -1533,7 +1547,7 @@ export default function App() {
                 user={user}
                 onUpdated={(updated) => setUser(updated)}
               />
-              <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
+              <div data-orin-control="notification-settings"><Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense></div>
               <AccountPrivacy userId={user.id} />
               <DeviceSettings onApprovalCreated={refreshApprovals} />
               <WorkspaceSettings
@@ -1783,32 +1797,32 @@ export default function App() {
                   </div>
                 )}
               {page === "opportunities" ? <Suspense fallback={<p role="status">Loading opportunities…</p>}><OpportunityWorkspace projects={projects} onOpenTask={openTask}/></Suspense> : page === "calendar" ? (
-                <CalendarWorkspace
+                <div data-orin-control="calendar-workspace"><CalendarWorkspace
                   projects={projects}
                   scheduleTaskId={scheduleTaskId}
                   onTaskScheduled={() => setScheduleTaskId(null)}
                   onOpenTask={openTask}
-                />
+                /></div>
               ) : page === "tasks" ? (
                 focusRolloutEnabled ? (
-                  <FocusExperience
+                  <div data-orin-control="tasks-workspace"><FocusExperience
                     name={user.display_name}
                     onSignOut={() => {
                       logout().finally(() => window.location.reload());
                     }}
                     embedded
                     onScheduleTask={scheduleTask}
-                  />
+                  /></div>
                 ) : (
-                  <LegacyTasks
+                  <div data-orin-control="tasks-workspace"><LegacyTasks
                     tasks={tasks}
                     projects={projects}
                     onChange={setTasks}
                     onScheduleTask={scheduleTask}
-                  />
+                  /></div>
                 )
               ) : page === "projects" ? (
-                <ProjectWorkspace
+                <div data-orin-control="projects-workspace"><ProjectWorkspace
                   projects={projects}
                   initialProjectId={projectToOpen}
                   onChanged={(project) =>
@@ -1820,7 +1834,7 @@ export default function App() {
                         : [project, ...current],
                     )
                   }
-                />
+                /></div>
               ) : page === "activity" ? (
                 <ActivityTimeline
                   onOpenProject={openProject}
@@ -2486,6 +2500,7 @@ export default function App() {
         taskName={tasks.find(item => item.id === activeTaskId)?.title}
         busy={commandBusy}
       />
+      <GuidedMode open={guidedOpen} onClose={() => setGuidedOpen(false)} navigate={selectPage} />
     </div>
   );
 }
