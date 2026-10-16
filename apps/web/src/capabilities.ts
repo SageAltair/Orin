@@ -11,6 +11,7 @@ export interface UserPreferences {
   theme: Theme;
   autonomyMode: "conservative" | "balanced" | "automatic" | "custom";
   customAutonomy: Record<string, "automatic" | "approval">;
+  proactiveMode: "quiet" | "supportive" | "proactive" | "persistent";
 }
 
 export interface Capability {
@@ -43,6 +44,7 @@ export const defaultPreferences: UserPreferences = {
   theme: "light",
   autonomyMode: "balanced",
   customAutonomy: {},
+  proactiveMode: "supportive",
 };
 
 export function getNavigationCapabilities(granted: Capability[], preferences: UserPreferences): Capability[] {
@@ -70,5 +72,6 @@ export function normalizePreferences(value: unknown): UserPreferences {
     theme: candidate.theme === "dark" || candidate.theme === "system" ? candidate.theme : "light",
     autonomyMode: candidate.autonomyMode === "conservative" || candidate.autonomyMode === "automatic" || candidate.autonomyMode === "custom" ? candidate.autonomyMode : "balanced",
     customAutonomy: candidate.customAutonomy && typeof candidate.customAutonomy === "object" ? candidate.customAutonomy as Record<string, "automatic" | "approval"> : {},
+    proactiveMode: candidate.proactiveMode === "quiet" || candidate.proactiveMode === "proactive" || candidate.proactiveMode === "persistent" ? candidate.proactiveMode : "supportive",
   };
 }

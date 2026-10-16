@@ -17,6 +17,7 @@ from orin_api.models import (
     User,
     UserCapability,
     UserPreferences,
+    NotificationPreferences,
 )
 from orin_api.schemas import PreferencesUpdate
 
@@ -115,6 +116,7 @@ def preference_view(session: Session, user: User, preferences: UserPreferences) 
         "pinned_capabilities": [row.code for row in rows if row.pinned and row.visible and row.granted and row.is_enabled],
         "autonomy_mode": preferences.autonomy_mode,
         "custom_autonomy": preferences.custom_autonomy,
+        "proactive_mode": preferences.proactive_mode,
     }
 
 
@@ -152,6 +154,10 @@ def update_preferences(session: Session, user: User, data: PreferencesUpdate) ->
         raise HTTPException(status_code=422, detail="Too many custom autonomy rules")
     preferences.autonomy_mode = data.autonomy_mode
     preferences.custom_autonomy = data.custom_autonomy
+    preferences.proactive_mode = data.proactive_mode
+    notification_preferences = session.get(NotificationPreferences, user.id)
+    if notification_preferences is not None:
+        notification_preferences.persistent = data.proactive_mode == "persistent"
     session.flush()
     return preferences
 

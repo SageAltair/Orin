@@ -519,3 +519,22 @@ def test_explicit_hide_tool_command_changes_the_saved_layout(client: TestClient,
     result = client.post("/api/v1/commands", json={"text": "Hide the Projects tool"})
     assert result.json()["status"] == "completed"
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["hidden_capabilities"]
+
+
+def test_missing_reflection_and_brain_dump_are_evidence_based_and_preview_first(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Film"}).json()
+    client.post("/api/v1/tasks", json={"title": "Important unfinished work", "project_id": project["id"], "priority": "high"})
+    missing = client.get("/api/v1/intelligence/missing")
+    assert missing.status_code == 200, missing.text
+    assert missing.json()["changes_applied"] is False
+    assert any(item["kind"] == "commitment" for item in missing.json()["findings"])
+    reflection = client.get("/api/v1/intelligence/reflection", params={"period": "weekly"})
+    assert reflection.status_code == 200 and reflection.json()["evidence_only"] is True
+    text = "Idea for a short film; Create a project for the website; Call Daniel tomorrow"
+    preview = client.post("/api/v1/intelligence/brain-dump", json={"text": text})
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["changes_applied"] is False
+    assert [item["kind"] for item in preview.json()["items"]] == ["idea", "project", "task"]
+    applied = client.post("/api/v1/intelligence/brain-dump", json={"text": text, "execute": True})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["changes_applied"] is True

@@ -98,6 +98,8 @@ import { QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { FocusSessions } from "./FocusSessions";
 import { CalendarWorkspace } from "./CalendarWorkspace";
 import { QuickCapture } from "./QuickCapture";
+import { VoiceInput } from "./VoiceInput";
+import { IntelligenceReview } from "./IntelligenceReview";
 
 const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
 
@@ -452,6 +454,15 @@ function PreferenceSettings({
           over this preference.
         </p>
         <div className="preference-controls">
+          <label>
+            Proactive assistance
+            <select value={preferences.proactiveMode} onChange={(event) => onChange({ ...preferences, proactiveMode: event.target.value as UserPreferences["proactiveMode"] })}>
+              <option value="quiet">Quiet — respond only when asked</option>
+              <option value="supportive">Supportive — contextual guidance</option>
+              <option value="proactive">Proactive — surface blockers and opportunities</option>
+              <option value="persistent">Persistent — stronger follow-up within notification limits</option>
+            </select>
+          </label>
           <label>
             Autonomy mode
             <select
@@ -872,6 +883,7 @@ export default function App() {
           pinnedCapabilities: prefs.pinned_capabilities,
           autonomyMode: prefs.autonomy_mode,
           customAutonomy: prefs.custom_autonomy,
+          proactiveMode: prefs.proactive_mode,
         });
         setPreferences({
           ...normalized,
@@ -1010,6 +1022,7 @@ export default function App() {
           pinned_capabilities: next.pinnedCapabilities,
           autonomy_mode: next.autonomyMode,
           custom_autonomy: next.customAutonomy,
+          proactive_mode: next.proactiveMode,
         }),
       });
       setPreferences({
@@ -1020,6 +1033,7 @@ export default function App() {
           pinnedCapabilities: saved.pinned_capabilities,
           autonomyMode: saved.autonomy_mode,
           customAutonomy: saved.custom_autonomy,
+          proactiveMode: saved.proactive_mode,
         }),
         minimizedCapabilities: next.minimizedCapabilities,
       });
@@ -1130,6 +1144,7 @@ export default function App() {
           pinnedCapabilities: prefs.pinned_capabilities,
           autonomyMode: prefs.autonomy_mode,
           customAutonomy: prefs.custom_autonomy,
+          proactiveMode: prefs.proactive_mode,
         });
         setPreferences({
           ...normalized,
@@ -1614,6 +1629,7 @@ export default function App() {
                 <ProactiveBriefing onOpenTask={openTask} onAsk={(prompt) => { setCommand(prompt); setAskOpen(true); }} />
                 <IntelligenceExplorer projects={activeProjects} />
                 <SpecialistAutomation projects={activeProjects} />
+                <IntelligenceReview />
                 <section className="home-section">
                   <div className="section-title">
                     <div>
@@ -2470,6 +2486,7 @@ export default function App() {
                 }}
                 placeholder="Ask Orin what you need"
               />
+              <VoiceInput value={command} onChange={setCommand} />
               <button
                 type="submit"
                 aria-label="Send message"
