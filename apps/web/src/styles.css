@@ -3,7 +3,7 @@
 
 :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; color: #242b27; background: #fbfcfa; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
+body { margin: 0; min-width: 0; overflow-x: hidden; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
@@ -34,6 +34,29 @@ button:disabled { cursor: not-allowed; }
 .nav-link.minimized { min-height: 29px; font-size: 11px; opacity: .76; }
 .nav-empty { padding: 0 10px; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .sidebar-bottom { margin-top: auto; }
+.sidebar-workspaces { min-height: 0; margin-top: 25px; }
+.workspace-list { display: grid; gap: 3px; max-height: min(28vh, 250px); margin-top: 9px; overflow-y: auto; scrollbar-width: thin; }
+.workspace-item, .new-workspace-button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 35px; padding: 4px 9px; color: var(--soft); background: transparent; border: 0; border-radius: 7px; text-align: left; font-size: 11px; }
+.workspace-item:hover, .workspace-item.active, .new-workspace-button:hover { color: var(--text); background: var(--hover); }
+.workspace-item.active { font-weight: 570; }
+.workspace-item-icon { display: grid; flex: 0 0 auto; width: 23px; height: 23px; place-items: center; color: color-mix(in srgb, var(--workspace-color), white 22%); background: color-mix(in srgb, var(--workspace-color) 16%, transparent); border: 1px solid color-mix(in srgb, var(--workspace-color) 55%, transparent); border-radius: 7px; font-size: 9px; font-weight: 700; }
+.workspace-status { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; }
+.workspace-check { color: var(--accent); }
+.new-workspace-button { margin-top: 5px; color: var(--muted); }
+.workspace-dialog-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: #10171380; backdrop-filter: blur(4px); }
+.workspace-dialog { width: min(100%, 430px); padding: 24px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 24px 80px #08100b45; }
+.workspace-dialog header, .workspace-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.workspace-dialog header h2 { margin: 5px 0 0; font-size: 20px; }
+.workspace-dialog header > button { display: grid; width: 34px; height: 34px; place-items: center; color: var(--muted); background: transparent; border: 0; border-radius: 8px; }
+.workspace-dialog > p { margin: 14px 0 20px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.workspace-dialog label { display: grid; gap: 7px; color: var(--soft); font-size: 12px; }
+.workspace-dialog input { width: 100%; min-height: 43px; padding: 9px 11px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.workspace-dialog fieldset { margin: 18px 0 24px; padding: 0; border: 0; }
+.workspace-dialog legend { margin-bottom: 9px; color: var(--soft); font-size: 12px; }
+.workspace-colors { display: flex; gap: 10px; }
+.workspace-colors button { display: grid; width: 30px; height: 30px; place-items: center; color: white; border: 2px solid transparent; border-radius: 50%; }
+.workspace-colors button[aria-pressed="true"] { border-color: var(--text); box-shadow: 0 0 0 3px var(--surface); }
+.workspace-dialog footer { justify-content: flex-end; }
 .settings-link { margin-bottom: 11px; border-top: 1px solid var(--line); border-radius: 0; padding-top: 14px; }
 .profile { display: flex; align-items: center; gap: 9px; padding: 12px 4px 4px; border-top: 1px solid var(--line); }
 .profile-avatar { color: #fff; background: #8d9d8e; border-radius: 50%; }
@@ -1023,6 +1046,14 @@ button, input, select, textarea { -webkit-tap-highlight-color: transparent; }
   .calendar-day { min-height: 56px; }
   .chat-header { padding-inline: 8px; }
   .toolbar-icon { width: 31px; }
+}
+@media (max-width: 420px) {
+  .topbar { gap: 4px; padding-inline: 8px; }
+  .topbar-actions { gap: 3px; }
+  .topbar-guide, .topbar-capture, .status-indicator { display: none; }
+  .breadcrumbs { min-width: 0; }
+  .breadcrumbs span:first-child, .breadcrumbs span:nth-child(2) { display: none; }
+  .hero-copy h1 { overflow-wrap: anywhere; }
 }
 .focus-shell { width: 100%; max-width: 100%; min-width: 0; }
 .focus-card { min-width: 0; overflow-wrap: anywhere; }

@@ -25,6 +25,8 @@
 5. Compared light and dark at 390 × 844. Confirmed the hero, composer, prompt chips, and shortcut cards stack without horizontal overflow.
 6. Verified theme switching, Home → Tasks → Home navigation, keyboard-accessible controls, and zero browser console errors.
 7. Fixed an unauthenticated AI-model request that could trigger a refresh loop on the sign-in screen.
+8. Tightened the sidebar to the reference proportions, moved workspace selection below primary navigation, and added a persistent New workspace dialog with selectable identity colors.
+9. Re-tested at a 304px embedded viewport and removed all horizontal overflow (`scrollWidth` equals `clientWidth`). Desktop verification at 1425px also has no horizontal overflow.
 
 ## Final result
 

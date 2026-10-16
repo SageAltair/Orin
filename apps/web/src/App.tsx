@@ -101,6 +101,7 @@ import { QuickCapture } from "./QuickCapture";
 import { VoiceInput } from "./VoiceInput";
 import { IntelligenceReview } from "./IntelligenceReview";
 import { HomeDashboard } from "./HomeDashboard";
+import { SidebarWorkspaces } from "./SidebarWorkspaces";
 
 const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
 
@@ -784,6 +785,7 @@ export default function App() {
   const [guidedOpen, setGuidedOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeWorkspaceName, setActiveWorkspaceName] = useState("Personal");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -1389,16 +1391,7 @@ export default function App() {
           </span>
           <span>orin</span>
         </a>
-        <div className="workspace-switch">
-          <span className="workspace-avatar">
-            {user.display_name[0]?.toUpperCase()}
-          </span>
-          <span>
-            <strong>My workspace</strong>
-            <small>{user.email}</small>
-          </span>
-        </div>
-        <span className="nav-label">WORKSPACE</span>
+        <span className="nav-label">MENU</span>
         <nav className="navigation">
           {navigation.map((item) => (
             <button
@@ -1418,6 +1411,7 @@ export default function App() {
             </button>
           ))}
         </nav>
+        <SidebarWorkspaces userId={user.id} onActiveChange={setActiveWorkspaceName} />
         <div className="sidebar-bottom">
           <button
             className="nav-link settings-link"
@@ -1466,7 +1460,7 @@ export default function App() {
             <Menu size={19} />
           </button>
           <div className="breadcrumbs">
-            <span>My workspace</span>
+            <span>{activeWorkspaceName}</span>
             <span>/</span>
             <span>{title}</span>
           </div>
