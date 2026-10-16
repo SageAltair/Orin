@@ -18,7 +18,7 @@ from orin_api.models import (
     IdeaInbox,
     CreativeDocumentCard,
     CreativeOutlineItem,
-    IdeaDocumentLink,
+    IdeaDocumentLink as IdeaDocumentLinkModel,
     KnowledgeDocument,
     Project,
 )
@@ -131,7 +131,7 @@ class IdeasCatalog:
         key = (idea_id, document_id)
         if key in self.links:
             raise ValueError("This idea is already linked to the document")
-        link = IdeaDocumentLink(
+        link = IdeaDocumentLinkModel(
             id=uuid.uuid4(),
             user_id=knowledge_document_user_id(session, document_id),
             idea_id=idea_id,
