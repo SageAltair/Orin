@@ -15,6 +15,7 @@ from orin_api.models import (
     ActivityType,
     CreativeDocumentCard,
     CreativeOutlineItem,
+    KnowledgeDocument,
     Project,
     User,
 )
@@ -28,6 +29,15 @@ def _owned_project(session: Session, project_id: uuid.UUID, user: User) -> Proje
     if project is None or project.owner_id != user.id:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+
+def _owned_document(session: Session, document_id: uuid.UUID, project_id: uuid.UUID, user: User) -> KnowledgeDocument:
+    document = session.get(KnowledgeDocument, document_id)
+    if document is None or document.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if document.project_id is not None and document.project_id != project_id:
+        raise HTTPException(status_code=422, detail="Document belongs to another project")
+    return document
 
 
 class OutlineItemCreate(BaseModel):
@@ -77,6 +87,18 @@ class DocumentCardCreate(BaseModel):
         "todo", "drafting", "revised", "polished", "ready", "published"
     ] = "todo"
     position: int = 0
+
+
+class DocumentCardPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    document_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=240)
+    summary: str | None = None
+    purpose: str | None = None
+    central_question: str | None = None
+    point_of_view: str | None = None
+    status: Literal["todo", "drafting", "revised", "polished", "ready", "published"] | None = None
+    position: int | None = None
 
 
 class DocumentCardRead(BaseModel):
@@ -152,6 +174,12 @@ def create_outline_item(
     _owned_project(session, project_id, user)
     if payload.parent_id is not None and payload.document_id is not None:
         raise HTTPException(status_code=422, detail="Provide only one of parent_id or document_id")
+    if payload.parent_id is not None:
+        parent = session.get(CreativeOutlineItem, payload.parent_id)
+        if parent is None or parent.user_id != user.id or parent.project_id != project_id:
+            raise HTTPException(status_code=404, detail="Parent outline item not found")
+    if payload.document_id is not None:
+        _owned_document(session, payload.document_id, project_id, user)
     row = CreativeOutlineItem(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -240,6 +268,8 @@ def create_document_card(
     user: User = Depends(get_current_user),
 ) -> DocumentCardRead:
     _owned_project(session, project_id, user)
+    if payload.document_id is not None:
+        _owned_document(session, payload.document_id, project_id, user)
     row = CreativeDocumentCard(
         id=uuid.uuid4(),
         user_id=user.id,
@@ -274,7 +304,7 @@ def create_document_card(
 def update_document_card(
     project_id: uuid.UUID,
     card_id: uuid.UUID,
-    payload: DocumentCardCreate,
+    payload: DocumentCardPatch,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> DocumentCardRead:
@@ -282,13 +312,17 @@ def update_document_card(
     card = session.get(CreativeDocumentCard, card_id)
     if card is None or card.project_id != project_id or card.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
-    card.title = payload.title
-    card.summary = payload.summary
-    card.purpose = payload.purpose
-    card.central_question = payload.central_question
-    card.point_of_view = payload.point_of_view
-    card.status = payload.status
-    card.position = payload.position
+    changes = payload.model_dump(exclude_unset=True)
+    if "title" in changes and changes["title"] is None:
+        raise HTTPException(status_code=422, detail="Card title cannot be null")
+    if "status" in changes and changes["status"] is None:
+        raise HTTPException(status_code=422, detail="Card status cannot be null")
+    if "position" in changes and changes["position"] is None:
+        raise HTTPException(status_code=422, detail="Card position cannot be null")
+    if changes.get("document_id") is not None:
+        _owned_document(session, changes["document_id"], project_id, user)
+    for field, value in changes.items():
+        setattr(card, field, value)
     session.flush()
     add_activity(
         session,
