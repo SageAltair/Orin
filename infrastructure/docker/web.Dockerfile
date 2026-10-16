@@ -8,7 +8,8 @@ RUN --mount=type=cache,target=/root/.npm npm ci --include=optional --ignore-scri
     && test -x node_modules/@esbuild/linux-x64/bin/esbuild \
     && sha256sum package-lock.json | cut -d ' ' -f 1 > node_modules/.orin-package-lock-hash
 COPY apps/web ./
-RUN chmod +x ./docker-entrypoint.sh \
+RUN sed -i 's/\r$//' ./docker-entrypoint.sh \
+    && chmod +x ./docker-entrypoint.sh \
     && cp ./docker-entrypoint.sh /usr/local/bin/orin-web-entrypoint
 EXPOSE 5173
 ENTRYPOINT ["/usr/local/bin/orin-web-entrypoint"]
