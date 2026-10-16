@@ -36,6 +36,8 @@ from orin_api.models import (
     ApprovalStatus,
     AIModelConfiguration,
     AIProviderConnection,
+    AIUserPolicy,
+    AIUsageRecord,
     EnvironmentPreference,
     ExecutionAudit,
     FocusSession,
@@ -285,6 +287,7 @@ def submit_command(
     ).order_by(FileAttachment.created_at.desc()).limit(5)).all()
     attachments.reverse()
     session.add(command)
+    terminal_usage_failure: dict[str, object] | None = None
     try:
         session.flush()
         add_activity(session, user_id=user.id, actor_user_id=user.id,
@@ -292,6 +295,7 @@ def submit_command(
             command_id=command.id, correlation_id=str(command.id), source="command_api",
             idempotency_key=f"command.received:{command.id}")
         configured_model = None
+        configured_candidates: list[tuple[AIModelConfiguration, AIProviderConnection]] = []
         if data.model_configuration_id is not None:
             configured_model = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
                 AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
@@ -299,11 +303,25 @@ def submit_command(
                 AIModelConfiguration.enabled.is_(True), AIProviderConnection.enabled.is_(True))).first()
             if configured_model is None:
                 raise AIProviderError("The selected AI model is unavailable", category="model_unavailable")
+            configured_candidates = [configured_model]
         else:
-            configured_model = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
+            available_models = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
                 AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
                 AIModelConfiguration.user_id == user.id, AIModelConfiguration.enabled.is_(True),
-                AIModelConfiguration.is_default.is_(True), AIProviderConnection.enabled.is_(True))).first()
+                AIProviderConnection.enabled.is_(True))).all()
+            policy = session.get(AIUserPolicy, user.id)
+            preferred = str((policy.task_model_ids or {}).get(AITaskType.COMMAND_INTERPRETATION.value, "")) if policy else ""
+            fallback_ids = list(policy.fallback_model_ids or []) if policy else []
+            def candidate_rank(item: tuple[AIModelConfiguration, AIProviderConnection]) -> tuple[int, int, str]:
+                row = item[0]; identity = str(row.id)
+                if identity == preferred: return (0, 0, row.model_id)
+                if row.is_default: return (1, 0, row.model_id)
+                if identity in fallback_ids: return (2, fallback_ids.index(identity), row.model_id)
+                return (3, 0, row.model_id)
+            configured_candidates = sorted(available_models, key=candidate_rank)
+            if configured_candidates and not (policy and policy.auto_enabled):
+                configured_candidates = [configured_candidates[0]] + [item for item in configured_candidates[1:] if str(item[0].id) in fallback_ids]
+            configured_model = configured_candidates[0] if configured_candidates else None
         if configured_model is not None:
             model_row, connection = configured_model
             if settings.integration_encryption_key is None:
@@ -414,10 +432,59 @@ def submit_command(
                     raise AIProviderError("Image attachments exceed the 10 MB vision request limit or failed integrity checks.", category="attachment_limit")
                 images.append({"mime_type": item.media_type, "data": base64.b64encode(content).decode("ascii")})
         context_json = json.dumps(active_context, ensure_ascii=True, default=str)
-        if images:
-            proposal = interpreter.interpret(data.text, context=context_json, images=images)
-        else:
-            proposal = interpreter.interpret(data.text, context=context_json)
+        attempts = configured_candidates or [None]
+        model_notice: str | None = None
+        proposal = None
+        last_provider_error: AIProviderError | None = None
+        input_estimate = max(1, (len(data.text) + len(context_json)) // 4)
+        for attempt_index, candidate in enumerate(attempts):
+            if candidate is not None:
+                model_row, connection = candidate
+                terminal_usage_failure = {
+                    "model_configuration_id": model_row.id, "provider": connection.provider,
+                    "model_id": model_row.model_id, "input_tokens_estimate": input_estimate,
+                    "used_fallback": attempt_index > 0,
+                }
+                capabilities = model_row.capabilities or {}
+                policy = session.get(AIUserPolicy, user.id)
+                if policy and policy.monthly_budget_cents is not None:
+                    input_rate, output_rate = capabilities.get("input_cost_per_million"), capabilities.get("output_cost_per_million")
+                    if not isinstance(input_rate, (int, float)) or not isinstance(output_rate, (int, float)):
+                        raise AIProviderError("This model needs pricing metadata before it can be used with the configured budget.", category="budget")
+                    month_start = datetime.now(timezone.utc) - timedelta(days=30)
+                    spent = session.scalar(select(func.coalesce(func.sum(AIUsageRecord.estimated_cost_microusd), 0)).where(
+                        AIUsageRecord.user_id == user.id, AIUsageRecord.created_at >= month_start)) or 0
+                    upper_estimate = int(input_estimate * input_rate + 1200 * output_rate)
+                    if spent + upper_estimate > policy.monthly_budget_cents * 10_000:
+                        raise AIProviderError("The configured AI usage budget would be exceeded.", category="budget")
+                try:
+                    credential = decrypt_credential(settings.integration_encryption_key.get_secret_value(), connection.credential_ciphertext) if settings.integration_encryption_key else ""
+                    current_interpreter = AIInterpreter(create_provider_from_config(
+                        connection.provider, credential, model_row.model_id, account_id=connection.account_id), model_row.model_id)
+                    proposal = current_interpreter.interpret(data.text, context=context_json, images=images) if images else current_interpreter.interpret(data.text, context=context_json)
+                    output_estimate = max(1, len(proposal.model_dump_json()) // 4)
+                    input_rate, output_rate = capabilities.get("input_cost_per_million"), capabilities.get("output_cost_per_million")
+                    cost = int(input_estimate * input_rate + output_estimate * output_rate) if isinstance(input_rate, (int, float)) and isinstance(output_rate, (int, float)) else None
+                    session.add(AIUsageRecord(user_id=user.id, model_configuration_id=model_row.id,
+                        provider=connection.provider, model_id=model_row.model_id, request_type=AITaskType.COMMAND_INTERPRETATION.value,
+                        status="completed", input_tokens_estimate=input_estimate, output_tokens_estimate=output_estimate,
+                        estimated_cost_microusd=cost, used_fallback=attempt_index > 0))
+                    if attempt_index > 0:
+                        model_notice = f"Used fallback model {model_row.display_name} from {connection.display_name} because the preferred model was unavailable."
+                    interpreter, model = current_interpreter, model_row.model_id
+                    break
+                except AIProviderError as exc:
+                    last_provider_error = exc
+                    session.add(AIUsageRecord(user_id=user.id, model_configuration_id=model_row.id,
+                        provider=connection.provider, model_id=model_row.model_id, request_type=AITaskType.COMMAND_INTERPRETATION.value,
+                        status="failed", input_tokens_estimate=input_estimate, error_category=exc.category,
+                        used_fallback=attempt_index > 0))
+                    continue
+            else:
+                proposal = interpreter.interpret(data.text, context=context_json, images=images) if images else interpreter.interpret(data.text, context=context_json)
+                break
+        if proposal is None:
+            raise last_provider_error or AIProviderError("No suitable AI model is available.", category="model_unavailable")
         add_activity(session, user_id=user.id, actor_user_id=user.id,
             activity_type=ActivityType.INTENT_INTERPRETED,
             summary=f"Intent interpreted: {proposal.intent.value}", command_id=command.id,
@@ -429,8 +496,11 @@ def submit_command(
                 activity_type=ActivityType.COMMAND_COMPLETED, summary="Command completed",
                 command_id=command.id, result_status="completed", source="command_api",
                 correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
+            response_result = {"response": proposal.parameters.response}
+            if model_notice is not None:
+                response_result["model_notice"] = model_notice
             response = CommandResult(command_id=command.id, conversation_id=conversation.id, status="completed", intent="RESPOND",
-                result={"response": proposal.parameters.response}, message=proposal.parameters.response or "Hello! What would you like help with?")
+                result=response_result, message=proposal.parameters.response or "Hello! What would you like help with?")
             question = (proposal.parameters.response or "").strip()
             if "?" in question:
                 conversation.pending_question = {"question": question, "purpose": "clarification",
@@ -486,6 +556,13 @@ def submit_command(
         session.flush()
         session.add(command)
         session.flush()
+        if terminal_usage_failure is not None:
+            session.add(AIUsageRecord(user_id=user.id,
+                model_configuration_id=terminal_usage_failure["model_configuration_id"],
+                provider=str(terminal_usage_failure["provider"]), model_id=str(terminal_usage_failure["model_id"]),
+                request_type=AITaskType.COMMAND_INTERPRETATION.value, status="failed",
+                input_tokens_estimate=int(terminal_usage_failure["input_tokens_estimate"]),
+                error_category=exc.category, used_fallback=bool(terminal_usage_failure["used_fallback"])))
         add_activity(session, user_id=user.id, actor_user_id=user.id,
             activity_type=ActivityType.COMMAND_RECEIVED, summary="Command received",
             command_id=command.id, correlation_id=str(command.id), source="command_api",

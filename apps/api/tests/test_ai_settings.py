@@ -77,3 +77,52 @@ def test_capability_registry_is_authenticated_product_evidence(client: TestClien
     payload = response.json()
     assert payload["identity"]["name"] == "Orin"
     assert any(item["name"] == "Ask Orin drawer" for item in payload["screens"])
+
+
+def test_routing_policy_favorites_usage_and_fallback_are_user_controlled(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    providers = []
+    for provider in ("openai", "anthropic"):
+        created = client.post("/api/v1/intelligence/providers", json={
+            "provider": provider, "display_name": provider.title(), "api_key": f"secret-{provider}",
+        }).json()
+        providers.append(created)
+    models = []
+    for connection, model_id in zip(providers, ("primary-test", "fallback-test")):
+        model = client.post("/api/v1/intelligence/models", json={
+            "connection_id": connection["id"], "model_id": model_id,
+        }).json()
+        model = client.patch(f"/api/v1/intelligence/models/{model['id']}", json={
+            "is_default": model_id == "primary-test", "is_favorite": True,
+            "capabilities": {"tools": True, "input_cost_per_million": 1.0, "output_cost_per_million": 2.0},
+        }).json()
+        assert model["is_favorite"] is True
+        models.append(model)
+    policy = client.put("/api/v1/intelligence/routing-policy", json={
+        "auto_enabled": True, "fallback_model_ids": [models[1]["id"]],
+        "task_model_ids": {"command_interpretation": models[0]["id"]}, "monthly_budget_cents": 1000,
+    })
+    assert policy.status_code == 200, policy.text
+
+    import orin_api.domain_router as domain_router
+    from orin_api.ai import AIIntent, AIProviderError
+    monkeypatch.setattr(domain_router, "create_provider_from_config", lambda *args, **kwargs: object())
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str): self.model = model; self.provider = provider
+        def interpret(self, command: str, *, context: str | None = None, images=None) -> AIIntent:
+            if self.model == "primary-test": raise AIProviderError("Primary unavailable", category="provider_unavailable")
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Fallback answer"}}')
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    response = client.post("/api/v1/commands", json={"text": "Help me plan this"})
+    assert response.status_code == 200, response.text
+    assert response.json()["message"] == "Fallback answer"
+    assert "fallback model" in response.json()["result"]["model_notice"].lower()
+    usage = client.get("/api/v1/intelligence/usage").json()
+    assert usage["requests"] == 2 and usage["failed_requests"] == 1
+    assert any(row["fallbacks"] == 1 for row in usage["by_model"])
+
+
+def test_routing_policy_rejects_another_users_model(client: TestClient) -> None:
+    response = client.put("/api/v1/intelligence/routing-policy", json={
+        "fallback_model_ids": ["00000000-0000-0000-0000-000000000001"],
+    })
+    assert response.status_code == 422

@@ -250,12 +250,14 @@ export function CommandAnswer({ result }: { result: CommandResult }) {
     typeof result.result.response === "string"
       ? result.result.response
       : null;
+  const modelNotice = result.result && typeof result.result === "object" && !Array.isArray(result.result) && typeof result.result.model_notice === "string" ? result.result.model_notice : null;
   return (
     <article className="chat-answer">
       <div className="eyebrow">ORIN · {result.status.replaceAll("_", " ")}</div>
       {result.execution?.approval_id && (
         <p>Approval {result.execution.approval_id}</p>
       )}
+      {modelNotice && <p className="model-notice">{modelNotice}</p>}
       {response !== null ? (
         <MarkdownResponse value={response} />
       ) : (

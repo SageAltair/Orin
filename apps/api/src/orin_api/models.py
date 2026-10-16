@@ -1036,6 +1036,34 @@ class AIModelConfiguration(TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     capabilities: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    is_favorite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class AIUserPolicy(TimestampMixin, Base):
+    __tablename__ = "ai_user_policies"
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    auto_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    fallback_model_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    task_model_ids: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    monthly_budget_cents: Mapped[int | None] = mapped_column(Integer)
+    warning_threshold_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=80, server_default="80")
+
+
+class AIUsageRecord(CreatedAtMixin, Base):
+    __tablename__ = "ai_usage_records"
+    __table_args__ = (Index("ix_ai_usage_user_created", "user_id", "created_at"),)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    model_configuration_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("ai_model_configurations.id", ondelete="SET NULL"))
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    request_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    input_tokens_estimate: Mapped[int | None] = mapped_column(Integer)
+    output_tokens_estimate: Mapped[int | None] = mapped_column(Integer)
+    estimated_cost_microusd: Mapped[int | None] = mapped_column(Integer)
+    error_category: Mapped[str | None] = mapped_column(String(60))
+    used_fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
 
 class AssistantTemplate(TimestampMixin, Base):
