@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, BookOpen, CalendarDays, Command, FolderOpen, Lightbulb, ListTodo, Search, Timer, X } from "lucide-react";
 import { request } from "./api";
 import type { Capability, CapabilityId } from "./capabilities";
+import { VoiceInput } from "./VoiceInput";
 
 type PinnedTemplate = { id: string; title: string; prompt: string; category: string; is_pinned: boolean };
 const quickActions = [
@@ -27,7 +28,7 @@ export function QuickOrin(props: {
   if (!props.open) return null;
   return <div className="quick-orin-layer"><button className="quick-orin-scrim" aria-label="Close Quick Orin" onClick={props.onClose} /><section className="quick-orin" role="dialog" aria-modal="true" aria-labelledby="quick-orin-title">
     <header><span className="brand-mark"><Command size={16} /></span><div><span className="eyebrow">QUICK ORIN</span><h2 id="quick-orin-title">Ask or go anywhere</h2></div><button className="toolbar-icon" aria-label="Close Quick Orin" onClick={props.onClose}><X size={17} /></button></header>
-    <form onSubmit={(event) => { void props.submitCommand(event); props.onSent(); }}><Search size={18} /><input ref={inputRef} aria-label="Quick Orin command" value={props.command} onChange={event => props.setCommand(event.target.value)} placeholder="Ask Orin or search actions" /><button type="submit" disabled={!props.command.trim() || props.busy} aria-label="Send to Orin"><ArrowRight size={17} /></button></form>
+    <form onSubmit={(event) => { void props.submitCommand(event); props.onSent(); }}><Search size={18} /><input ref={inputRef} aria-label="Quick Orin command" value={props.command} onChange={event => props.setCommand(event.target.value)} placeholder="Ask Orin or search actions" /><VoiceInput value={props.command} onChange={props.setCommand} /><button type="submit" disabled={!props.command.trim() || props.busy} aria-label="Send to Orin"><ArrowRight size={17} /></button></form>
     <p className="quick-orin-context">Current context: {props.page}{props.projectName ? ` · ${props.projectName}` : ""}{props.taskName ? ` · ${props.taskName}` : ""}</p>
     <div className="quick-orin-results">
       {pinned.length > 0 && <section><h3>Pinned workflows</h3>{pinned.map(item => <button key={item.id} onClick={() => choosePrompt(item.prompt)}><Lightbulb size={16} /><span><strong>{item.title}</strong><small>{item.category}</small></span></button>)}</section>}

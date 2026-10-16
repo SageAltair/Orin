@@ -18,6 +18,7 @@ class PreferencesRead(BaseModel):
     pinned_capabilities: list[str]
     autonomy_mode: str = "balanced"
     custom_autonomy: dict[str, str] = Field(default_factory=dict)
+    proactive_mode: Literal["quiet", "supportive", "proactive", "persistent"] = "supportive"
 
 
 class PreferencesUpdate(BaseModel):
@@ -28,6 +29,7 @@ class PreferencesUpdate(BaseModel):
     pinned_capabilities: list[str] = Field(default_factory=lambda: ["home", "tasks"])
     autonomy_mode: str = Field(default="balanced", pattern="^(conservative|balanced|automatic|custom)$")
     custom_autonomy: dict[str, str] = Field(default_factory=dict)
+    proactive_mode: Literal["quiet", "supportive", "proactive", "persistent"] = "supportive"
 
 
 class CapabilityRead(BaseModel):

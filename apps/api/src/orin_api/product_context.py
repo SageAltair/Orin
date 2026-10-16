@@ -53,6 +53,7 @@ PRODUCT_INVENTORY = {
         {"name": "Personal Radar, Life Graph, and decision simulation", "status": "implemented", "evidence": "proactive_router.py and IntelligenceExplorer.tsx; bounded relationship graph, approaching signals, and fact/estimate-separated simulations"},
         {"name": "Specialist coordination and reusable automation", "status": "implemented", "evidence": "specialist_router.py; evidence-scoped specialist views and approval-aware scheduled action plans"},
         {"name": "Windows and Android device assistance", "status": "implemented, companion-dependent", "evidence": "worker_router.py and worker_service.py; platform capability profiles, one-time enrollment, approvals, signed jobs, Windows execution and Android companion protocol"},
+        {"name": "Missing-work analysis, personal reflection, brain dump, and proactive modes", "status": "implemented", "evidence": "proactive_router.py and user preferences; evidence-based findings/reflections, previewable multi-intent plans, and quiet/supportive/proactive/persistent behavior"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",

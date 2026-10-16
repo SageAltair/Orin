@@ -8,6 +8,7 @@ import { QuickOrin } from "./QuickOrin";
 import { GuidedMode, GUIDES } from "./GuidedMode";
 import { IntelligenceExplorer } from "./IntelligenceExplorer";
 import { SpecialistAutomation } from "./SpecialistAutomation";
+import { IntelligenceReview } from "./IntelligenceReview";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
@@ -61,6 +62,13 @@ describe("capability navigation", () => {
     const markup = renderToStaticMarkup(<SpecialistAutomation projects={[]} />);
     expect(markup).toContain("Specialists and automation");
     expect(markup).toContain("Add weekly review");
+  });
+
+  it("renders missing-work, reflection, and brain-dump tools", () => {
+    const markup = renderToStaticMarkup(<IntelligenceReview />);
+    expect(markup).toContain("What am I missing?");
+    expect(markup).toContain("Weekly reflection");
+    expect(markup).toContain("Brain dump");
   });
 });
 

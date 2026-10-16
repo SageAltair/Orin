@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import re
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,8 +16,10 @@ from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.memory_context import memory_provenance
-from orin_api.models import (CalendarEvent, Memory, Opportunity, Project, Risk, Task, TaskDependency,
-                             TaskReturnPoint, TaskSchedule, TaskStatus, User, UserSettings)
+from orin_api.models import (Activity, CalendarEvent, Memory, Opportunity, Project, Risk, Task, TaskDependency,
+                             TaskReturnPoint, TaskSchedule, TaskStatus, User, UserPreferences, UserSettings)
+from orin_api.action_plan_router import ActionPlanRequest, PlanStep, _preview, _run_plan
+from orin_api.models import Command, CommandStatus
 
 
 router = APIRouter(prefix="/api/v1/intelligence", tags=["personal intelligence"])
@@ -28,6 +32,12 @@ class DecisionScenario(BaseModel):
     delay_days: int = Field(default=0, ge=0, le=365)
 
 
+class BrainDumpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=3, max_length=6000)
+    execute: bool = False
+
+
 def _aware(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=timezone.utc) if value is not None and value.tzinfo is None else value
 
@@ -36,6 +46,8 @@ def _aware(value: datetime | None) -> datetime | None:
 def proactive_briefing(user: User = Depends(get_current_user),
                        session: Session = Depends(get_session)) -> dict[str, object]:
     settings = session.get(UserSettings, user.id)
+    preferences = session.scalar(select(UserPreferences).where(UserPreferences.user_id == user.id))
+    proactive_mode = preferences.proactive_mode if preferences else "supportive"
     timezone_name = settings.timezone if settings else "UTC"
     try:
         zone = ZoneInfo(timezone_name)
@@ -110,7 +122,9 @@ def proactive_briefing(user: User = Depends(get_current_user),
     advanced_projects = {task.project_id for task in completed if task.project_id}
     project_names = session.scalars(select(Project.name).where(
         Project.owner_id == user.id, Project.id.in_(advanced_projects))).all() if advanced_projects else []
-    return {"generated_at": now.isoformat(), "timezone": timezone_name,
+    if proactive_mode == "quiet":
+        one, findings = None, []
+    return {"generated_at": now.isoformat(), "timezone": timezone_name, "proactive_mode": proactive_mode,
         "one_move": ({"task_id": str(one.id), "title": one.title,
             "first_step": one.first_step, "why": one.why, "return_point": return_point,
             "reason": "Already in progress" if one.status == TaskStatus.IN_PROGRESS else
@@ -225,3 +239,87 @@ def simulate_decision(data: DecisionScenario, user: User = Depends(get_current_u
         "unknowns": ["Available people, budget, and scope changes are not represented in this workspace."],
         "recommendation": "Review the affected tasks and calendar blocks before deciding. This simulation did not change any records.",
         "changes_applied": False}
+
+
+@router.get("/missing")
+def what_am_i_missing(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    briefing = proactive_briefing(user, session)
+    tasks = session.scalars(select(Task).where(
+        Task.owner_id == user.id, Task.status.notin_([TaskStatus.DONE, TaskStatus.CANCELLED])
+    ).limit(300)).all()
+    task_ids = {row.id for row in tasks}
+    dependencies = session.scalars(select(TaskDependency).where(TaskDependency.task_id.in_(task_ids))).all() if task_ids else []
+    existing = {row.id: row for row in tasks}
+    findings = list(briefing.get("findings", []))
+    unresolved = [row for row in dependencies if row.depends_on_task_id in existing and existing[row.depends_on_task_id].status != TaskStatus.DONE]
+    if unresolved:
+        findings.append({"kind": "dependency", "confidence": "confirmed", "title": "Unresolved task dependencies",
+            "detail": f"{len(unresolved)} open task relationship(s) still depend on unfinished work.",
+            "evidence": [{"task_id": str(row.task_id), "depends_on_task_id": str(row.depends_on_task_id)} for row in unresolved[:5]],
+            "suggested_action": "Review the dependency order before scheduling downstream work."})
+    undated = [row for row in tasks if row.due_at is None and row.priority.value in {"urgent", "high"}]
+    if undated:
+        findings.append({"kind": "commitment", "confidence": "possible concern", "title": "Important work without a decision date",
+            "detail": f"{len(undated)} high-priority open task(s) have no recorded date.",
+            "evidence": [{"task_id": str(row.id), "title": row.title} for row in undated[:5]],
+            "suggested_action": "Decide whether each item needs time reserved, a date, or release."})
+    normalized = []
+    for item in findings[:5]:
+        normalized.append({**item, "confidence": item.get("confidence", "confirmed"),
+                           "suggested_action": item.get("suggested_action") or item.get("suggested_prompt")})
+    return {"findings": normalized, "scope": {"open_tasks": len(tasks), "dependencies": len(dependencies)},
+            "changes_applied": False}
+
+
+@router.get("/reflection")
+def personal_reflection(period: Literal["daily", "weekly"] = "weekly", user: User = Depends(get_current_user),
+                        session: Session = Depends(get_session)) -> dict[str, object]:
+    now = datetime.now(timezone.utc); start = now - timedelta(days=1 if period == "daily" else 7)
+    completed = session.scalars(select(Task).where(
+        Task.owner_id == user.id, Task.status == TaskStatus.DONE, Task.completed_at >= start
+    ).order_by(Task.completed_at.desc()).limit(100)).all()
+    activities = session.scalars(select(Activity).where(
+        Activity.user_id == user.id, Activity.created_at >= start
+    ).order_by(Activity.created_at.desc()).limit(200)).all()
+    decisions = session.scalars(select(Memory).where(
+        Memory.user_id == user.id, Memory.memory_type == "decision", Memory.updated_at >= start,
+        Memory.archived.is_(False)).limit(50)).all()
+    advanced_ids = {row.project_id for row in completed if row.project_id}
+    projects = session.scalars(select(Project).where(Project.owner_id == user.id, Project.id.in_(advanced_ids))).all() if advanced_ids else []
+    return {"period": period, "start": start.isoformat(), "end": now.isoformat(),
+            "accomplishments": [{"task_id": str(row.id), "title": row.title} for row in completed],
+            "projects_advanced": [{"project_id": str(row.id), "name": row.name} for row in projects],
+            "decisions": [{"memory_id": str(row.id), "title": row.title} for row in decisions],
+            "activity_count": len(activities),
+            "reflection": (f"You completed {len(completed)} task(s) and advanced {len(projects)} project(s)."
+                           if completed else "No completed tasks were recorded in this period. Review open work without treating missing records as failure."),
+            "evidence_only": True}
+
+
+@router.post("/brain-dump")
+def organize_brain_dump(data: BrainDumpRequest, user: User = Depends(get_current_user),
+                        session: Session = Depends(get_session)) -> dict[str, object]:
+    fragments = [part.strip(" .-\t") for part in re.split(r"[\n;]+|(?<=[.!?])\s+", data.text) if part.strip(" .-\t")][:20]
+    if not fragments:
+        raise HTTPException(status_code=422, detail="The brain dump does not contain an actionable item.")
+    items: list[dict[str, str]] = []
+    steps: list[PlanStep] = []
+    for index, text in enumerate(fragments):
+        lowered = text.casefold()
+        kind = "idea" if any(word in lowered for word in ("idea", "maybe", "could")) else "project" if lowered.startswith(("project ", "start a project", "create a project")) else "task"
+        items.append({"text": text, "kind": kind, "confidence": "rule-based suggestion"})
+        if kind == "idea":
+            steps.append(PlanStep(id=f"item_{index + 1}", action="save_memory", inputs={"memory_type": "knowledge", "memory_title": text[:180], "memory_content": text}))
+        elif kind == "project":
+            title = re.sub(r"^(?:create|start)\s+(?:a\s+)?project\s+(?:for\s+|to\s+)?", "", text, flags=re.I).strip() or text
+            steps.append(PlanStep(id=f"item_{index + 1}", action="create_project", inputs={"name": title[:160]}))
+        else:
+            steps.append(PlanStep(id=f"item_{index + 1}", action="create_task", inputs={"title": text[:240]}))
+    plan = ActionPlanRequest(title="Organize brain dump", steps=steps, stop_on_failure=False)
+    preview = _preview(plan, session, user)
+    if not data.execute:
+        return {"items": items, "preview": preview, "changes_applied": False, "plan": plan.model_dump(mode="json")}
+    parent = Command(user_id=user.id, text="Brain dump action plan", status=CommandStatus.SUBMITTED, response_intent="ACTION_PLAN")
+    session.add(parent); session.flush()
+    result = _run_plan(parent, plan, session, user)
+    return {"items": items, "preview": preview, "changes_applied": result["completed_steps"] > 0, "execution": result}
