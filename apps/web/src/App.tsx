@@ -100,6 +100,7 @@ import { CalendarWorkspace } from "./CalendarWorkspace";
 import { QuickCapture } from "./QuickCapture";
 import { VoiceInput } from "./VoiceInput";
 import { IntelligenceReview } from "./IntelligenceReview";
+import { HomeDashboard } from "./HomeDashboard";
 
 const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
 
@@ -827,6 +828,10 @@ export default function App() {
     return () => window.removeEventListener("keydown", openQuickOrin);
   }, []);
   useEffect(() => {
+    if (!user) {
+      setAiModels([]);
+      return;
+    }
     const syncModels = (event?: Event) => {
       const supplied = (event as CustomEvent<AIModel[]> | undefined)?.detail;
       const load = supplied ? Promise.resolve(supplied) : request<AIModel[]>("/intelligence/models");
@@ -1339,22 +1344,6 @@ export default function App() {
     setScheduleTaskId(id);
     selectPage("calendar");
   };
-  const homeTasks = tasks
-    .filter((task) => !["done", "cancelled"].includes(task.status))
-    .sort((left, right) => {
-      const rank: Record<Task["priority"], number> = {
-        urgent: 0,
-        high: 1,
-        normal: 2,
-        low: 3,
-      };
-      return (
-        rank[left.priority] - rank[right.priority] ||
-        (left.due_at ? new Date(left.due_at).getTime() : Infinity) -
-          (right.due_at ? new Date(right.due_at).getTime() : Infinity)
-      );
-    })
-    .slice(0, 5);
   const activeProjects = projects
     .filter((project) => project.status === "active")
     .slice(0, 4);
@@ -1538,7 +1527,7 @@ export default function App() {
           </div>
         </header>
         <FocusEnvironment />
-        <main id="main-content" className="main-content" tabIndex={-1}>
+        <main id="main-content" className={`main-content ${page === "home" ? "home-main" : ""}`} tabIndex={-1}>
           {loadError && (
             <p className="api-error" role="alert">
               {loadError}{" "}
@@ -1605,205 +1594,27 @@ export default function App() {
               renderAnswer={(result) => <CommandAnswer result={result} />}
             />
           ) : page === "home" ? (
-            <>
-              <div className="greeting">
-                <span className="eyebrow">YOUR WORKSPACE</span>
-                <h1>
-                  What needs your attention, {user.display_name.split(" ")[0]}?
-                </h1>
-                <p>Your projects, open tasks, and recent work in one place.</p>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setKnowledgeCaptureOpen(true)}
-                >
-                  Capture a thought
-                </button>
-                <button
-                  type="button"
-                  className="primary-button home-ask"
-                  onClick={() => setAskOpen(true)}
-                >
-                  <MessageCircle size={16} /> Ask Orin to plan or continue work
-                </button>
-              </div>
-              <div className="home-dashboard">
-                <ProactiveBriefing onOpenTask={openTask} onAsk={(prompt) => { setCommand(prompt); setAskOpen(true); }} />
-                <IntelligenceExplorer projects={activeProjects} />
-                <SpecialistAutomation projects={activeProjects} />
-                <IntelligenceReview />
-                <section className="home-section">
-                  <div className="section-title">
-                    <div>
-                      <span className="eyebrow">NEXT ACTIONS</span>
-                      <h2>What to work on next</h2>
-                    </div>
-                    <button
-                      className="text-action"
-                      onClick={() => selectPage("tasks")}
-                    >
-                      All tasks <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                  {loading ? (
-                    <div className="loading-state">
-                      <span className="spinner" />
-                      Loading tasks…
-                    </div>
-                  ) : homeTasks.length ? (
-                    <div className="home-record-list">
-                      {homeTasks.map((task) => (
-                        <button
-                          className="home-record"
-                          key={task.id}
-                          onClick={() => openTask(task.id)}
-                        >
-                          <span>
-                            <strong>{task.title}</strong>
-                            <small>
-                              {task.priority} priority
-                              {task.due_at
-                                ? ` · Due ${new Date(task.due_at).toLocaleDateString()}`
-                                : ""}
-                            </small>
-                          </span>
-                          <ArrowUpRight size={14} />
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="home-empty">
-                      <p>
-                        No open tasks. Capture a next step when you’re ready.
-                      </p>
-                      <button
-                        className="text-action"
-                        onClick={() => selectPage("tasks")}
-                      >
-                        <Plus size={14} /> Add a task
-                      </button>
-                    </div>
-                  )}
-                </section>
-                <section className="home-section">
-                  <div className="section-title">
-                    <div>
-                      <span className="eyebrow">CONTINUE WORKING</span>
-                      <h2>Recent sessions</h2>
-                    </div>
-                    <button
-                      className="text-action"
-                      onClick={() => {
-                        setAskOpen(true);
-                        setHistoryOpen(true);
-                      }}
-                    >
-                      History <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                  {conversations.length ? (
-                    <div className="home-record-list">
-                      {conversations.slice(0, 4).map((conversation) => (
-                        <button
-                          className="home-record"
-                          key={conversation.id}
-                          onClick={() => {
-                            setAskOpen(true);
-                            void openConversation(conversation.id);
-                          }}
-                        >
-                          <span>
-                            <strong>
-                              {conversation.title || "New work session"}
-                            </strong>
-                            <small>
-                              {new Date(
-                                conversation.updated_at,
-                              ).toLocaleDateString()}{" "}
-                              · {conversation.objective || "Open session"}
-                            </small>
-                          </span>
-                          <ArrowUpRight size={15} />
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="home-empty">
-                      <p>Your saved work sessions will appear here.</p>
-                      <button
-                        className="text-action"
-                        onClick={() => setAskOpen(true)}
-                      >
-                        <MessageCircle size={14} /> Start with Ask Orin
-                      </button>
-                    </div>
-                  )}
-                </section>
-                <section className="home-section home-projects">
-                  <div className="section-title">
-                    <div>
-                      <span className="eyebrow">PROJECTS</span>
-                      <h2>Active projects</h2>
-                    </div>
-                    <button
-                      className="text-action"
-                      onClick={() => selectPage("projects")}
-                    >
-                      All projects <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                  {loading ? (
-                    <div className="loading-state">
-                      <span className="spinner" />
-                      Loading projects…
-                    </div>
-                  ) : activeProjects.length ? (
-                    <div className="home-project-grid">
-                      {activeProjects.map((project) => {
-                        const projectTasks = tasks.filter(
-                          (task) => task.project_id === project.id,
-                        );
-                        const remaining = projectTasks.filter(
-                          (task) =>
-                            !["done", "cancelled"].includes(task.status),
-                        ).length;
-                        return (
-                          <button
-                            className="home-project-card"
-                            key={project.id}
-                            onClick={() => openProject(project.id)}
-                          >
-                            <strong>{project.name}</strong>
-                            <p>
-                              {project.objective ||
-                                project.description ||
-                                "No outcome recorded yet."}
-                            </p>
-                            <small>
-                              {remaining} open{" "}
-                              {remaining === 1 ? "task" : "tasks"}
-                            </small>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="home-empty">
-                      <p>
-                        No active projects yet. Create one to group related
-                        tasks and context.
-                      </p>
-                      <button
-                        className="text-action"
-                        onClick={() => selectPage("projects")}
-                      >
-                        <Plus size={14} /> Create a project
-                      </button>
-                    </div>
-                  )}
-                </section>
-              </div>
-            </>
+            <HomeDashboard
+              user={user}
+              tasks={tasks}
+              projects={projects}
+              conversations={conversations}
+              files={savedAttachments}
+              command={command}
+              setCommand={setCommand}
+              submitCommand={submitCommand}
+              busy={commandBusy}
+              openAssistant={(prompt) => { if (prompt) setCommand(prompt); setAskOpen(true); }}
+              openTask={openTask}
+              openProject={openProject}
+              openPage={(destination) => selectPage(destination)}
+              capture={() => setCaptureOpen(true)}
+            >
+              <ProactiveBriefing onOpenTask={openTask} onAsk={(prompt) => { setCommand(prompt); setAskOpen(true); }} />
+              <IntelligenceExplorer projects={activeProjects} />
+              <SpecialistAutomation projects={activeProjects} />
+              <IntelligenceReview />
+            </HomeDashboard>
           ) : (
             <>
               {!(page === "tasks" && focusRolloutEnabled) &&
