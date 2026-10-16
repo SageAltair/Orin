@@ -7,6 +7,7 @@ import { OrinWorkspace } from "./OrinWorkspace";
 import { QuickOrin } from "./QuickOrin";
 import { GuidedMode, GUIDES } from "./GuidedMode";
 import { IntelligenceExplorer } from "./IntelligenceExplorer";
+import { SpecialistAutomation } from "./SpecialistAutomation";
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
@@ -54,6 +55,12 @@ describe("capability navigation", () => {
     expect(markup).toContain("Personal Radar");
     expect(markup).toContain("Life Graph");
     expect(markup).toContain("Decision Simulator");
+  });
+
+  it("renders unified specialist coordination and automation", () => {
+    const markup = renderToStaticMarkup(<SpecialistAutomation projects={[]} />);
+    expect(markup).toContain("Specialists and automation");
+    expect(markup).toContain("Add weekly review");
   });
 });
 

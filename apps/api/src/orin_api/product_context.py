@@ -51,6 +51,7 @@ PRODUCT_INVENTORY = {
         {"name": "Personal intelligence memory", "status": "implemented", "evidence": "memory_context.py and workspace_router.py; categorized explicit/inferred memory, explainable relevance retrieval, correction, export, and deletion"},
         {"name": "Proactive planning and recovery", "status": "implemented", "evidence": "proactive_router.py and ProactiveBriefing.tsx; one move, schedule and blocker findings, return points, and evidence of progress"},
         {"name": "Personal Radar, Life Graph, and decision simulation", "status": "implemented", "evidence": "proactive_router.py and IntelligenceExplorer.tsx; bounded relationship graph, approaching signals, and fact/estimate-separated simulations"},
+        {"name": "Specialist coordination and reusable automation", "status": "implemented", "evidence": "specialist_router.py; evidence-scoped specialist views and approval-aware scheduled action plans"},
     ],
     "boundaries": [
         "No roadmap source is included in the supplied product inventory, so no feature is asserted as planned.",

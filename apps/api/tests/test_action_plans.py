@@ -109,3 +109,32 @@ def test_plan_pauses_for_approval_and_resumes_remaining_steps(world) -> None:
     assert client.post(f"/api/v1/approvals/{second_approval}/decision", json={"approved": True}).json()["status"] == "completed"
     finished = client.post(f"/api/v1/action-plans/{pending['plan_id']}/resume").json()
     assert finished["status"] == "completed" and finished["completed_steps"] == 2
+
+
+def test_specialists_share_evidence_and_automation_uses_validated_action_plan(world) -> None:
+    client, _, _ = world
+    project = client.post("/api/v1/projects", json={"name": "Launch"}).json()
+    client.post("/api/v1/tasks", json={"title": "Prepare release", "project_id": project["id"]})
+    coordinated = client.post("/api/v1/intelligence/specialists/coordinate", json={
+        "objective": "Prepare a safe launch", "project_id": project["id"],
+        "specialties": ["planning", "risk", "development"],
+    })
+    assert coordinated.status_code == 200, coordinated.text
+    assert len(coordinated.json()["specialists"]) == 3
+    assert coordinated.json()["evidence"]["open_tasks"][0]["title"] == "Prepare release"
+
+    created = client.post("/api/v1/intelligence/automations", json={
+        "title": "Weekly review", "objective": "Keep the release moving", "cadence": "weekly",
+        "plan": {"title": "Review action", "steps": [
+            {"id": "task", "action": "create_task", "inputs": {"title": "Review launch progress", "project_id": project["id"]}},
+        ]},
+    })
+    assert created.status_code == 201, created.text
+    automation = created.json()
+    assert automation["enabled"] is False and automation["preview"]["valid"] is True
+    enabled = client.patch(f"/api/v1/intelligence/automations/{automation['id']}", json={"enabled": True}).json()
+    assert enabled["next_run_at"] is not None
+    executed = client.post(f"/api/v1/intelligence/automations/{automation['id']}/run")
+    assert executed.status_code == 200, executed.text
+    assert executed.json()["run"]["status"] == "completed"
+    assert any(row["title"] == "Review launch progress" for row in client.get("/api/v1/tasks").json())
