@@ -19,6 +19,8 @@ SCOPES = {
     "read_file": "filesystem.file.read",
     "write_file": "filesystem.file.write",
     "run_allowed_command": "process.command.execute",
+    "show_notification": "device.notification.send",
+    "launch_app": "device.application.launch",
 }
 ALLOWED_COMMANDS: dict[str, tuple[str, ...]] = {
     "git_status": ("git", "-c", "core.fsmonitor=false", "status", "--short"),
@@ -161,6 +163,24 @@ def execute_job(job: WorkerJob, *, device_id: str, allowed_roots: tuple[Path, ..
     params = job.parameters
     if job.action == "get_system_info":
         return {"platform": os.name, "python": __import__("platform").python_version()}
+    if job.action == "show_notification":
+        if os.name != "nt":
+            raise PermissionError("Desktop notifications are currently available on Windows workers")
+        title, message = params.get("title"), params.get("message")
+        if not isinstance(title, str) or not isinstance(message, str) or not title or not message:
+            raise ValueError("Notification content is invalid")
+        script = "Add-Type -AssemblyName System.Windows.Forms;[System.Windows.Forms.MessageBox]::Show($args[1],$args[0])|Out-Null"
+        _run_bounded(("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script, title[:120], message[:500]), timeout=30)
+        return {"delivered": True}
+    if job.action == "launch_app":
+        if os.name != "nt":
+            raise PermissionError("Application launching is currently available on Windows workers")
+        executable = {"calculator": "calc.exe", "settings": "explorer.exe"}.get(params.get("app_id"))
+        if executable is None:
+            raise PermissionError("Application is not on the worker allowlist")
+        argv = (executable, "ms-settings:") if params.get("app_id") == "settings" else (executable,)
+        subprocess.Popen(argv, shell=False, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"launched": params["app_id"]}
     if job.action == "list_directory":
         path = _path(str(params.get("path", "")), allowed_roots)
         if not path.is_dir():
