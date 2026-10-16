@@ -86,6 +86,7 @@ import { QuickOrin } from "./QuickOrin";
 import { GuidedMode } from "./GuidedMode";
 import { ProactiveBriefing } from "./ProactiveBriefing";
 import { IntelligenceExplorer } from "./IntelligenceExplorer";
+import { SpecialistAutomation } from "./SpecialistAutomation";
 import { ProjectWorkspace } from "./ProjectWorkspace";
 import { FocusEnvironment, WorkspaceSettings } from "./WorkspaceSettings";
 import { AccountSecurity } from "./AccountSecurity";
@@ -1612,6 +1613,7 @@ export default function App() {
               <div className="home-dashboard">
                 <ProactiveBriefing onOpenTask={openTask} onAsk={(prompt) => { setCommand(prompt); setAskOpen(true); }} />
                 <IntelligenceExplorer projects={activeProjects} />
+                <SpecialistAutomation projects={activeProjects} />
                 <section className="home-section">
                   <div className="section-title">
                     <div>

@@ -16,6 +16,7 @@ from orin_api.planning_domain import occurrence, dates
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
 from orin_api.models import ActivityType, CalendarEvent, KnowledgeExtractionJob, Notification, Routine, RoutineCheckin, WorkerJob, WorkerJobStatus
+from orin_api.specialist_router import run_due_automations
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 except IntegrityError:
                     pass
         notification_tick(session, current)
+        run_due_automations(session, current)
         jobs = session.scalars(select(KnowledgeExtractionJob.id).where(
             KnowledgeExtractionJob.status == "queued"
         ).order_by(KnowledgeExtractionJob.created_at).limit(4)).all()
