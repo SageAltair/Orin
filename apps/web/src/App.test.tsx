@@ -61,7 +61,7 @@ describe("capability navigation", () => {
   it("renders unified specialist coordination and automation", () => {
     const markup = renderToStaticMarkup(<SpecialistAutomation projects={[]} />);
     expect(markup).toContain("Specialists and automation");
-    expect(markup).toContain("Add weekly review");
+    expect(markup).toContain("Open coordinator");
   });
 
   it("renders missing-work, reflection, and brain-dump tools", () => {

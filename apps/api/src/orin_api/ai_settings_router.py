@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from orin_api.ai import PROVIDER_BASE_URLS, ProviderName
@@ -15,7 +15,7 @@ from orin_api.auth import get_current_user
 from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
 from orin_api.integration_secrets import IntegrationSecretError, decrypt_credential, encrypt_credential
-from orin_api.models import AIModelConfiguration, AIProviderConnection, User
+from orin_api.models import AIModelConfiguration, AIProviderConnection, AIUsageRecord, AIUserPolicy, User
 from orin_api.product_context import product_capabilities
 
 router = APIRouter(prefix="/api/v1/intelligence", tags=["intelligence"])
@@ -48,6 +48,17 @@ class ModelUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool | None = None
     is_default: bool | None = None
+    is_favorite: bool | None = None
+    capabilities: dict[str, object] | None = None
+
+
+class RoutingPolicyUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    auto_enabled: bool = False
+    fallback_model_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
+    task_model_ids: dict[str, uuid.UUID] = Field(default_factory=dict)
+    monthly_budget_cents: int | None = Field(default=None, ge=100, le=10_000_000)
+    warning_threshold_percent: int = Field(default=80, ge=1, le=100)
 
 
 def _encryption_key(settings: Settings) -> str:
@@ -65,7 +76,8 @@ def _provider_read(row: AIProviderConnection) -> dict[str, object]:
 def _model_read(row: AIModelConfiguration, provider: str, provider_enabled: bool = True) -> dict[str, object]:
     return {"id": row.id, "connection_id": row.connection_id, "provider": provider,
             "model_id": row.model_id, "display_name": row.display_name, "enabled": row.enabled,
-            "is_default": row.is_default, "provider_enabled": provider_enabled, "capabilities": row.capabilities}
+            "is_default": row.is_default, "is_favorite": row.is_favorite,
+            "provider_enabled": provider_enabled, "capabilities": row.capabilities}
 
 
 def _connection(session: Session, user: User, connection_id: uuid.UUID) -> AIProviderConnection:
@@ -232,6 +244,68 @@ def update_model(model_id: uuid.UUID, data: ModelUpdate, user: User = Depends(ge
         row.is_default = True
     elif data.is_default is False:
         row.is_default = False
+    if data.is_favorite is not None:
+        row.is_favorite = data.is_favorite
+    if data.capabilities is not None:
+        allowed = {"tools", "vision", "reasoning", "streaming", "context_window", "input_cost_per_million", "output_cost_per_million"}
+        if set(data.capabilities) - allowed:
+            raise HTTPException(status_code=422, detail="Unsupported model capability metadata.")
+        row.capabilities = data.capabilities
     session.commit()
     connection = _connection(session, user, row.connection_id)
     return _model_read(row, connection.provider, connection.enabled)
+
+
+def _policy(session: Session, user: User) -> AIUserPolicy:
+    row = session.get(AIUserPolicy, user.id)
+    if row is None:
+        row = AIUserPolicy(user_id=user.id); session.add(row); session.flush()
+    return row
+
+
+def _policy_read(row: AIUserPolicy) -> dict[str, object]:
+    return {"auto_enabled": row.auto_enabled, "fallback_model_ids": row.fallback_model_ids,
+            "task_model_ids": row.task_model_ids, "monthly_budget_cents": row.monthly_budget_cents,
+            "warning_threshold_percent": row.warning_threshold_percent}
+
+
+@router.get("/routing-policy")
+def get_routing_policy(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    row = _policy(session, user); session.commit(); return _policy_read(row)
+
+
+@router.put("/routing-policy")
+def put_routing_policy(data: RoutingPolicyUpdate, user: User = Depends(get_current_user),
+                       session: Session = Depends(get_session)) -> dict[str, object]:
+    requested = {str(item) for item in data.fallback_model_ids} | {str(item) for item in data.task_model_ids.values()}
+    owned = {str(item) for item in session.scalars(select(AIModelConfiguration.id).where(
+        AIModelConfiguration.user_id == user.id, AIModelConfiguration.enabled.is_(True))).all()}
+    if requested - owned:
+        raise HTTPException(status_code=422, detail="Routing models must be enabled models owned by the user.")
+    row = _policy(session, user); row.auto_enabled = data.auto_enabled
+    row.fallback_model_ids = [str(item) for item in data.fallback_model_ids]
+    row.task_model_ids = {key: str(value) for key, value in data.task_model_ids.items()}
+    row.monthly_budget_cents = data.monthly_budget_cents; row.warning_threshold_percent = data.warning_threshold_percent
+    session.commit(); return _policy_read(row)
+
+
+@router.get("/usage")
+def ai_usage(days: int = 30, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=422, detail="Usage range must be between 1 and 365 days.")
+    start = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = session.scalars(select(AIUsageRecord).where(
+        AIUsageRecord.user_id == user.id, AIUsageRecord.created_at >= start).order_by(AIUsageRecord.created_at.desc()).limit(5000)).all()
+    cost = sum(row.estimated_cost_microusd or 0 for row in rows)
+    policy = _policy(session, user); session.commit()
+    groups: dict[str, dict[str, object]] = {}
+    for row in rows:
+        key = f"{row.provider}:{row.model_id}"; group = groups.setdefault(key, {"provider": row.provider, "model_id": row.model_id, "requests": 0, "failed": 0, "fallbacks": 0, "estimated_cost_microusd": 0})
+        group["requests"] = int(group["requests"]) + 1; group["failed"] = int(group["failed"]) + int(row.status == "failed")
+        group["fallbacks"] = int(group["fallbacks"]) + int(row.used_fallback); group["estimated_cost_microusd"] = int(group["estimated_cost_microusd"]) + (row.estimated_cost_microusd or 0)
+    budget_micro = policy.monthly_budget_cents * 10_000 if policy.monthly_budget_cents is not None else None
+    return {"days": days, "requests": len(rows), "failed_requests": sum(row.status == "failed" for row in rows),
+            "rate_limit_events": sum(row.error_category == "rate_limit" for row in rows), "estimated_cost_microusd": cost,
+            "estimated_cost_usd": round(cost / 1_000_000, 6), "budget_cents": policy.monthly_budget_cents,
+            "budget_used_percent": round(cost / budget_micro * 100, 1) if budget_micro else None,
+            "cost_kind": "estimate", "by_model": list(groups.values())}

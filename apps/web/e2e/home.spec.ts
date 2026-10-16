@@ -316,7 +316,7 @@ test("settings expose profile security, autonomy, approvals, and worker enrollme
   await expect(page.getByLabel("Worker token")).toHaveValue("one-time-test-worker-token-that-is-long");
   await page.getByRole("button", { name: "Request approval" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Request sent for approval" })).toBeVisible();
-  await expect(page.getByText("get system info")).toBeVisible();
+  await expect(page.getByRole("strong").filter({ hasText: "get system info" })).toBeVisible();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(/approved · low risk/)).toBeVisible();
   page.once("dialog", dialog => dialog.accept());
@@ -407,7 +407,7 @@ test("project intelligence stores knowledge and starts a persistent focus sessio
   await page.getByLabel("Title", { exact: true }).last().fill("Database decision");
   await page.getByLabel("Details").fill("Use PostgreSQL for consistent project data.");
   await page.getByRole("button", { name: "Save memory" }).click();
-  await expect(page.getByText("Database decision · decision")).toBeVisible();
+  await expect(page.getByText("Database decision · project")).toBeVisible();
 });
 
 test("adaptive navigation can minimize, hide, recover, and reset tools", async ({ page }) => {

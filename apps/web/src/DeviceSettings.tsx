@@ -25,8 +25,10 @@ export function DeviceSettings({ onApprovalCreated }: { onApprovalCreated: () =>
       onApprovalCreated();
       if (target) {
         setSelected(target);
-        const [nextJobs, profile] = await Promise.all([request<WorkerJob[]>(`/devices/${target}/jobs`), request<{ actions: Array<{ action: string; scope: string }> }>(`/devices/${target}/capabilities`)]);
-        setJobs(nextJobs); setCapabilities(profile.actions); setAction(current => profile.actions.some(item => item.action === current) ? current : profile.actions[0]?.action ?? "get_system_info");
+        const [jobsResult, profileResult] = await Promise.allSettled([request<WorkerJob[]>(`/devices/${target}/jobs`), request<{ actions: Array<{ action: string; scope: string }> }>(`/devices/${target}/capabilities`)]);
+        setJobs(jobsResult.status === "fulfilled" && Array.isArray(jobsResult.value) ? jobsResult.value : []);
+        const actions = profileResult.status === "fulfilled" && Array.isArray(profileResult.value?.actions) ? profileResult.value.actions : [{ action: "get_system_info", scope: "device:read" }];
+        setCapabilities(actions); setAction(current => actions.some(item => item.action === current) ? current : actions[0]?.action ?? "get_system_info");
       } else setJobs([]);
     } catch (cause) { setError(errorText(cause)); }
   };

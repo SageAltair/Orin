@@ -4,7 +4,7 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
   const now = "2026-10-10T08:00:00Z";
   let tasks: Array<Record<string, unknown>> = [
     { id: "task-today", title: "Review the launch outline", description: null, status: "todo", priority: "normal", due_at: null, focus_state: "today", project_id: null, created_at: now, updated_at: now },
-    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2026-10-13T14:00:00Z", focus_state: "later", project_id: null, created_at: now, updated_at: now },
+    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", focus_state: "later", project_id: null, created_at: now, updated_at: now },
   ];
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());

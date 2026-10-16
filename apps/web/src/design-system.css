@@ -717,6 +717,34 @@
   margin: auto;
 }
 
+/* Reference dashboard sidebar: compact navigation followed by user workspaces. */
+.orin-shell .sidebar:has(.sidebar-workspaces) {
+  width: 220px;
+  padding: 18px 14px 14px;
+}
+.orin-shell:has(.sidebar-workspaces) .main-column {
+  width: calc(100% - 220px);
+  margin-left: 220px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .brand {
+  margin: 0 0 20px 5px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .navigation {
+  gap: 2px;
+  margin-top: 7px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .nav-link {
+  min-height: 34px;
+  padding-inline: 9px;
+  font-size: 12px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .sidebar-workspaces {
+  margin-top: 18px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .sidebar-bottom {
+  padding-top: 10px;
+}
+
 @media (max-width: 1000px) {
   .manuscript-columns {
     grid-template-columns: 1fr;
@@ -741,6 +769,10 @@
   }
   .orin-shell .sidebar {
     width: 248px;
+  }
+  .orin-shell:has(.sidebar-workspaces) .main-column {
+    width: 100%;
+    margin-left: 0;
   }
   .orin-shell .breadcrumbs {
     gap: 7px;
