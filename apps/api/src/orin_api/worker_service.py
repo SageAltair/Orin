@@ -18,16 +18,32 @@ DEVICE_SCOPES = {
     "read_file": ("filesystem.file.read", "low"),
     "write_file": ("filesystem.file.write", "medium"),
     "run_allowed_command": ("process.command.execute", "high"),
+    "show_notification": ("device.notification.send", "medium"),
+    "launch_app": ("device.application.launch", "medium"),
 }
 ALLOWED_WORKER_COMMANDS = {"git_status", "git_version", "python_tests", "npm_tests"}
+ALLOWED_APPLICATIONS = {"calculator", "settings"}
+DEVICE_PROFILES = {
+    "windows": frozenset(DEVICE_SCOPES),
+    "android": frozenset({"get_system_info", "show_notification", "launch_app"}),
+    "linux": frozenset({"get_system_info", "list_directory", "read_file", "write_file", "run_allowed_command"}),
+}
 
 
-def validate_worker_action(action: str, parameters: dict[str, Any]) -> tuple[str, str]:
+def device_family(platform: str) -> str:
+    lowered = platform.casefold()
+    return next((name for name in DEVICE_PROFILES if name in lowered), "unknown")
+
+
+def validate_worker_action(action: str, parameters: dict[str, Any], *, platform: str | None = None) -> tuple[str, str]:
     policy = DEVICE_SCOPES.get(action)
     if policy is None:
         raise HTTPException(status_code=422, detail="Worker action is not supported")
+    if platform is not None and action not in DEVICE_PROFILES.get(device_family(platform), frozenset({"get_system_info"})):
+        raise HTTPException(status_code=422, detail="This action is unavailable for the device platform")
     expected = {"get_system_info": set(), "list_directory": {"path"}, "read_file": {"path"},
-                "write_file": {"path", "content"}, "run_allowed_command": {"command"}}[action]
+                "write_file": {"path", "content"}, "run_allowed_command": {"command"},
+                "show_notification": {"title", "message"}, "launch_app": {"app_id"}}[action]
     if set(parameters) != expected:
         raise HTTPException(status_code=422, detail="Worker action parameters are invalid")
     if action == "write_file" and not isinstance(parameters.get("content"), str):
@@ -41,13 +57,19 @@ def validate_worker_action(action: str, parameters: dict[str, Any]) -> tuple[str
             raise HTTPException(status_code=422, detail="Worker path is too long")
     if action == "run_allowed_command" and parameters.get("command") not in ALLOWED_WORKER_COMMANDS:
         raise HTTPException(status_code=422, detail="Command is not on the worker allowlist")
+    if action == "launch_app" and parameters.get("app_id") not in ALLOWED_APPLICATIONS:
+        raise HTTPException(status_code=422, detail="Application is not on the worker allowlist")
+    if action == "show_notification":
+        if not all(isinstance(parameters.get(key), str) and 1 <= len(parameters[key]) <= limit
+                   for key, limit in (("title", 120), ("message", 500))):
+            raise HTTPException(status_code=422, detail="Notification content is invalid")
     return policy
 
 
 def queue_user_job(session: Session, *, user: User, device: WorkerDevice, command: Command,
                    action: str, parameters: dict[str, Any],
                    requested_target: ExecutionTarget = ExecutionTarget.AUTO) -> tuple[WorkerJob, Approval]:
-    (scope, risk) = validate_worker_action(action, parameters)
+    (scope, risk) = validate_worker_action(action, parameters, platform=device.platform)
     if device.owner_id != user.id or device.status == DeviceStatus.REVOKED:
         raise HTTPException(status_code=404, detail="Active device not found")
     decision = select_target(requested=ExecutionTarget(requested_target),

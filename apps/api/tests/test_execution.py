@@ -273,6 +273,24 @@ def test_worker_job_cloud_target_fails_clearly_until_cloud_worker_exists(world: 
     assert "cloud execution is unavailable" in response.json()["detail"]
 
 
+def test_android_device_exposes_only_approved_companion_capabilities(world: tuple[TestClient, sessionmaker[Session], User]) -> None:
+    client, _, _ = world
+    enrolled = client.post("/api/v1/devices", json={"name": "Phone", "platform": "Android 16", "version": "1.0"}).json()
+    profile = client.get(f"/api/v1/devices/{enrolled['id']}/capabilities")
+    assert profile.status_code == 200
+    assert {item["action"] for item in profile.json()["actions"]} == {"get_system_info", "show_notification", "launch_app"}
+    assert client.post(f"/api/v1/devices/{enrolled['id']}/jobs", json={
+        "action": "read_file", "parameters": {"path": "/sdcard/private.txt"},
+    }).status_code == 422
+    notification = client.post(f"/api/v1/devices/{enrolled['id']}/jobs", json={
+        "action": "show_notification", "parameters": {"title": "Orin", "message": "Review the plan"},
+    })
+    assert notification.status_code == 202 and notification.json()["status"] == "pending_approval"
+    assert client.post(f"/api/v1/devices/{enrolled['id']}/jobs", json={
+        "action": "launch_app", "parameters": {"app_id": "banking"},
+    }).status_code == 422
+
+
 def test_ai_worker_action_uses_registry_and_waits_for_user_approval(world: tuple[TestClient, sessionmaker[Session], User], monkeypatch: pytest.MonkeyPatch) -> None:
     import orin_api.domain_router as domain_router
     from orin_api.ai import AIIntent

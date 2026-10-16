@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.models import ActivityType, Approval, ApprovalStatus, Command, DeviceStatus, User, WorkerDevice, WorkerJob, WorkerJobStatus
-from orin_api.worker_service import queue_user_job
+from orin_api.worker_service import DEVICE_PROFILES, DEVICE_SCOPES, device_family, queue_user_job
 from orin_api.services import add_activity
 
 router = APIRouter(prefix="/api/v1", tags=["devices and worker"])
@@ -81,6 +81,19 @@ def _worker_device(authorization: Annotated[str | None, Header()] = None, sessio
 @router.get("/devices")
 def list_devices(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[dict[str, object]]:
     return [_device_view(row) for row in session.scalars(select(WorkerDevice).where(WorkerDevice.owner_id == user.id).order_by(WorkerDevice.created_at.desc())).all()]
+
+
+@router.get("/devices/{device_id}/capabilities")
+def device_capabilities(device_id: uuid.UUID, user: User = Depends(get_current_user),
+                        session: Session = Depends(get_session)) -> dict[str, object]:
+    row = session.scalar(select(WorkerDevice).where(WorkerDevice.id == device_id, WorkerDevice.owner_id == user.id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    family = device_family(row.platform)
+    actions = DEVICE_PROFILES.get(family, frozenset({"get_system_info"}))
+    return {"device_id": str(row.id), "platform_family": family,
+            "actions": [{"action": action, "scope": DEVICE_SCOPES[action][0], "approval_required": True}
+                        for action in sorted(actions)]}
 
 
 @router.post("/devices", status_code=status.HTTP_201_CREATED)
