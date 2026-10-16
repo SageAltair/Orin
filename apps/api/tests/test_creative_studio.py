@@ -210,7 +210,7 @@ def test_outline_items_nest_by_parent_and_order_by_position(client: TestClient) 
 def test_outline_item_can_be_moved_and_marked_done(client: TestClient) -> None:
     project = _project(client)
     base = f"/api/v1/creative/projects/{project['id']}/outline"
-    created = client.post(base, json={"title": "A loose beat", "kind": "beat", "parent_id": str(uuid.uuid4())})
+    created = client.post(base, json={"title": "A loose beat", "kind": "beat"})
 
     patched = client.patch(f"{base}/{created.json()['id']}", json={"title": "A tightened beat", "status": "done", "position": 3})
 
@@ -223,7 +223,7 @@ def test_outline_item_can_be_moved_and_marked_done(client: TestClient) -> None:
 def test_outline_item_patch_rejects_unknown_status(client: TestClient) -> None:
     project = _project(client)
     base = f"/api/v1/creative/projects/{project['id']}/outline"
-    created = client.post(base, json={"title": "Beat", "kind": "beat", "parent_id": str(uuid.uuid4())})
+    created = client.post(base, json={"title": "Beat", "kind": "beat"})
 
     assert client.patch(f"{base}/{created.json()['id']}", json={"status": "shipped"}).status_code == 422
 
@@ -497,3 +497,71 @@ def test_creative_tables_exist_in_the_schema(sessions: tuple[sessionmaker, uuid.
         tables = set(session.execute(text("SELECT name FROM sqlite_master WHERE type = 'table'")).scalars())
     assert {"idea_inbox", "creative_outline_items", "creative_document_cards", "idea_document_links"} <= tables
 
+
+
+def test_card_partial_patch_preserves_other_fields(client: TestClient) -> None:
+    project = _project(client)
+    base = f"/api/v1/creative/projects/{project['id']}/cards"
+    created = client.post(base, json={"title": "Chapter", "summary": "Keep this", "position": 4})
+    assert created.status_code == 201, created.text
+    updated = client.patch(f"{base}/{created.json()['id']}", json={"status": "published"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "published"
+    assert updated.json()["title"] == "Chapter"
+    assert updated.json()["summary"] == "Keep this"
+    assert updated.json()["position"] == 4
+    assert client.patch(f"{base}/{created.json()['id']}", json={"title": None}).status_code == 422
+    cleared = client.patch(f"{base}/{created.json()['id']}", json={"summary": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["summary"] is None
+
+
+def test_creative_references_must_be_owned_and_project_consistent(
+    client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]
+) -> None:
+    factory, owner_id = sessions
+    project = _project(client)
+    other_project = _project(client, "Another project")
+    base = f"/api/v1/creative/projects/{project['id']}"
+    note = _note(client)
+    valid_card = client.post(f"{base}/cards", json={"title": "Owned", "document_id": note["id"]})
+    assert valid_card.status_code == 201, valid_card.text
+    valid_outline = client.post(f"{base}/outline", json={"title": "Owned outline", "document_id": note["id"]})
+    assert valid_outline.status_code == 201, valid_outline.text
+
+    with factory.begin() as session:
+        intruder = User(email="other-writer@example.test", password_hash="test-hash", display_name="Other writer")
+        session.add(intruder)
+        session.flush()
+        from orin_api.models import KnowledgeDocument
+        foreign_document = KnowledgeDocument(user_id=intruder.id, title="Private document", content="Secret")
+        session.add(foreign_document)
+        session.flush()
+        foreign_id = str(foreign_document.id)
+
+    assert client.post(f"{base}/cards", json={"title": "Foreign", "document_id": foreign_id}).status_code == 404
+    assert client.post(f"{base}/outline", json={"title": "Foreign", "document_id": foreign_id}).status_code == 404
+    assert client.patch(f"{base}/cards/{valid_card.json()['id']}", json={"document_id": foreign_id}).status_code == 404
+    assert client.patch(f"{base}/cards/{valid_card.json()['id']}", json={"status": "ready"}).status_code == 200
+
+    parent = client.post(f"{base}/outline", json={"title": "Parent"}).json()
+    assert client.post(f"{base}/outline", json={"title": "Child", "parent_id": parent["id"]}).status_code == 201
+    assert client.post(f"/api/v1/creative/projects/{other_project['id']}/outline",
+                       json={"title": "Wrong parent", "parent_id": parent["id"]}).status_code == 404
+    assert client.post(f"{base}/outline",
+                       json={"title": "Missing parent", "parent_id": str(uuid.uuid4())}).status_code == 404
+    assert client.get(f"{base}/cards").json()[0]["document_id"] == note["id"]
+
+
+def test_creative_document_project_mismatch_is_rejected(client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]) -> None:
+    factory, _ = sessions
+    first = _project(client, "First")
+    second = _project(client, "Second")
+    note = _note(client)
+    from orin_api.models import KnowledgeDocument
+    with factory.begin() as session:
+        row = session.get(KnowledgeDocument, uuid.UUID(note["id"]))
+        row.project_id = uuid.UUID(first["id"])
+    base = f"/api/v1/creative/projects/{second['id']}"
+    assert client.post(f"{base}/cards", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
+    assert client.post(f"{base}/outline", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
