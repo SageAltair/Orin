@@ -565,3 +565,30 @@ def test_creative_document_project_mismatch_is_rejected(client: TestClient, sess
     base = f"/api/v1/creative/projects/{second['id']}"
     assert client.post(f"{base}/cards", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
     assert client.post(f"{base}/outline", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
+
+
+def test_ideas_catalog_link_uses_persisted_model(
+    client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]
+) -> None:
+    from orin_api.creative_domain import IdeasCatalog
+    factory, owner_id = sessions
+    idea_id = uuid.UUID(client.post("/api/v1/creative/ideas", json={"text": "Linkable"}).json()["id"])
+    document_id = uuid.UUID(_note(client)["id"])
+    with factory.begin() as session:
+        catalog = IdeasCatalog()
+        link = catalog.link_idea_to_document(
+            session=session, idea_id=idea_id, document_id=document_id,
+            link_type="supports", note="Source material"
+        )
+        assert link.user_id == owner_id
+        assert link.document_id == document_id
+        assert link.id is not None
+    with factory() as session:
+        stored = session.scalar(
+            select(IdeaDocumentLink).where(
+                IdeaDocumentLink.idea_id == idea_id,
+                IdeaDocumentLink.document_id == document_id,
+            )
+        )
+        assert stored is not None
+        assert stored.link_type == "supports"
