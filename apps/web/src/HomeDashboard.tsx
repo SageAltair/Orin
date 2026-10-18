@@ -38,7 +38,7 @@ export function HomeDashboard(props: Props) {
       <div className="hero-copy"><p>{timeGreeting()}, {props.user.display_name.split(" ")[0]}</p><h1>What would you like to<br />work on today?</h1><span>Ask Orin, plan your day, or jump into a project.</span></div>
       <p className="hero-mantra">Better tools.<br />Deeper focus.<br />Greater impact.</p>
       <form className="hero-composer" onSubmit={event => { void props.submitCommand(event); props.openAssistant(); }}>
-        <Sparkles size={20} /><input aria-label="Ask Orin from home" value={props.command} onChange={event => props.setCommand(event.target.value)} placeholder="Ask Orin anything…" />
+        <Sparkles size={20} /><input aria-label="Home command" value={props.command} onChange={event => props.setCommand(event.target.value)} placeholder="Ask Orin anything…" />
         <button type="button" aria-label="Add attachment" onClick={props.capture}><Paperclip size={18} /></button>
         <button className="hero-send" aria-label="Send to Orin" disabled={props.busy || !props.command.trim()}><Send size={18} /></button>
       </form>

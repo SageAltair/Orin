@@ -110,7 +110,6 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
   return <div className={`focus-shell ${embedded ? "focus-embedded" : ""} ${dark ? "focus-dark" : "focus-light"} ${reduce ? "focus-reduced-motion" : ""}`}>
     <a className="focus-skip" href="#focus-main">Skip to content</a>
     {!embedded && <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><Command size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><X size={18} /></button></header>}
-    {embedded && <header className="task-workspace-heading"><div><span className="eyebrow">YOUR WORKSPACE</span><h1>Tasks</h1><p>Capture what matters. Choose a small step. Make room to focus.</p></div><button className="primary-button" type="button" aria-label="Capture a task" onClick={() => navClick("capture")}><Plus size={16}/> Add task</button></header>}
     <main id="focus-main" className="focus-main" tabIndex={-1}>
       {focus.error && <p className="focus-error" role="alert">{focus.error}</p>}
       {reentryVisible && <aside className="focus-reentry" aria-label="Welcome back"><strong>Welcome back.</strong><p>Your tasks are still here. Start with what feels useful today.</p><button type="button" className="focus-secondary" onClick={() => void request("/focus/reentry/dismiss", { method: "POST" }).then(() => setReentryVisible(false))}>Continue</button></aside>}

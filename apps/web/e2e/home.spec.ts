@@ -124,7 +124,7 @@ test("Calendar supports Month and Agenda plus event create, edit, and delete on 
   await signIn(page);
   await page.getByRole("button", { name: "Open navigation" }).click();
   await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
-  await expect(page.getByRole("heading", { name: "Calendar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Agenda", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Agenda", exact: true }).click();
   await expect(page.getByText("No events").first()).toBeVisible();
   await page.getByRole("button", { name: "New event" }).click();
@@ -272,7 +272,7 @@ test("home shows the personal dashboard and offers Ask Orin", async ({ page }) =
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Welcome to Orin" })).toBeVisible();
   await signIn(page);
-  await expect(page.getByRole("heading", { name: "What needs your attention, Morgan?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("Recent requests")).toHaveCount(0);
@@ -574,10 +574,10 @@ test("home dashboard shows persisted tasks, projects, and work sessions", async 
   await page.route("**/api/v1/commands?**", route => route.fulfill({ json: [] }));
   await page.goto("/");
   await signIn(page);
-  await expect(page.getByRole("heading", { name: "What needs your attention, Morgan?" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
   await expect(page.getByText("Prepare the launch outline")).toBeVisible();
   await expect(page.getByText("Already finished")).toHaveCount(0);
-  await expect(page.getByText("Orin launch")).toBeVisible();
+  await expect(page.getByText("Orin launch").first()).toBeVisible();
   await expect(page.getByText("Release planning")).toBeVisible();
 });
 

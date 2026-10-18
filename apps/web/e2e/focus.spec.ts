@@ -261,7 +261,8 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
   await expect(page.getByText("Prepare next week's notes")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
   await expect(page.getByText("Send the approved update")).toBeVisible();
-  await expect(page.locator(".task-workspace-heading").getByRole("heading", {name:"Tasks", exact:true})).toBeVisible();
+  await expect(page.locator(".task-workspace-heading")).toHaveCount(0);
+  await expect(focusNav).toBeVisible();
   expect(await focusNav.evaluate(el => getComputedStyle(el).position)).toBe("static");
   await page.screenshot({path:test.info().outputPath("tasks-desktop.png")});
   await page.emulateMedia({reducedMotion:"reduce"});

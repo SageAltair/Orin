@@ -30,16 +30,6 @@ export function WritingStudio({
   };
   return (
     <div className="writing-studio">
-      <header className="writing-studio-heading">
-        <div>
-          <span className="eyebrow">YOUR CREATIVE WORKSPACE</span>
-          <h1>Writing</h1>
-          <p>A quiet place to think. Room to build something bigger.</p>
-        </div>
-        <span className="studio-private">
-          <span /> Private workspace
-        </span>
-      </header>
       <nav className="studio-tabs" aria-label="Writing views">
         {tabs.map(({ id, label, icon: Icon }) => (
           <button

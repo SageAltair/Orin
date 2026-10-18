@@ -51,14 +51,14 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
   return <section className="sidebar-workspaces" aria-label="Workspaces">
     <span className="nav-label">WORKSPACES</span>
     <div className="workspace-list">
-      {items.map(item => <button type="button" className={`workspace-item ${activeId === item.id ? "active" : ""}`} key={item.id} onClick={() => select(item)}>
+      {items.map(item => <button type="button" className={`workspace-item ${activeId === item.id ? "active" : ""}`} key={item.id} onClick={() => select(item)} aria-label={item.name} title={item.name}>
         <span className="workspace-item-icon" style={{ "--workspace-color": item.color } as CSSProperties}>{item.name.slice(0, 1).toUpperCase()}</span>
         <span>{item.name}</span>
         <span className="workspace-status" style={{ background: item.color }} />
         {activeId === item.id && <Check className="workspace-check" size={12} />}
       </button>)}
     </div>
-    <button type="button" className="new-workspace-button" onClick={() => setCreating(true)}><Plus size={15} />New workspace</button>
+    <button type="button" className="new-workspace-button" aria-label="New workspace" title="New workspace" onClick={() => setCreating(true)}><Plus size={15} /><span>New workspace</span></button>
     {creating && <div className="workspace-dialog-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setCreating(false); }}>
       <form className="workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="new-workspace-title" onSubmit={create}>
         <header><div><span className="eyebrow">WORKSPACES</span><h2 id="new-workspace-title">Create a workspace</h2></div><button type="button" aria-label="Close workspace dialog" onClick={() => setCreating(false)}><X size={18} /></button></header>

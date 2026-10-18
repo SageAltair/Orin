@@ -47,6 +47,8 @@ import {
   MoreHorizontal,
   Library,
   Map,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import {
   ApiError,
@@ -107,6 +109,7 @@ const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
 
 const storageKey = "orin.preferences.v1";
 const conversationStorageKey = "orin.activeConversation.v1";
+const sidebarCollapsedStorageKey = "orin.sidebar-collapsed.v1";
 type Page = CapabilityId;
 type ChatTurn = { prompt: string; result: CommandResult };
 export function mergeCommandHistory(
@@ -785,6 +788,11 @@ export default function App() {
   const [guidedOpen, setGuidedOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.localStorage.getItem(sidebarCollapsedStorageKey) === "true",
+  );
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Personal");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1369,7 +1377,7 @@ export default function App() {
   if (!user) return <AuthScreen onAuthenticated={setUser} />;
   return (
     <div
-      className={`orin-shell density-${preferences.density} theme-${preferences.theme}`}
+      className={`orin-shell density-${preferences.density} theme-${preferences.theme}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
     >
       <a className="skip-link" href="#main-content">
         Skip to content
@@ -1391,6 +1399,19 @@ export default function App() {
           </span>
           <span>orin</span>
         </a>
+        <button
+          className="sidebar-collapse-button"
+          type="button"
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar" : "Minimize sidebar"}
+          onClick={() => {
+            const next = !sidebarCollapsed;
+            setSidebarCollapsed(next);
+            window.localStorage.setItem(sidebarCollapsedStorageKey, String(next));
+          }}
+        >
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
         <span className="nav-label">MENU</span>
         <nav className="navigation">
           {navigation.map((item) => (
@@ -1401,6 +1422,8 @@ export default function App() {
               className={`nav-link ${preferences.minimizedCapabilities.includes(item.id) ? "minimized " : ""}${page === item.id ? "active" : ""}`}
               onClick={() => selectPage(item.id)}
               aria-current={page === item.id ? "page" : undefined}
+              aria-label={item.label}
+              title={sidebarCollapsed ? item.label : undefined}
             >
               <span className="nav-icon">
                 <NavigationIcon id={item.id} />
@@ -1417,6 +1440,8 @@ export default function App() {
             className="nav-link settings-link"
             type="button"
             onClick={() => selectPage("settings")}
+            aria-label="Preferences"
+            title={sidebarCollapsed ? "Preferences" : undefined}
           >
             <Settings2 size={17} />
             Preferences
@@ -1521,7 +1546,7 @@ export default function App() {
           </div>
         </header>
         <FocusEnvironment />
-        <main id="main-content" className={`main-content ${page === "home" ? "home-main" : ""}`} tabIndex={-1}>
+        <main id="main-content" className={`main-content page-${page} ${page === "home" ? "home-main" : ""}`} tabIndex={-1}>
           {loadError && (
             <p className="api-error" role="alert">
               {loadError}{" "}
@@ -1611,20 +1636,6 @@ export default function App() {
             </HomeDashboard>
           ) : (
             <>
-              {!(page === "tasks" && focusRolloutEnabled) &&
-                page !== "memories" && page !== "opportunities" && (
-                  <div className="page-intro">
-                    <span className="eyebrow">YOUR WORKSPACE</span>
-                    <h1>{title}</h1>
-                    <p>
-                      {
-                        capabilities.find((item) => item.id === page)
-                          ?.description
-                      }
-                      .
-                    </p>
-                  </div>
-                )}
               {page === "opportunities" ? <Suspense fallback={<p role="status">Loading opportunities…</p>}><OpportunityWorkspace projects={projects} onOpenTask={openTask}/></Suspense> : page === "calendar" ? (
                 <div data-orin-control="calendar-workspace"><CalendarWorkspace
                   projects={projects}
@@ -1682,7 +1693,7 @@ export default function App() {
               ) : null}
             </>
           )}
-          <footer className="page-footer">
+          {(page === "home" || page === "settings") && <footer className="page-footer">
             <span>Thoughtfully, at your pace.</span>
             <a
               href="#preferences"
@@ -1693,7 +1704,7 @@ export default function App() {
             >
               Workspace preferences <ArrowUpRight size={13} />
             </a>
-          </footer>
+          </footer>}
         </main>
       </div>
       <button

@@ -990,3 +990,113 @@
   outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: 4px;
 }
+
+/* Feature pages begin with their working surface and use the available canvas. */
+.orin-shell .main-content:is(.page-tasks, .page-projects, .page-calendar, .page-activity, .page-opportunities, .page-focus) {
+  width: calc(100% - 40px);
+  max-width: 1440px;
+  padding-top: 20px;
+}
+.orin-shell .page-projects .project-create-form { margin-bottom: 14px; }
+.orin-shell .page-projects .project-list-controls { margin-bottom: 18px; }
+.orin-shell:has(.main-content:not(.page-home)) .ask-fab {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+}
+.orin-shell:has(.main-content:not(.page-home)) .ask-fab span { display: none; }
+
+/* Writing is the primary canvas: navigation stays compact and content owns the viewport. */
+.orin-shell:has(.writing-studio) .main-content {
+  width: 100%;
+  max-width: none;
+  height: calc(100dvh - 64px);
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+.writing-studio .studio-tabs {
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.writing-studio .studio-tabs button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border-radius: 7px 7px 0 0;
+}
+.writing-studio .studio-surface { border-radius: 10px; }
+
+/* Desktop sidebar can collapse to an accessible icon rail. */
+.sidebar-collapse-button {
+  position: absolute;
+  top: 20px;
+  right: 12px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+.sidebar-collapse-button:hover { color: var(--text); background: var(--hover); }
+@media (min-width: 761px) {
+  .orin-shell.sidebar-collapsed .sidebar,
+  .orin-shell.sidebar-collapsed .sidebar:has(.sidebar-workspaces) {
+    width: 68px;
+    padding: 18px 8px 12px;
+  }
+  .orin-shell.sidebar-collapsed .main-column,
+  .orin-shell.sidebar-collapsed:has(.sidebar-workspaces) .main-column {
+    width: calc(100% - 68px);
+    margin-left: 68px;
+  }
+  .orin-shell.sidebar-collapsed .brand { justify-content: center; margin: 0 0 20px; }
+  .orin-shell.sidebar-collapsed .brand > span:last-child,
+  .orin-shell.sidebar-collapsed .sidebar > .nav-label,
+  .orin-shell.sidebar-collapsed .sidebar-workspaces > .nav-label,
+  .orin-shell.sidebar-collapsed .workspace-item > span:nth-child(2),
+  .orin-shell.sidebar-collapsed .workspace-status,
+  .orin-shell.sidebar-collapsed .workspace-check,
+  .orin-shell.sidebar-collapsed .new-workspace-button > span,
+  .orin-shell.sidebar-collapsed .profile > span:nth-child(2),
+  .orin-shell.sidebar-collapsed .tiny-pin { display: none; }
+  .orin-shell.sidebar-collapsed .sidebar-collapse-button { position: static; margin: 0 auto 10px; }
+  .orin-shell.sidebar-collapsed .navigation,
+  .orin-shell.sidebar-collapsed .sidebar-workspaces { margin-top: 6px; }
+  .orin-shell.sidebar-collapsed .nav-link,
+  .orin-shell.sidebar-collapsed .workspace-item,
+  .orin-shell.sidebar-collapsed .new-workspace-button {
+    justify-content: center;
+    overflow: hidden;
+    padding-inline: 0;
+    gap: 0;
+    font-size: 0;
+  }
+  .orin-shell.sidebar-collapsed .nav-icon { width: auto; }
+  .orin-shell.sidebar-collapsed .sidebar-bottom { display: grid; justify-items: center; }
+  .orin-shell.sidebar-collapsed .profile {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-inline: 0;
+  }
+  .orin-shell.sidebar-collapsed .logout-button { margin-left: 0; }
+}
+@media (max-width: 760px) {
+  .sidebar-collapse-button { display: none; }
+  .orin-shell:has(.writing-studio) .main-content {
+    width: 100%;
+    height: calc(100dvh - 58px);
+    padding: 8px;
+  }
+  .orin-shell .main-content:is(.page-tasks, .page-projects, .page-calendar, .page-activity, .page-opportunities, .page-focus) {
+    width: calc(100% - 24px);
+    padding-top: 12px;
+  }
+  .writing-studio .studio-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .writing-studio .studio-tabs button { flex: 0 0 auto; }
+}
