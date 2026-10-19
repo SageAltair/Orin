@@ -54,7 +54,7 @@ class ModelUpdate(BaseModel):
 
 class RoutingPolicyUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    auto_enabled: bool = False
+    auto_enabled: bool = True
     fallback_model_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
     task_model_ids: dict[str, uuid.UUID] = Field(default_factory=dict)
     monthly_budget_cents: int | None = Field(default=None, ge=100, le=10_000_000)
@@ -305,7 +305,7 @@ def ai_usage(days: int = 30, user: User = Depends(get_current_user), session: Se
         group["fallbacks"] = int(group["fallbacks"]) + int(row.used_fallback); group["estimated_cost_microusd"] = int(group["estimated_cost_microusd"]) + (row.estimated_cost_microusd or 0)
     budget_micro = policy.monthly_budget_cents * 10_000 if policy.monthly_budget_cents is not None else None
     return {"days": days, "requests": len(rows), "failed_requests": sum(row.status == "failed" for row in rows),
-            "rate_limit_events": sum(row.error_category == "rate_limit" for row in rows), "estimated_cost_microusd": cost,
+            "rate_limit_events": sum(row.error_category in {"rate_limited", "quota_exceeded"} for row in rows), "estimated_cost_microusd": cost,
             "estimated_cost_usd": round(cost / 1_000_000, 6), "budget_cents": policy.monthly_budget_cents,
             "budget_used_percent": round(cost / budget_micro * 100, 1) if budget_micro else None,
             "cost_kind": "estimate", "by_model": list(groups.values())}

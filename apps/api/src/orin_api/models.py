@@ -1042,7 +1042,7 @@ class AIModelConfiguration(TimestampMixin, Base):
 class AIUserPolicy(TimestampMixin, Base):
     __tablename__ = "ai_user_policies"
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    auto_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    auto_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     fallback_model_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     task_model_ids: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
     monthly_budget_cents: Mapped[int | None] = mapped_column(Integer)

@@ -296,32 +296,51 @@ def submit_command(
             idempotency_key=f"command.received:{command.id}")
         configured_model = None
         configured_candidates: list[tuple[AIModelConfiguration, AIProviderConnection]] = []
+        available_models = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
+            AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
+            AIModelConfiguration.user_id == user.id, AIModelConfiguration.enabled.is_(True),
+            AIProviderConnection.enabled.is_(True))).all()
+        policy = session.get(AIUserPolicy, user.id)
+        auto_routing_enabled = policy is None or policy.auto_enabled
+        preferred = str((policy.task_model_ids or {}).get(AITaskType.COMMAND_INTERPRETATION.value, "")) if policy else ""
+        fallback_ids = list(policy.fallback_model_ids or []) if policy else []
+
+        def is_free_model(row: AIModelConfiguration) -> bool:
+            capabilities = row.capabilities or {}
+            input_rate = capabilities.get("input_cost_per_million")
+            output_rate = capabilities.get("output_cost_per_million")
+            zero_priced = isinstance(input_rate, (int, float)) and isinstance(output_rate, (int, float)) and input_rate <= 0 and output_rate <= 0
+            return zero_priced or row.model_id.lower().endswith(":free")
+
+        def candidate_rank(item: tuple[AIModelConfiguration, AIProviderConnection]) -> tuple[int, int, str]:
+            row = item[0]
+            identity = str(row.id)
+            if identity == preferred:
+                return (0, 0, row.model_id)
+            if is_free_model(row):
+                return (1, 0, row.model_id)
+            if row.is_default:
+                return (2, 0, row.model_id)
+            if row.is_favorite:
+                return (3, 0, row.model_id)
+            if identity in fallback_ids:
+                return (4, fallback_ids.index(identity), row.model_id)
+            return (5, 0, row.model_id)
+
+        automatically_ranked = sorted(available_models, key=candidate_rank)
         if data.model_configuration_id is not None:
-            configured_model = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
-                AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
-                AIModelConfiguration.id == data.model_configuration_id, AIModelConfiguration.user_id == user.id,
-                AIModelConfiguration.enabled.is_(True), AIProviderConnection.enabled.is_(True))).first()
+            configured_model = next((item for item in available_models if item[0].id == data.model_configuration_id), None)
             if configured_model is None:
                 raise AIProviderError("The selected AI model is unavailable", category="model_unavailable")
             configured_candidates = [configured_model]
+            if auto_routing_enabled:
+                configured_candidates.extend(item for item in automatically_ranked if item[0].id != configured_model[0].id)
         else:
-            available_models = session.execute(select(AIModelConfiguration, AIProviderConnection).join(
-                AIProviderConnection, AIProviderConnection.id == AIModelConfiguration.connection_id).where(
-                AIModelConfiguration.user_id == user.id, AIModelConfiguration.enabled.is_(True),
-                AIProviderConnection.enabled.is_(True))).all()
-            policy = session.get(AIUserPolicy, user.id)
-            preferred = str((policy.task_model_ids or {}).get(AITaskType.COMMAND_INTERPRETATION.value, "")) if policy else ""
-            fallback_ids = list(policy.fallback_model_ids or []) if policy else []
-            def candidate_rank(item: tuple[AIModelConfiguration, AIProviderConnection]) -> tuple[int, int, str]:
-                row = item[0]; identity = str(row.id)
-                if identity == preferred: return (0, 0, row.model_id)
-                if row.is_default: return (1, 0, row.model_id)
-                if identity in fallback_ids: return (2, fallback_ids.index(identity), row.model_id)
-                return (3, 0, row.model_id)
-            configured_candidates = sorted(available_models, key=candidate_rank)
-            if configured_candidates and not (policy and policy.auto_enabled):
+            configured_candidates = automatically_ranked
+            if configured_candidates and not auto_routing_enabled:
                 configured_candidates = [configured_candidates[0]] + [item for item in configured_candidates[1:] if str(item[0].id) in fallback_ids]
             configured_model = configured_candidates[0] if configured_candidates else None
+        configured_candidates = configured_candidates[:10]
         if configured_model is not None:
             model_row, connection = configured_model
             if settings.integration_encryption_key is None:
@@ -433,7 +452,6 @@ def submit_command(
                 images.append({"mime_type": item.media_type, "data": base64.b64encode(content).decode("ascii")})
         context_json = json.dumps(active_context, ensure_ascii=True, default=str)
         attempts = configured_candidates or [None]
-        model_notice: str | None = None
         proposal = None
         last_provider_error: AIProviderError | None = None
         input_estimate = max(1, (len(data.text) + len(context_json)) // 4)
@@ -469,8 +487,6 @@ def submit_command(
                         provider=connection.provider, model_id=model_row.model_id, request_type=AITaskType.COMMAND_INTERPRETATION.value,
                         status="completed", input_tokens_estimate=input_estimate, output_tokens_estimate=output_estimate,
                         estimated_cost_microusd=cost, used_fallback=attempt_index > 0))
-                    if attempt_index > 0:
-                        model_notice = f"Used fallback model {model_row.display_name} from {connection.display_name} because the preferred model was unavailable."
                     interpreter, model = current_interpreter, model_row.model_id
                     break
                 except AIProviderError as exc:
@@ -497,8 +513,6 @@ def submit_command(
                 command_id=command.id, result_status="completed", source="command_api",
                 correlation_id=str(command.id), idempotency_key=f"command.terminal:{command.id}")
             response_result = {"response": proposal.parameters.response}
-            if model_notice is not None:
-                response_result["model_notice"] = model_notice
             response = CommandResult(command_id=command.id, conversation_id=conversation.id, status="completed", intent="RESPOND",
                 result=response_result, message=proposal.parameters.response or "Hello! What would you like help with?")
             question = (proposal.parameters.response or "").strip()

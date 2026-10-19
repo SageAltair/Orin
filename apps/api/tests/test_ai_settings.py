@@ -115,10 +115,58 @@ def test_routing_policy_favorites_usage_and_fallback_are_user_controlled(client:
     response = client.post("/api/v1/commands", json={"text": "Help me plan this"})
     assert response.status_code == 200, response.text
     assert response.json()["message"] == "Fallback answer"
-    assert "fallback model" in response.json()["result"]["model_notice"].lower()
+    assert "model_notice" not in response.json()["result"]
     usage = client.get("/api/v1/intelligence/usage").json()
     assert usage["requests"] == 2 and usage["failed_requests"] == 1
     assert any(row["fallbacks"] == 1 for row in usage["by_model"])
+
+
+def test_automatic_routing_silently_recovers_from_quota_with_a_free_model(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    paid_provider = client.post("/api/v1/intelligence/providers", json={
+        "provider": "openai", "display_name": "Paid", "api_key": "secret-openai",
+    }).json()
+    free_provider = client.post("/api/v1/intelligence/providers", json={
+        "provider": "openrouter", "display_name": "Free", "api_key": "secret-openrouter",
+    }).json()
+    paid = client.post("/api/v1/intelligence/models", json={
+        "connection_id": paid_provider["id"], "model_id": "paid-model",
+    }).json()
+    free = client.post("/api/v1/intelligence/models", json={
+        "connection_id": free_provider["id"], "model_id": "community-model:free",
+    }).json()
+    client.patch(f"/api/v1/intelligence/models/{free['id']}", json={
+        "capabilities": {"input_cost_per_million": 0, "output_cost_per_million": 0},
+    })
+
+    import orin_api.domain_router as domain_router
+    from orin_api.ai import AIIntent, AIProviderError
+    attempted: list[str] = []
+    monkeypatch.setattr(domain_router, "create_provider_from_config", lambda *args, **kwargs: object())
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            self.model = model
+            self.provider = provider
+
+        def interpret(self, command: str, *, context: str | None = None, images=None) -> AIIntent:
+            attempted.append(self.model)
+            if self.model == "paid-model":
+                raise AIProviderError("Quota exhausted", category="quota_exceeded")
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Completed"}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    response = client.post("/api/v1/commands", json={
+        "text": "Help me", "model_configuration_id": paid["id"],
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["message"] == "Completed"
+    assert "model_notice" not in response.json()["result"]
+    assert attempted == ["paid-model", "community-model:free"]
+    usage = client.get("/api/v1/intelligence/usage").json()
+    assert usage["requests"] == 2
+    assert usage["rate_limit_events"] == 1
+    assert any(row["model_id"] == "community-model:free" and row["fallbacks"] == 1 for row in usage["by_model"])
 
 
 def test_routing_policy_rejects_another_users_model(client: TestClient) -> None:
