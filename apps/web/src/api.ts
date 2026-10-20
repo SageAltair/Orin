@@ -1,6 +1,9 @@
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8100";
 let accessToken: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let activeWorkspaceId: string | null = null;
+
+export function setActiveWorkspace(id: string | null) { activeWorkspaceId = id; }
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -42,6 +45,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);
   let response: Response;
   try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(120000), credentials: "include" }); }
   catch { throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0); }
@@ -63,6 +67,7 @@ export async function requestBlob(path: string): Promise<Blob> {
   const fetchBlob = async (retry: boolean): Promise<Blob> => {
     const headers = new Headers();
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);
     const response = await fetch(`${baseUrl}/api/v1${path}`, { headers, credentials: "include" });
     if (response.status === 401 && retry && await refresh()) return fetchBlob(false);
     if (!response.ok) throw new ApiError(`Could not load file (${response.status}).`, response.status);

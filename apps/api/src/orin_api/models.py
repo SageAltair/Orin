@@ -258,6 +258,19 @@ class UserCapability(TimestampMixin, Base):
     capability: Mapped[Capability] = relationship(back_populates="user_assignments")
 
 
+class Workspace(TimestampMixin, Base):
+    __tablename__ = "workspaces"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "name", name="uq_workspace_owner_name"),
+        CheckConstraint("length(trim(name)) > 0", name="ck_workspaces_name_nonempty"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(48), nullable=False)
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#6b73ff", server_default="#6b73ff")
+
+
 class Project(TimestampMixin, Base):
     __tablename__ = "projects"
     __table_args__ = (
@@ -267,6 +280,7 @@ class Project(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     objective: Mapped[str | None] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text)
@@ -326,6 +340,7 @@ class Task(TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"))
     milestone_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("milestones.id", ondelete="SET NULL"))
     assignee_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
@@ -1206,6 +1221,7 @@ class Routine(TimestampMixin, Base):
     __tablename__ = "routines"
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(240))
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     weekdays: Mapped[list[int]] = mapped_column(JSON, default=lambda: list(range(7)))

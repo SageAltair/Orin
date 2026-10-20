@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,7 @@ from orin_api.models import (
     WorkerJob,
     WorkerJobStatus,
     WorkerDevice,
+    Workspace,
 )
 from orin_api.schemas import (
     ActivityRead,
@@ -84,6 +85,8 @@ from orin_api.schemas import (
     ConversationRead,
     ConversationUpdate,
     SearchResultRead,
+    WorkspaceCreate,
+    WorkspaceRead,
 )
 from orin_api.services import (
     add_activity,
@@ -102,6 +105,26 @@ from orin_api.execution_actions import build_action_registry
 from orin_api.focus_domain import reopen_task, touch_task, transition_task_status
 
 router = APIRouter(prefix="/api/v1", tags=["core"])
+
+
+def ensure_personal_workspace(session: Session, user_id: uuid.UUID) -> Workspace:
+    workspace = session.scalar(select(Workspace).where(Workspace.owner_id == user_id).order_by(Workspace.created_at.asc()))
+    if workspace is None:
+        workspace = Workspace(owner_id=user_id, name="Personal", color="#6b73ff")
+        session.add(workspace)
+        session.flush()
+    return workspace
+
+
+def active_workspace(session: Session, user_id: uuid.UUID, workspace_id: uuid.UUID | None) -> Workspace:
+    if not isinstance(workspace_id, uuid.UUID):
+        workspace_id = None
+    if workspace_id is None:
+        return ensure_personal_workspace(session, user_id)
+    workspace = session.scalar(select(Workspace).where(Workspace.id == workspace_id, Workspace.owner_id == user_id))
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
 logger = logging.getLogger(__name__)
 ACTION_REGISTRY = build_action_registry()
 EXECUTION_ENGINE = ExecutionEngine(ACTION_REGISTRY)
@@ -1199,15 +1222,36 @@ def _availability_message(record: dict[str, object]) -> str:
         f"({record.get('suggested_working_window')} local time): " + "; ".join(lines))
 
 
+@router.get("/workspaces", response_model=list[WorkspaceRead])
+def list_workspaces(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[Workspace]:
+    ensure_personal_workspace(session, user.id)
+    session.commit()
+    return list(session.scalars(select(Workspace).where(Workspace.owner_id == user.id).order_by(Workspace.created_at.asc())).all())
+
+
+@router.post("/workspaces", response_model=WorkspaceRead, status_code=status.HTTP_201_CREATED)
+def create_workspace(data: WorkspaceCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Workspace:
+    if session.scalar(select(Workspace.id).where(Workspace.owner_id == user.id, func.lower(Workspace.name) == data.name.lower())):
+        raise HTTPException(status_code=409, detail="A workspace with this name already exists")
+    workspace = Workspace(owner_id=user.id, **data.model_dump())
+    session.add(workspace)
+    session.commit()
+    session.refresh(workspace)
+    return workspace
+
+
 @router.get("/projects", response_model=list[ProjectRead])
 def list_projects(
     user: User = Depends(get_current_user),
     status_filter: ProjectStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
     session: Session = Depends(get_session),
 ) -> list[Project]:
-    statement = select(Project).where(Project.owner_id == user.id)
+    workspace = active_workspace(session, user.id, workspace_id)
+    workspace_scope = or_(Project.workspace_id == workspace.id, Project.workspace_id.is_(None)) if workspace_id is None else Project.workspace_id == workspace.id
+    statement = select(Project).where(Project.owner_id == user.id, workspace_scope)
     if status_filter is not None:
         statement = statement.where(Project.status == status_filter)
     return list(session.scalars(statement.order_by(Project.updated_at.desc()).limit(limit).offset(offset)).all())
@@ -1218,8 +1262,10 @@ def create_project(
     data: ProjectCreate,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
 ) -> Project:
-    project = Project(owner_id=user.id, **data.model_dump())
+    workspace = active_workspace(session, user.id, workspace_id)
+    project = Project(owner_id=user.id, workspace_id=workspace.id, **data.model_dump())
     project.name = project.name.strip()
     session.add(project)
     session.flush()
@@ -1307,9 +1353,12 @@ def list_tasks(
     project_id: uuid.UUID | None = None,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
     session: Session = Depends(get_session),
 ) -> list[Task]:
-    statement = select(Task).where(Task.owner_id == user.id)
+    workspace = active_workspace(session, user.id, workspace_id)
+    workspace_scope = or_(Task.workspace_id == workspace.id, Task.workspace_id.is_(None)) if workspace_id is None else Task.workspace_id == workspace.id
+    statement = select(Task).where(Task.owner_id == user.id, workspace_scope)
     if status_filter is not None:
         statement = statement.where(Task.status == status_filter)
     if project_id is not None:
@@ -1404,11 +1453,20 @@ def create_task(
     data: TaskCreate,
     user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
 ) -> Task:
     validate_task_links(session, user.id, data.project_id, data.assignee_id, data.milestone_id)
     values = data.model_dump()
     requested_status = values.pop("status")
-    task = Task(owner_id=user.id, **values)
+    workspace = active_workspace(session, user.id, workspace_id)
+    if data.project_id is not None:
+        project = session.get(Project, data.project_id)
+        if project is not None:
+            if project.workspace_id is None:
+                project.workspace_id = workspace.id
+            elif project.workspace_id != workspace.id:
+                raise HTTPException(status_code=422, detail="Project belongs to another workspace")
+    task = Task(owner_id=user.id, workspace_id=workspace.id, **values)
     if requested_status != TaskStatus.TODO:
         transition_task_status(task, requested_status)
     touch_task(task)

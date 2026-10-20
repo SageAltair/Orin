@@ -20,6 +20,7 @@ const WritingStudio = lazy(() =>
 import { NotificationCenter } from "./NotificationCenter";
 import {
   useEffect,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -794,6 +795,14 @@ export default function App() {
       window.localStorage.getItem(sidebarCollapsedStorageKey) === "true",
   );
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Personal");
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const handleWorkspaceChange = useCallback((workspace: { id: string; name: string }) => {
+    setActiveWorkspaceName(workspace.name);
+    setActiveWorkspaceId(current => {
+      if (current && current !== workspace.id) setPage("home");
+      return workspace.id;
+    });
+  }, []);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -923,7 +932,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [user, activeWorkspaceId]);
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -964,7 +973,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [user, activeWorkspaceId]);
   useEffect(() => {
     if (conversationId)
       localStorage.setItem(conversationStorageKey, conversationId);
@@ -1434,7 +1443,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <SidebarWorkspaces userId={user.id} onActiveChange={setActiveWorkspaceName} />
+        <SidebarWorkspaces userId={user.id} onActiveChange={handleWorkspaceChange} />
         <div className="sidebar-bottom">
           <button
             className="nav-link settings-link"
@@ -1644,7 +1653,7 @@ export default function App() {
                   onOpenTask={openTask}
                 /></div>
               ) : page === "tasks" ? (
-                focusRolloutEnabled ? (
+                focusRolloutEnabled && activeWorkspaceName === "Personal" ? (
                   <div data-orin-control="tasks-workspace"><FocusExperience
                     name={user.display_name}
                     onSignOut={() => {

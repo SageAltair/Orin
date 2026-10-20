@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,11 +20,23 @@ from orin_api.models import (
     TaskStatus,
     User,
     ActivityType,
+    Workspace,
 )
 from orin_api.planning_domain import occurrence, dates
 from orin_api.services import add_activity
 
 router = APIRouter(prefix="/api/v1", tags=["planning"])
+
+
+def workspace_for_request(session: Session, user: User, workspace_id: uuid.UUID | None) -> Workspace:
+    workspace = session.scalar(select(Workspace).where(Workspace.owner_id == user.id).order_by(Workspace.created_at.asc())) if workspace_id is None else session.scalar(select(Workspace).where(Workspace.id == workspace_id, Workspace.owner_id == user.id))
+    if workspace is None:
+        workspace = Workspace(owner_id=user.id, name="Personal", color="#6b73ff") if workspace_id is None else None
+        if workspace is None:
+            raise HTTPException(404, "Workspace not found")
+        session.add(workspace)
+        session.flush()
+    return workspace
 
 
 class Write(BaseModel):
@@ -273,8 +285,10 @@ def routines(
     limit: int = Query(100, ge=1, le=200),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
 ):
-    return list_owned(Routine, session, user, offset, limit)
+    workspace = workspace_for_request(session, user, workspace_id)
+    return list(session.scalars(select(Routine).where(Routine.user_id == user.id, Routine.workspace_id == workspace.id).order_by(Routine.created_at.desc()).offset(offset).limit(limit)).all())
 
 
 @router.post("/calendar/routines", response_model=RoutineRead, status_code=201)
@@ -282,8 +296,10 @@ def create_routine(
     data: RoutineWrite,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
 ):
-    row = Routine(user_id=user.id, **data.model_dump())
+    workspace = workspace_for_request(session, user, workspace_id)
+    row = Routine(user_id=user.id, workspace_id=workspace.id, **data.model_dump())
     session.add(row)
     session.commit()
     return row
@@ -310,6 +326,7 @@ def routine_occurrences(
     display_timezone: str | None = Query(None, alias="timezone"),
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id"),
 ):
     if not 0 <= (end - start).days <= 92:
         raise HTTPException(422, "Choose a range of up to 93 days")
@@ -317,8 +334,9 @@ def routine_occurrences(
         display_zone = ZoneInfo(display_timezone) if display_timezone else None
     except (KeyError, ValueError):
         raise HTTPException(422, "Use a valid display timezone")
+    workspace = workspace_for_request(session, user, workspace_id)
     rows = session.scalars(
-        select(Routine).where(Routine.user_id == user.id, Routine.paused.is_(False))
+        select(Routine).where(Routine.user_id == user.id, Routine.workspace_id == workspace.id, Routine.paused.is_(False))
     ).all()
     checkins = {
         (c.routine_id, c.day): c.status

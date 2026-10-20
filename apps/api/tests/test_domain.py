@@ -222,6 +222,29 @@ def test_project_task_activity_flow_and_user_scoping(client: TestClient) -> None
     assert {event["activity_type"] for event in events.json()} == {"task_updated", "task_created", "project_created"}
 
 
+def test_workspaces_scope_projects_tasks_and_routines(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office_response = client.post("/api/v1/workspaces", json={"name": "Client office", "color": "#2da6b5"})
+    assert office_response.status_code == 201
+    office = office_response.json()
+    headers = {"X-Orin-Workspace-Id": office["id"]}
+
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Client launch"}).json()
+    task = client.post("/api/v1/tasks", headers=headers, json={"title": "Prepare launch", "project_id": project["id"]}).json()
+    routine = client.post("/api/v1/calendar/routines", headers=headers, json={
+        "title": "Daily client review", "start_date": "2026-10-19", "weekdays": [0], "timezone": "UTC",
+    })
+
+    assert project["workspace_id"] == office["id"]
+    assert task["workspace_id"] == office["id"]
+    assert routine.status_code == 201
+    assert [row["name"] for row in client.get("/api/v1/projects", headers=headers).json()] == ["Client launch"]
+    assert client.get("/api/v1/projects", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=headers).json()] == ["Prepare launch"]
+    assert [row["title"] for row in client.get("/api/v1/calendar/routines", headers=headers).json()] == ["Daily client review"]
+    assert client.get("/api/v1/calendar/routines", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+
+
 def test_preference_rejects_pinning_a_hidden_capability(client: TestClient) -> None:
     test_client = client
     response = test_client.put(

@@ -41,6 +41,19 @@ class CapabilityRead(BaseModel):
     pinned: bool
 
 
+class WorkspaceCreate(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=48)]
+    color: str = Field(default="#6b73ff", pattern=r"^#[0-9a-fA-F]{6}$")
+
+
+class WorkspaceRead(WorkspaceCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 ProjectName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
 TaskTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
 
@@ -67,6 +80,7 @@ class ProjectRead(BaseModel):
 
     id: uuid.UUID
     owner_id: uuid.UUID
+    workspace_id: uuid.UUID | None
     name: str
     description: str | None
     objective: str | None = None
@@ -154,6 +168,7 @@ class TaskRead(BaseModel):
 
     id: uuid.UUID
     owner_id: uuid.UUID
+    workspace_id: uuid.UUID | None
     project_id: uuid.UUID | None
     milestone_id: uuid.UUID | None = None
     assignee_id: uuid.UUID | None
