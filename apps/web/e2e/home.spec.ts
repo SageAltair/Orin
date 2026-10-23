@@ -1,5 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
+async function settingsSection(page: Page, name: string) {
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name, exact: true }).click();
+}
+
 async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject = false) {
   let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "calendar", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
   const tasks: Record<string, unknown>[] = seedCalendarTask ? [{ id: "calendar-task-1", owner_id: "user-1", project_id: seedCalendarProject ? "project-1" : null, assignee_id: null, title: "Write project brief", description: null, status: "todo", priority: "normal", due_at: null, estimated_minutes: 45, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }] : [];
@@ -276,7 +280,8 @@ test("home shows the personal dashboard and offers Ask Orin", async ({ page }) =
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("Recent requests")).toHaveCount(0);
-  await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Orin", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Ask Orin" }).first().click();
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("autocomplete", "off");
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("placeholder", "Ask Orin what you need");
@@ -288,6 +293,7 @@ test("workspace preferences control visible capabilities", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
 });
@@ -297,9 +303,13 @@ test("settings expose profile security, autonomy, approvals, and worker enrollme
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Account");
   await expect(page.getByRole("heading", { name: "Email and sessions" })).toBeVisible();
+  await settingsSection(page, "Intelligence");
   await expect(page.getByRole("heading", { name: "Choose how Orin handles actions" })).toBeVisible();
+  await settingsSection(page, "Approvals");
   await expect(page.getByRole("heading", { name: "Requests and history" })).toBeVisible();
+  await settingsSection(page, "Devices");
   await expect(page.getByRole("heading", { name: "Connected workers" })).toBeVisible();
   await page.getByLabel("Device name").fill("Sage-Laptop");
   await page.getByRole("button", { name: "Register", exact: true }).click();
@@ -307,8 +317,10 @@ test("settings expose profile security, autonomy, approvals, and worker enrollme
   await page.getByRole("button", { name: "Request approval" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Request sent for approval" })).toBeVisible();
   await expect(page.getByText("get system info")).toBeVisible();
+  await settingsSection(page, "Approvals");
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(/approved · low risk/)).toBeVisible();
+  await settingsSection(page, "Devices");
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Revoke" }).click();
   await expect(page.getByText("revoked", { exact: true })).toBeVisible();
@@ -331,6 +343,7 @@ test("GitHub settings show the connected account and accessible repositories", a
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Integrations");
   await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
   await expect(page.getByText("Connected as").getByText("octo-test")).toBeVisible();
   await expect(page.getByText("octo-test/orin-demo")).toBeVisible();
@@ -383,6 +396,7 @@ test("project intelligence stores knowledge and starts a persistent focus sessio
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await page.getByRole("navigation").getByRole("button", { name: "Projects" }).click();
   await page.getByRole("textbox", { name: "Project name" }).fill("The Small Voice");
@@ -405,6 +419,7 @@ test("adaptive navigation can minimize, hide, recover, and reset tools", async (
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   const projects = page.getByRole("combobox", { name: "projects", exact: true });
   await projects.selectOption("minimized");
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveClass(/minimized/);
@@ -437,6 +452,7 @@ test("activity links open related workspace records and exposes lifecycle event 
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await page.getByRole("checkbox", { name: "Show Activity" }).check();
   await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
@@ -617,4 +633,67 @@ test("quick capture saves an inbox task from the global workspace toolbar", asyn
   await page.locator(".quick-capture button[type=submit]").click();
   await expect(page.getByRole("status")).toContainText("Saved to your Inbox");
   await expect(page.getByText("Ask the ministry team about the venue", { exact: true })).toBeVisible();
+});
+
+
+test("settings theme controls persist across pages and section navigation preserves drafts", async ({ page }, testInfo) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const settingsNav = page.getByRole("navigation", { name: "Settings sections" });
+  await expect(settingsNav.getByRole("button", { name: "Appearance", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "A familiar kind of calm." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Email and sessions" })).not.toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("settings-light.png") });
+  await page.getByRole("button", { name: "Dark A softer light for late work", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.getByRole("combobox", { name: "Interface density", exact: true }).selectOption("compact");
+  await expect(page.locator(".orin-shell")).toHaveClass(/density-compact/);
+  await page.screenshot({ path: testInfo.outputPath("settings-dark.png") });
+  await settingsSection(page, "Account");
+  await page.getByLabel("Current password", { exact: true }).fill("unfinished-local-test-draft");
+  await settingsSection(page, "Appearance");
+  await settingsSection(page, "Account");
+  await expect(page.getByLabel("Current password", { exact: true })).toHaveValue("unfinished-local-test-draft");
+  await page.getByRole("navigation", { name: "Workspace", exact: true }).getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.reload();
+  await signIn(page);
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await expect(page.locator(".orin-shell")).toHaveClass(/density-compact/);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await settingsSection(page, "Appearance");
+  await page.getByRole("button", { name: "System Follow your device", exact: true }).click();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-system/);
+  const systemDark = await page.locator(".orin-shell").evaluate(el => getComputedStyle(el).backgroundColor);
+  await page.emulateMedia({ colorScheme: "light" });
+  const systemLight = await page.locator(".orin-shell").evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(systemDark).not.toBe(systemLight);
+});
+
+test("settings stays usable on a phone and section navigation supports keyboard movement", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const settingsNav = page.getByRole("navigation", { name: "Settings sections" });
+  const appearance = settingsNav.getByRole("button", { name: "Appearance", exact: true });
+  await appearance.focus();
+  await appearance.press("ArrowRight");
+  await expect(settingsNav.getByRole("button", { name: "Workspace", exact: true })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Choose what you see" })).toBeVisible();
+  await settingsNav.getByRole("button", { name: "Workspace", exact: true }).press("End");
+  await expect(settingsNav.getByRole("button", { name: "Your data", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Export my account", exact: true })).toBeVisible();
+  const size = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, view: window.innerWidth }));
+  expect(size.scroll).toBeLessThanOrEqual(size.view);
+  await settingsNav.getByRole("button", { name: "Your data", exact: true }).press("Home");
+  await page.getByRole("button", { name: "Dark A softer light for late work", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await expect(page.getByRole("button", { name: "Dark A softer light for late work", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("settings-mobile.png") });
 });

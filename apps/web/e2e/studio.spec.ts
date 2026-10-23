@@ -209,6 +209,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
     .getByRole("button", { name: "Open navigation", exact: true })
     .click();
   await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Notifications", exact: true }).click();
   const notificationSettings = page.getByRole("region", {
     name: "Notification preferences",
   });

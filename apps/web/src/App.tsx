@@ -1,4 +1,5 @@
 import { AccountPrivacy } from "./AccountPrivacy";
+import { AppearanceSettings, SettingsWorkspace, type SettingsSection } from "./settings/SettingsWorkspace";
 import {
   Compass,
   Home,
@@ -254,12 +255,14 @@ export function CommandAnswer({ result }: { result: CommandResult }) {
 }
 
 function PreferenceSettings({
+  section,
   preferences,
   onChange,
   user,
   approvals,
   refreshApprovals,
 }: {
+  section: SettingsSection;
   preferences: UserPreferences;
   onChange: (value: UserPreferences) => void;
   user: User;
@@ -295,7 +298,7 @@ function PreferenceSettings({
     });
   return (
     <div className="settings-content">
-      <section className="settings-section">
+      <section className="settings-section" hidden={section !== "workspace"}>
         <div className="section-heading">
           <div>
             <span className="eyebrow">WORKSPACE</span>
@@ -329,7 +332,7 @@ function PreferenceSettings({
             })}
         </div>
       </section>
-      <section className="settings-section">
+      <section className="settings-section" hidden={section !== "account"}>
         <div className="section-heading">
           <div>
             <span className="eyebrow">ACCOUNT</span>
@@ -430,7 +433,7 @@ function PreferenceSettings({
           Sign out of this session
         </button>
       </section>
-      <section className="settings-section">
+      <section className="settings-section" hidden={section !== "intelligence"}>
         <div className="section-heading">
           <div>
             <span className="eyebrow">AUTONOMY</span>
@@ -493,7 +496,7 @@ function PreferenceSettings({
           </div>
         )}
       </section>
-      <section className="settings-section">
+      <section className="settings-section" hidden={section !== "approvals"}>
         <div className="section-heading">
           <div>
             <span className="eyebrow">APPROVALS</span>
@@ -562,47 +565,7 @@ function PreferenceSettings({
           />
         )}
       </section>
-      <section className="settings-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">APPEARANCE</span>
-            <h2>Make it yours</h2>
-          </div>
-        </div>
-        <div className="preference-controls">
-          <label>
-            Interface density
-            <select
-              value={preferences.density}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  density: event.target.value as UserPreferences["density"],
-                })
-              }
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-            </select>
-          </label>
-          <label>
-            Theme
-            <select
-              value={preferences.theme}
-              onChange={(event) =>
-                onChange({
-                  ...preferences,
-                  theme: event.target.value as UserPreferences["theme"],
-                })
-              }
-            >
-              <option value="light">Light</option>
-              <option value="dark">Dark</option>
-              <option value="system">System</option>
-            </select>
-          </label>
-        </div>
-      </section>
+
     </div>
   );
 }
@@ -1347,7 +1310,7 @@ export default function App() {
           </span>
         </div>
         <span className="nav-label">WORKSPACE</span>
-        <nav className="navigation">
+        <nav className="navigation" aria-label="Workspace">
           {navigation.map((item) => (
             <button
               key={item.id}
@@ -1367,7 +1330,8 @@ export default function App() {
         </nav>
         <div className="sidebar-bottom">
           <button
-            className="nav-link settings-link"
+            className={`nav-link settings-link ${page === "settings" ? "active" : ""}`}
+            aria-current={page === "settings" ? "page" : undefined}
             type="button"
             onClick={() => selectPage("settings")}
           >
@@ -1421,19 +1385,12 @@ export default function App() {
             <button
               type="button"
               className="topbar-capture"
-              title="Quick capture (Ctrl or ? + Shift + Space)"
+              title="Quick capture (Ctrl or Command + Shift + Space)"
+              aria-label="Capture"
               onClick={() => setCaptureOpen(true)}
             >
               <Plus size={15} />
-              Capture
-            </button>
-            <button
-              type="button"
-              className="topbar-ask"
-              onClick={() => setAskOpen(true)}
-            >
-              <MessageCircle size={15} />
-              Ask Orin
+              <span className="toolbar-label">Capture</span>
             </button>
             <NotificationCenter onOpen={(category,id) => {if(category === "tasks" && id) openTask(id); else if(category === "projects" && id) openProject(id); else setPage(category === "calendar" || category === "routines" ? "calendar" : category === "opportunities" || category === "risks" ? "opportunities" : category === "writing" ? "memories" : "settings");}} />
             <span className="status-indicator">
@@ -1476,32 +1433,32 @@ export default function App() {
           {page === "settings" ? (
             <>
               <div className="page-intro">
-                <span className="eyebrow">PREFERENCES</span>
+                <span className="eyebrow">MAKE YOURSELF AT HOME</span>
                 <h1>Settings</h1>
                 <p>
-                  Your account, autonomy, approvals, devices, and appearance.
+                  Your space, your way. Small adjustments. A better fit.
                 </p>
               </div>
-              <PreferenceSettings
-                preferences={preferences}
-                onChange={savePreferences}
-                user={user}
-                approvals={approvals}
-                refreshApprovals={refreshApprovals}
-              />
-              <AccountSecurity
-                user={user}
-                onUpdated={(updated) => setUser(updated)}
-              />
-              <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
-              <AccountPrivacy userId={user.id} />
-              <DeviceSettings onApprovalCreated={refreshApprovals} />
-              <WorkspaceSettings
-                projects={projects}
-                preferences={preferences}
-                onPreferencesChange={savePreferences}
-              />
-              <GitHubSettings projects={projects} />
+              <SettingsWorkspace>{section => <>
+                <div hidden={section !== "appearance"}>
+                  <AppearanceSettings preferences={preferences} onChange={savePreferences} />
+                </div>
+                <PreferenceSettings section={section}
+                  preferences={preferences} onChange={savePreferences} user={user}
+                  approvals={approvals} refreshApprovals={refreshApprovals} />
+                <div hidden={section !== "account"}>
+                  <AccountSecurity user={user} onUpdated={setUser} />
+                </div>
+                <div hidden={section !== "notifications"}>
+                  <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
+                </div>
+                <div hidden={section !== "privacy"}><AccountPrivacy userId={user.id} /></div>
+                <div hidden={section !== "devices"}><DeviceSettings onApprovalCreated={refreshApprovals} /></div>
+                <div hidden={section !== "workspace"}>
+                  <WorkspaceSettings projects={projects} preferences={preferences} onPreferencesChange={savePreferences} />
+                </div>
+                <div hidden={section !== "integrations"}><GitHubSettings projects={projects} /></div>
+              </>}</SettingsWorkspace>
             </>
           ) : page === "home" ? (
             <>
@@ -1518,13 +1475,7 @@ export default function App() {
                 >
                   Capture a thought
                 </button>
-                <button
-                  type="button"
-                  className="primary-button home-ask"
-                  onClick={() => setAskOpen(true)}
-                >
-                  <MessageCircle size={16} /> Ask Orin to plan or continue work
-                </button>
+
               </div>
               <div className="home-dashboard">
                 <section className="home-section">
@@ -1580,7 +1531,7 @@ export default function App() {
                     </div>
                   )}
                 </section>
-                <section className="home-section">
+                <section className="home-section home-support">
                   <div className="section-title">
                     <div>
                       <span className="eyebrow">CONTINUE WORKING</span>

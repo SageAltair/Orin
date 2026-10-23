@@ -40,6 +40,8 @@ Home, Tasks/Focus, Projects, Calendar, Writing and Activity share a responsive l
 
 Use `BACKGROUND_WORKER_ENABLED=true` for durable analysis recovery and reminders (enabled in Compose and `.env.example`). The device worker is opt-in: enroll in Settings, configure `ORIN_API_URL`, `ORIN_DEVICE_ID`, `ORIN_WORKER_TOKEN` and explicit allowed roots, then run `orin-worker`. Use `docker compose --profile worker up` only after supplying the enrollment settings. See [repair details and limits](docs/reliability-and-design.md) and [operations](docs/operations.md).
 
+Settings now uses section navigation, visual Light/Dark/System choices, and the shared minimal workspace style. See [workspace design](docs/workspace-design.md) for the visual rules and interaction details.
+
 ## Opportunities, risks and routines
 
 Opportunities captures possibilities, tracks decisions and links practical next actions to Tasks. Its Risk register records warning signs and response plans. Calendar routines repeat on chosen weekdays with timezone-aware schedules, in-app reminders, minimum versions and reversible check-ins. See [feature details and evidence](docs/opportunities-and-routines.md).
