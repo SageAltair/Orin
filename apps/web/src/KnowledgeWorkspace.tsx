@@ -1,4 +1,4 @@
-import { Pencil, Plus, Search, FileText } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -745,7 +745,7 @@ export function KnowledgeWorkspace({
       <aside className="writing-list">
         <header className="writing-list-header">
           <div className="writing-brand">
-            <Pencil aria-hidden="true" size={20} />
+            <ActionIcon name="edit" aria-hidden="true" size={20} />
             <div>
               <h2>Notes</h2>
               <p>Capture thoughts and develop ideas.</p>
@@ -756,7 +756,7 @@ export function KnowledgeWorkspace({
             disabled={creating}
             onClick={() => void create()}
           >
-            <Plus aria-hidden="true" size={16} /> New note <kbd>Ctrl N</kbd>
+            <ActionIcon name="add" aria-hidden="true" size={16} /> New note <kbd>Ctrl N</kbd>
           </button>
           <details className="writing-template-menu">
             <summary>Start from a template</summary>
@@ -812,7 +812,7 @@ export function KnowledgeWorkspace({
             </button>
           </details>
           <div className="writing-search">
-            <Search aria-hidden="true" size={14} />
+            <ActionIcon name="search" aria-hidden="true" size={14} />
             <input
               aria-label="Search documents"
               value={query}
@@ -853,7 +853,7 @@ export function KnowledgeWorkspace({
               onClick={() => void open(doc)}
             >
               <span className="writing-document-icon" aria-hidden="true">
-                <FileText size={16} />
+                <ActionIcon name="document" size={16} />
               </span>
               <span className="writing-document-copy">
                 <strong>{doc.title || "Untitled"}</strong>
@@ -1594,7 +1594,7 @@ export function KnowledgeWorkspace({
           </>
         ) : (
           <div className="writing-welcome">
-            <Pencil aria-hidden="true" size={20} />
+            <ActionIcon name="edit" aria-hidden="true" size={20} />
             <h2>Your space to think.</h2>
             <p>Capture thoughts, take notes, and write your ideas.</p>
             <button
@@ -1602,7 +1602,7 @@ export function KnowledgeWorkspace({
               disabled={creating}
               onClick={() => void create()}
             >
-              <Plus aria-hidden="true" size={16} /> New note
+              <ActionIcon name="add" aria-hidden="true" size={16} /> New note
             </button>
           </div>
         )}
