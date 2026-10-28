@@ -682,6 +682,7 @@ function AuthScreen({
         </button>
         <button
           type="button"
+          disabled={busy}
           className="auth-switch"
           onClick={() => {
             setIsRegister(!isRegister);
