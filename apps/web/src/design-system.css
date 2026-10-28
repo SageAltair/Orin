@@ -1270,3 +1270,82 @@
   .orin-shell .home-introduction h1 { font-size: clamp(28px, 7vw, 38px); }
   .orin-shell .home-dashboard .section-title { align-items: start; }
 }
+
+/* Calendar: consistent scheduling controls and a readable responsive grid. */
+.orin-shell .calendar-workspace { gap: 24px; min-width: 0; }
+.orin-shell .calendar-toolbar {
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.orin-shell .calendar-date-controls { flex-wrap: wrap; gap: 10px; }
+.orin-shell .calendar-date-controls h2 {
+  min-width: 0;
+  font-size: clamp(19px, 2vw, 25px);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+.orin-shell .calendar-icon-button {
+  width: 42px;
+  height: 42px;
+  border-radius: 7px;
+  background: transparent;
+}
+.orin-shell .calendar-toolbar-actions { flex-wrap: wrap; gap: 10px; }
+.orin-shell .calendar-view-switch {
+  gap: 0;
+  padding: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.orin-shell .calendar-view-switch button {
+  min-height: 42px;
+  padding-inline: 13px;
+  font-size: 12px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.orin-shell .calendar-view-switch button[aria-pressed="true"] {
+  color: var(--text);
+  background: transparent;
+  border-bottom-color: var(--accent);
+  box-shadow: none;
+  font-weight: 650;
+}
+.orin-shell .calendar-filters { min-width: 0; }
+.orin-shell .calendar-month { gap: 24px; }
+.orin-shell .calendar-grid { min-width: 0; }
+.orin-shell .calendar-day {
+  min-height: 112px;
+  padding: 9px 7px;
+  background: var(--surface);
+}
+.orin-shell .calendar-day.selected-day { background: var(--hover); }
+.orin-shell .calendar-day-number { font-size: 12px; }
+.orin-shell .calendar-event-chip { border-radius: 4px; font-size: 10px; }
+.orin-shell .calendar-selected-day { padding-left: 20px; }
+.orin-shell .calendar-section-heading h3 { font-size: 17px; font-weight: 650; }
+.orin-shell .calendar-event-row { min-height: 62px; padding-block: 12px; }
+.orin-shell .calendar-event-body { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .orin-shell .calendar-month { grid-template-columns: minmax(0, 1fr); }
+  .orin-shell .calendar-selected-day {
+    grid-column: 1;
+    grid-row: auto;
+    padding: 20px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .orin-shell .calendar-day { min-height: 84px; padding: 6px 3px; }
+}
+@media (max-width: 520px) {
+  .orin-shell .calendar-toolbar-actions { width: 100%; }
+  .orin-shell .calendar-view-switch { width: 100%; justify-content: space-between; }
+  .orin-shell .calendar-view-switch button { flex: 1; padding-inline: 5px; }
+  .orin-shell .calendar-date-controls h2 { font-size: 19px; }
+  .orin-shell .calendar-day { min-height: 62px; padding: 4px 2px; }
+  .orin-shell .calendar-day-number { width: 23px; height: 23px; font-size: 11px; }
+  .orin-shell .calendar-event-chip { font-size: 9px; }
+  .orin-shell .calendar-event-chip-label { max-width: 100%; }
+}
