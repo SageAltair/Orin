@@ -131,3 +131,92 @@
 .focus-task-empty { padding: 1.25rem 0; }
 .focus-task-empty h2 { font-size: 1.1rem; }
 @media (max-width: 520px) { .focus-task-list li { grid-template-columns: auto minmax(0, 1fr); } .focus-task-schedule { grid-column: 2; justify-self: start; } }
+
+/* Project execution surface: document hierarchy and durable task rows. */
+.orin-shell .main-content:has(.project-workspace) {
+  width: min(calc(100% - 64px), 1120px);
+}
+.orin-shell .project-workspace {
+  gap: 26px;
+  min-width: 0;
+}
+.orin-shell .project-create-form {
+  gap: 12px;
+  padding: 16px 0 22px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.orin-shell .project-create-form > input {
+  min-width: 200px;
+  min-height: 44px;
+}
+.orin-shell .project-list-controls {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr);
+  gap: 16px;
+}
+.orin-shell .project-list-controls :is(input, select) { min-height: 44px; }
+.orin-shell .project-heading { gap: 14px; padding: 8px 0 22px; }
+.orin-shell .project-title { font-weight: 650; font-size: clamp(27px, 3vw, 38px); }
+.orin-shell .project-heading-meta { font-size: 12px; }
+.orin-shell .project-outcome {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 20px 0 26px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  box-shadow: none;
+}
+.orin-shell .project-outcome .project-header-fields { max-width: 740px; }
+.orin-shell .project-outcome textarea { min-height: 96px; font-size: 14px; line-height: 1.55; }
+.orin-shell .project-signal-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  padding: 0 0 24px;
+}
+.orin-shell .project-signal-row > div {
+  gap: 10px;
+  padding: 12px 20px;
+  border-right: 1px solid var(--line);
+}
+.orin-shell .project-signal-row > div:first-child { padding-left: 0; }
+.orin-shell .project-signal-row > div:last-child { border-right: 0; }
+.orin-shell .project-signal-row strong { font-size: 16px; font-weight: 650; }
+.orin-shell .project-task-row {
+  min-height: 66px;
+  padding-block: 12px;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  border-radius: 0;
+}
+.orin-shell .project-task-row:hover { background: transparent; }
+.orin-shell .task-open-button { padding: 8px 0; line-height: 1.5; }
+.orin-shell .task-open-button strong { font-size: 13px; font-weight: 600; }
+.orin-shell .project-task-panel {
+  padding: 24px;
+  background: var(--surface);
+  box-shadow: none;
+}
+.orin-shell .project-task-board { gap: 14px; }
+.orin-shell .project-task-column {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 12px;
+}
+.orin-shell .project-task-card { box-shadow: none; border-radius: 6px; }
+@media (max-width: 760px) {
+  .orin-shell .main-content:has(.project-workspace) { width: calc(100% - 32px); }
+  .orin-shell .project-list-controls { grid-template-columns: 1fr; }
+  .orin-shell .project-signal-row { grid-template-columns: 1fr; }
+  .orin-shell .project-signal-row > div {
+    padding: 14px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .orin-shell .project-signal-row > div:last-child { border-bottom: 0; }
+  .orin-shell .project-outcome .project-header-fields { grid-template-columns: 1fr; }
+  .orin-shell .project-task-panel { padding: 16px; }
+}
