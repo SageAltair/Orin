@@ -1272,7 +1272,7 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [searchText, searchOpen]);
-  useLayoutEffect(() => {
+  (typeof window === "undefined" ? useEffect : useLayoutEffect)(() => {
     const input = commandInputRef.current;
     if (!input) return;
     input.style.height = "auto";
