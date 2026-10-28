@@ -1173,3 +1173,100 @@
     flex-wrap: wrap;
   }
 }
+
+/* Home composition: a working brief with live numbers, not decorative tiles. */
+.orin-shell .home-introduction {
+  max-width: 780px;
+  margin-bottom: 24px;
+}
+.orin-shell .home-introduction h1 {
+  max-width: 760px;
+  font-size: clamp(30px, 3.4vw, 46px);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+.orin-shell .home-introduction > p {
+  margin: 12px 0 22px;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.orin-shell .home-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.orin-shell .home-actions .primary-button,
+.orin-shell .home-actions .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding-inline: 18px;
+  font-size: 13px;
+}
+.orin-shell .home-actions .text-action {
+  min-height: 44px;
+  padding-inline: 10px;
+}
+.orin-shell .home-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 38px;
+}
+.orin-shell .home-overview > button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 22px 18px;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  border-right: 1px solid var(--line);
+  cursor: pointer;
+}
+.orin-shell .home-overview > button:first-child { padding-left: 0; }
+.orin-shell .home-overview > button:last-child { border-right: 0; }
+.orin-shell .home-overview strong {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.orin-shell .home-overview span {
+  font-size: 12px;
+  color: var(--soft);
+  overflow-wrap: anywhere;
+}
+.orin-shell .home-overview svg { align-self: center; color: var(--muted); }
+.orin-shell .home-dashboard { max-width: 900px; gap: 34px; }
+.orin-shell .home-dashboard .home-section { padding-bottom: 30px; }
+.orin-shell .home-dashboard .section-title { align-items: end; gap: 18px; }
+.orin-shell .home-dashboard .section-title h2 { font-size: 21px; line-height: 1.25; }
+.orin-shell .home-record {
+  width: 100%;
+  min-height: 70px;
+  padding: 16px 4px;
+  border-radius: 0;
+}
+.orin-shell .home-record > span { min-width: 0; }
+.orin-shell .home-record strong { overflow-wrap: anywhere; }
+.orin-shell .home-project-card { min-height: 92px; }
+@media (max-width: 700px) {
+  .orin-shell .home-overview { grid-template-columns: 1fr; margin-bottom: 28px; }
+  .orin-shell .home-overview > button {
+    padding: 16px 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .orin-shell .home-overview > button:last-child { border-bottom: 0; }
+  .orin-shell .home-introduction h1 { font-size: clamp(28px, 7vw, 38px); }
+  .orin-shell .home-dashboard .section-title { align-items: start; }
+}
