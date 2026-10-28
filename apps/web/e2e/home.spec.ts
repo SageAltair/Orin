@@ -629,6 +629,25 @@ test("quick capture saves an inbox task from the global workspace toolbar", asyn
 });
 
 
+test("quick capture remains usable on a short mobile viewport", async ({ page }) => {
+  await mockApi(page);
+  await page.setViewportSize({ width: 320, height: 480 });
+  await page.goto("/");
+  await signIn(page);
+  await page.locator(".topbar-capture").click();
+  const dialog = page.getByRole("dialog", { name: "Quick capture" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveCSS("overflow-y", "auto");
+  await expect(dialog.getByRole("textbox", { name: "What do you want to remember?" })).toBeFocused();
+  const bounds = await dialog.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, height: rect.height };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(321);
+  expect(bounds.height).toBeLessThanOrEqual(480);
+});
+
 test("home uses a single-column reading layout on desktop and mobile", async ({ page }) => {
   await mockApi(page);
   await page.goto("/");
