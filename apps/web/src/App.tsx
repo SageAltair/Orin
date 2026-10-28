@@ -19,16 +19,6 @@ import {
   type FormEvent,
 } from "react";
 import {
-  ArrowUp,
-  ArrowUpRight,
-  Command,
-  Moon,
-  Sun,
-  History,
-  ListPlus,
-  MoreHorizontal,
-} from "lucide-react";
-import {
   ApiError,
   Approval,
   Attachment,
@@ -620,7 +610,7 @@ function AuthScreen({
     <main className="auth-screen">
       <form className="auth-card" onSubmit={submit}>
         <span className="brand-mark">
-          <Command size={17} />
+          <ActionIcon name="command" size={17} />
         </span>
         <h1>{isRegister ? "Create your Orin account" : "Welcome to Orin"}</h1>
         <p>Sign in to your workspace to continue.</p>
@@ -1299,7 +1289,7 @@ export default function App() {
           }}
         >
           <span className="brand-mark">
-            <Command size={17} />
+            <ActionIcon name="command" size={17} />
           </span>
           <span>orin</span>
         </a>
@@ -1422,9 +1412,9 @@ export default function App() {
               }
             >
               {preferences.theme === "dark" ? (
-                <Moon size={17} />
+                <ActionIcon name="moon" size={17} />
               ) : (
-                <Sun size={17} />
+                <ActionIcon name="sun" size={17} />
               )}
             </button>
           </div>
@@ -1503,7 +1493,7 @@ export default function App() {
                       className="text-action"
                       onClick={() => selectPage("tasks")}
                     >
-                      All tasks <ArrowUpRight size={14} />
+                      All tasks <ActionIcon name="external" size={14} />
                     </button>
                   </div>
                   {loading ? (
@@ -1528,7 +1518,7 @@ export default function App() {
                                 : ""}
                             </small>
                           </span>
-                          <ArrowUpRight size={14} />
+                          <ActionIcon name="external" size={14} />
                         </button>
                       ))}
                     </div>
@@ -1559,7 +1549,7 @@ export default function App() {
                         setHistoryOpen(true);
                       }}
                     >
-                      History <ArrowUpRight size={14} />
+                      History <ActionIcon name="external" size={14} />
                     </button>
                   </div>
                   {conversations.length ? (
@@ -1584,7 +1574,7 @@ export default function App() {
                               · {conversation.objective || "Open session"}
                             </small>
                           </span>
-                          <ArrowUpRight size={15} />
+                          <ActionIcon name="external" size={15} />
                         </button>
                       ))}
                     </div>
@@ -1610,7 +1600,7 @@ export default function App() {
                       className="text-action"
                       onClick={() => selectPage("projects")}
                     >
-                      All projects <ArrowUpRight size={14} />
+                      All projects <ActionIcon name="external" size={14} />
                     </button>
                   </div>
                   {loading ? (
@@ -1747,7 +1737,7 @@ export default function App() {
                 selectPage("settings");
               }}
             >
-              Workspace preferences <ArrowUpRight size={13} />
+              Workspace preferences <ActionIcon name="external" size={13} />
             </a>
           </footer>
         </main>
@@ -1795,7 +1785,7 @@ export default function App() {
             <header className="chat-header compact-chat-header">
               <div className="chat-session-identity">
                 <span className="brand-mark">
-                  <Command size={15} />
+                  <ActionIcon name="command" size={15} />
                 </span>
                 <label className="sr-only" htmlFor="work-session-title">
                   Work session title
@@ -1830,7 +1820,7 @@ export default function App() {
                     setHistoryOpen((value) => !value);
                   }}
                 >
-                  <History size={17} />
+                  <ActionIcon name="history" size={17} />
                 </button>
                 <button
                   type="button"
@@ -1855,7 +1845,7 @@ export default function App() {
                   title="New task"
                   onClick={startNewConversation}
                 >
-                  <ListPlus size={17} />
+                  <ActionIcon name="list-add" size={17} />
                 </button>
                 <button
                   type="button"
@@ -1871,7 +1861,7 @@ export default function App() {
                     aria-label="More session actions"
                     title="More session actions"
                   >
-                    <MoreHorizontal size={18} />
+                    <ActionIcon name="more" size={18} />
                   </summary>
                   <div className="chat-more-menu">
                     <label>
@@ -2149,7 +2139,7 @@ export default function App() {
               {chatTurns.length === 0 && !commandBusy && !commandMessage && (
                 <div className="chat-welcome">
                   <span className="ask-mark">
-                    <Command size={16} />
+                    <ActionIcon name="command" size={16} />
                   </span>
                   <h3>What would you like to do?</h3>
                   <p>
@@ -2362,7 +2352,7 @@ export default function App() {
                 {commandBusy ? (
                   <span className="spinner" />
                 ) : (
-                  <ArrowUp size={17} />
+                  <ActionIcon name="up" size={17} />
                 )}
               </button>
             </form>
