@@ -8,7 +8,7 @@ async function setupFocus(page: Page) {
   const collectionTasks: Record<string, unknown>[] = [
     { id: "inbox-task", title: "Ask the team about the venue", description: null, status: "todo", priority: "normal", due_at: null, focus_state: "inbox", project_id: null },
     { id: "today-task", title: "Review the project outline", description: null, status: "todo", priority: "high", due_at: null, focus_state: "today", project_id: null },
-    { id: "upcoming-task", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2026-10-13T14:00:00Z", focus_state: "later", project_id: null },
+    { id: "upcoming-task", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), focus_state: "later", project_id: null },
     { id: "completed-task", title: "Send the approved update", description: null, status: "done", priority: "normal", due_at: null, focus_state: "released", project_id: null },
   ];
   let settings: Record<string, unknown> = { timezone: "Africa/Dar_es_Salaam", theme: "light", reduced_motion: false, hide_timer_numbers: false, sound_enabled: false, haptics_enabled: false, check_in_interval: 15 };
