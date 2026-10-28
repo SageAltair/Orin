@@ -1,15 +1,5 @@
 import { AccountPrivacy } from "./AccountPrivacy";
 import { NavigationIcon } from "./NavigationIcon";
-import {
-  Compass,
-  Home,
-  CalendarDays,
-  FolderOpen,
-  ListTodo,
-  Activity,
-  BookOpen,
-  Timer,
-} from "lucide-react";
 import { lazy, Suspense } from "react";
 const NotificationPreferencesPanel = lazy(() => import("./NotificationPreferences").then(m => ({default:m.NotificationPreferencesPanel})));
 const OpportunityWorkspace = lazy(() => import("./OpportunityWorkspace").then(m => ({default: m.OpportunityWorkspace})));
