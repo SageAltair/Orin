@@ -22,7 +22,9 @@ describe("Orin action icon system", () => {
     for (const label of ["Notes", "Idea inbox", "Connections", "Manuscript"]) {
       expect(markup).toContain(label);
     }
-    expect(markup.match(/<svg/g)).toHaveLength(4);
+    const tabMarkup = markup.match(/<nav class="studio-tabs"[^>]*>[\s\S]*?<\/nav>/)?.[0];
+    expect(tabMarkup).toBeDefined();
+    expect(tabMarkup?.match(/<svg/g)).toHaveLength(4);
     expect(markup).toContain('aria-label="Writing views"');
   });
 });
