@@ -7,10 +7,10 @@ import { IdeasCanvas } from "./features/creative-studio/IdeasCanvas";
 import { Manuscript } from "./features/creative-studio/Manuscript";
 
 const tabs = [
-  { id: "notes", label: "Notes", icon: BookOpen },
-  { id: "ideas", label: "Idea inbox", icon: Lightbulb },
-  { id: "canvas", label: "Connections", icon: Network },
-  { id: "manuscript", label: "Manuscript", icon: Layers },
+  { id: "notes", label: "Notes", icon: "book" },
+  { id: "ideas", label: "Idea inbox", icon: "idea" },
+  { id: "canvas", label: "Connections", icon: "network" },
+  { id: "manuscript", label: "Manuscript", icon: "layers" },
 ] as const;
 
 export function WritingStudio({
@@ -41,14 +41,14 @@ export function WritingStudio({
         </span>
       </header>
       <nav className="studio-tabs" aria-label="Writing views">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon }) => (
           <button
             type="button"
             key={id}
             aria-current={tab === id ? "page" : undefined}
             onClick={() => void navigate(id)}
           >
-            <Icon size={16} />
+            <ActionIcon name={icon} size={16} />
             {label}
           </button>
         ))}
