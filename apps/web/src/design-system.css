@@ -1139,3 +1139,37 @@
     padding-inline: 9px;
   }
 }
+
+/* Capture dialog: readable input, controlled dimensions and consistent actions. */
+.orin-shell .quick-capture-scrim {
+  overflow-y: auto;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+}
+.orin-shell .quick-capture {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  border-radius: 10px;
+  box-shadow: 0 16px 48px #101d1724;
+}
+.orin-shell .quick-capture h2 {
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+.orin-shell .quick-capture textarea {
+  font-size: 16px;
+  line-height: 1.55;
+  background: var(--surface);
+}
+.orin-shell .quick-capture .primary-button {
+  min-height: 42px;
+  padding-inline: 16px;
+}
+@media (max-width: 520px) {
+  .orin-shell .quick-capture-scrim {
+    padding-top: 8vh;
+  }
+  .orin-shell .quick-capture form > div {
+    flex-wrap: wrap;
+  }
+}
