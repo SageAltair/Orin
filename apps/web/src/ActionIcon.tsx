@@ -24,7 +24,7 @@ export function ActionIcon({ name, size = 18, ...props }: ActionIconProps) {
     insight: <><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2M8 17h8"/></>,
     left: <path d="m15 5-7 7 7 7"/>,
     right: <path d="m9 5 7 7-7 7"/>,
-    filters: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--surface, white)"/><circle cx="15" cy="12" r="2" fill="var(--surface, white)"/><circle cx="9" cy="18" r="2" fill="var(--surface, white)"/></>,
+    filters: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="none"/><circle cx="15" cy="12" r="2" fill="none"/><circle cx="9" cy="18" r="2" fill="none"/></>,
     edit: <><path d="M5 19h14M6 15l9-9 3 3-9 9H6z"/><path d="m13.5 7.5 3 3"/></>,
     document: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M9 12h6m-6 4h6"/></>,
     download: <><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></>,
@@ -48,7 +48,7 @@ export function ActionIcon({ name, size = 18, ...props }: ActionIconProps) {
     menu: <path d="M4 6h16M4 12h16M4 18h16" />,
     pin: <><path d="M9 3.5h6l-.8 6 2.8 3v1.5H7v-1.5l2.8-3z"/><path d="M12 14v7"/></>,
     close: <path d="M6 6l12 12M18 6 6 18" />,
-    settings: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="var(--surface, white)" /><circle cx="15" cy="17" r="2" fill="var(--surface, white)" /></>,
+    settings: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="2" fill="none" /><circle cx="15" cy="17" r="2" fill="none" /></>,
   };
   return (
     <svg
