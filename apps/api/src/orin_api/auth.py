@@ -184,7 +184,7 @@ def authenticate_user(
         password_matches, upgraded_hash = PASSWORD_HASHER.verify_and_update(data.password, hash_to_check)
     except UnknownHashError:
         password_matches, upgraded_hash = False, None
-    if user is None or user.password_hash is None or not password_matches:
+    if user is None or user.password_hash is None or not password_matches or user.is_disabled:
         raise _invalid_credentials()
     if upgraded_hash is not None:
         user.password_hash = upgraded_hash
@@ -231,7 +231,7 @@ def get_current_authentication(
         )
     )
     user = session.get(User, user_id)
-    if auth_session is None or user is None:
+    if auth_session is None or user is None or user.is_disabled:
         raise _invalid_auth_token()
     return AuthenticatedUser(user=user, auth_session=auth_session, token_id=token_id)
 

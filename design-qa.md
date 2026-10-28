@@ -1,33 +1,64 @@
-# Dashboard design QA
+# Writing Option 3 Design QA
 
-## Reference inputs
+- source visual truth path: `C:\Users\mwaig\.codex\generated_images\01a135c8-3d41-79a3-ba28-8e64d4fcc5c9\exec-f7592e07-3985-410c-a0c7-94a06eeaa1be.png`
+- implementation screenshot path: `C:\Users\mwaig\Documents\ChatGPT\Orin\artifacts\writing-option-3\implementation-expanded-final.png`
+- collapsed screenshot path: `C:\Users\mwaig\Documents\ChatGPT\Orin\artifacts\writing-option-3\implementation-collapsed-final.png`
+- viewport: 1440 x 1024 CSS px, device scale factor 1
+- source pixels: 1536 x 1024
+- implementation pixels: 1440 x 1024
+- normalization: same height and desktop state; widths differ by 96px, so comparison used proportional region boundaries rather than pixel-identical x coordinates
+- state: light theme, note selected, AI Review inspector open
 
-| State | Dashboard reference | Dimensions | Hero asset | Dimensions |
-| --- | --- | ---: | --- | ---: |
-| Light | `C:\Users\mwaig\Downloads\Orin Productivity Dashboard Interface.png` | 1312 × 1199 | `C:\Users\mwaig\Downloads\Gemini_Generated_Image_4zexys4zexys4zex.jpg` | 3116 × 1344 |
-| Dark | `C:\Users\mwaig\Downloads\790b6ac0-fefc-47c0-8665-9d79fa903b53.png` | 1312 × 1199 | `C:\Users\mwaig\Downloads\Gemini_Generated_Image_hlx1e4hlx1e4hlx1.jpg` | 3116 × 1344 |
+**Full-view comparison evidence**
 
-## Implemented surface
+The implementation follows the selected composition while incorporating the user's later direction to remove the fixed cover image: persistent Orin rail, unified title-only Writing library, single document header, one grouped formatting row, dominant editorial canvas, and a contextual tabbed right inspector. Region proportions, warm ivory/forest palette, serif editorial hierarchy, thin dividers, and low-elevation surfaces follow the source.
 
-- URL: `http://localhost:5273/`
-- Route/state: authenticated Home dashboard
-- Desktop verification viewport: 1512 × 1100
-- Mobile verification viewport: 390 × 844
-- Existing Orin color tokens remain the source for surfaces, text, borders, accents, and dark mode.
-- The supplied daytime and nighttime mountain images switch with the app theme and are used in the hero only.
+**Focused region comparison evidence**
 
-## QA history
+- Header: editable serif title, saved status, Focus, inspector toggle, and overflow menu match the source hierarchy.
+- Library: notebooks, modes, search/filter, note list, new note, resize and collapse are functional. The source's Notes/Notebooks segmented control is represented by existing Writing views plus notebooks to preserve product functions.
+- Toolbar: paragraph style, font, size, emphasis, lists, links, color, alignment and a compact Insert menu operate directly on the visual document. Tables, columns, callouts, dividers and images render immediately and remain editable.
+- Inspector: AI Review, Design, and Note details are working tabs with real actions and controlled document values.
+- Collapsed state: the 56px icon rail remains, the editor reclaims the released width, and the inspector holds its 320px track.
+- Images: the pinned cover was removed. User images are inserted into the document as editable, captioned visual blocks.
 
-1. Verified the reference hierarchy: persistent navigation, toolbar, image-led assistant hero, four workspace shortcuts, two-column work panels, and assistant/focus/files rail.
-2. Implemented the hierarchy with live Orin data and existing navigation/actions.
-3. Compared light desktop against the light reference. Adjusted the hero, composer, shortcut cards, panel density, and responsive grid.
-4. Compared dark desktop and confirmed the existing dark palette is preserved while the nighttime image is selected.
-5. Compared light and dark at 390 × 844. Confirmed the hero, composer, prompt chips, and shortcut cards stack without horizontal overflow.
-6. Verified theme switching, Home → Tasks → Home navigation, keyboard-accessible controls, and zero browser console errors.
-7. Fixed an unauthenticated AI-model request that could trigger a refresh loop on the sign-in screen.
-8. Tightened the sidebar to the reference proportions, moved workspace selection below primary navigation, and added a persistent New workspace dialog with selectable identity colors.
-9. Re-tested at a 304px embedded viewport and removed all horizontal overflow (`scrollWidth` equals `clientWidth`). Desktop verification at 1425px also has no horizontal overflow.
+**Comparison history**
 
-## Final result
+1. P0 found: a legacy higher-specificity grid overrode the collapsed state, reducing the editor to a 4px track and expanding the inspector into the remaining viewport.
+   - Fix: added explicit `:has(.writing-studio) .writing-workspace.writing-list-collapsed` templates for inspector-open and inspector-closed states, including the 1180px overlay breakpoint.
+   - Post-fix evidence: `implementation-collapsed-final.png` shows a usable full editor between the 56px rail and 320px inspector.
+2. P2 found: the old format bar still exposed magazine controls, causing horizontal clipping and conflicting with the selected inspector model.
+   - Fix: advanced magazine controls moved to the Design tab and were removed from the persistent toolbar.
+   - Post-fix evidence: the final expanded capture shows the compact common-action row, while Design remains available in the inspector.
 
-passed
+**Required fidelity surfaces**
+
+- Fonts and typography: passed. Georgia supplies the editorial face; existing DM Sans/Manrope product typography remains for UI. Hierarchy and line height match the selected calm editorial direction.
+- Spacing and layout rhythm: passed. Major tracks, header heights, canvas width, thin dividers, and inspector rhythm are coherent. The selected fixture is intentionally sparse.
+- Colors and visual tokens: passed. Existing light/dark Orin tokens power all surfaces; forest accents and warm ivory match the source.
+- Image behavior: passed. The editor accepts, compresses, renders, persists, and restores user-inserted images without exposing source markup.
+- Copy and content: passed for product labels and actions. Document content remains user-owned and therefore differs from the concept mockup.
+
+**Primary interactions tested**
+
+- Open Writing and select a note
+- Switch AI Review and Design inspector tabs
+- Open/close note filtering
+- Create a notebook
+- Collapse the Writing library to a 56px icon rail
+- Enter and exit full-screen writing
+- Collapse the global app sidebar
+- Pause while typing and receive a live, cancellable AI review
+- Apply an exact-excerpt suggestion directly to the draft
+- Create and persist a magazine note containing editable columns, table, callout, divider and uploaded image without exposing HTML or Markdown source
+- Fall through configured preferred/free/default/fallback models when a provider is unavailable
+- Continue with clearly labelled local checks when no provider is available
+
+The focused browser flow and the complete browser suite passed without an application runtime exception. Live review payloads are bounded, are not persisted by the endpoint, treat document text as untrusted content, and discard replacements whose quoted source text is not present in the current draft.
+
+**Follow-up polish**
+
+- P3: add drag handles and table row/column context menus for deeper page-layout control.
+- P3: animate inspector and library transitions after reduced-motion handling is defined.
+
+final result: passed

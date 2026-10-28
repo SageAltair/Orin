@@ -48,6 +48,44 @@ def _project(client: TestClient, *, name: str = "The Small Voice") -> dict[str, 
     return response.json()
 
 
+def test_live_writing_review_returns_actionable_local_checks_without_storing_draft(client: TestClient) -> None:
+    response = client.post("/api/v1/knowledge/review-live", json={
+        "title": "A clearer introduction",
+        "content": "In order to explain the idea, we should should use a direct sentence that readers can follow.",
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["mode"] == "local"
+    assert result["model"] is None
+    assert len(result["source_fingerprint"]) == 16
+    assert {item["category"] for item in result["suggestions"]} >= {"clarity", "grammar"}
+    assert any(item["replacement"] == "to" for item in result["suggestions"])
+    assert "content" not in result
+
+
+def test_live_writing_review_rejects_oversized_payload(client: TestClient) -> None:
+    response = client.post("/api/v1/knowledge/review-live", json={"title": "Draft", "content": "x" * 30001})
+    assert response.status_code == 422
+
+
+def test_live_writing_review_uses_configured_ai_and_validates_exact_excerpt(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Provider:
+        def structured_output(self, **_: object) -> str:
+            return '{"suggestions":[{"category":"flow","severity":"suggestion","title":"Open directly","message":"Lead with the action.","original":"In order to","replacement":"To"},{"category":"tone","severity":"suggestion","title":"Invalid excerpt","message":"This must be discarded.","original":"not in the draft","replacement":"x"}]}'
+    monkeypatch.setattr("orin_api.workspace_router.create_provider", lambda _settings: Provider())
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        _env_file=None, ai_provider="openai", ai_model="test-editor", openai_api_key="test-key")
+    response = client.post("/api/v1/knowledge/review-live", json={
+        "title": "Draft", "content": "In order to make this opening clear, the draft begins with a practical action for the reader."
+    })
+    assert response.status_code == 200
+    result = response.json()
+    assert result["mode"] == "ai"
+    assert result["model"] == "test-editor"
+    assert len(result["suggestions"]) == 1
+    assert result["suggestions"][0]["replacement"] == "To"
+
+
 def test_project_context_uses_real_task_activity_and_memory_data(client: TestClient) -> None:
     project = _project(client)
     project_id = project["id"]
@@ -188,6 +226,8 @@ def test_knowledge_documents_versions_links_search_and_exclusion(client: TestCli
     archived = client.patch(f"/api/v1/knowledge/documents/{idea_id}", json={"archived": True, "expected_version": 2})
     assert archived.json()["archived"] is True
     assert client.get("/api/v1/knowledge/documents").json() == [research.json()]
+    assert client.delete(f"/api/v1/knowledge/documents/{idea_id}").status_code == 204
+    assert client.get(f"/api/v1/knowledge/documents/{idea_id}").status_code == 404
     assert client.put("/api/v1/environment/preferences", json={"surface": "navigation", "item": "projects", "visibility": "prioritized", "priority": 10}).status_code == 200
     assert "projects" in client.get("/api/v1/users/me/preferences").json()["pinned_capabilities"]
     assert client.delete("/api/v1/environment/preferences").status_code == 204

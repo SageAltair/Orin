@@ -83,6 +83,25 @@ export interface KnowledgeReviewRecord {
   snoozed_until: string | null;
 }
 
+export interface WritingReviewSuggestion {
+  id: string;
+  category: "clarity" | "flow" | "engagement" | "grammar" | "tone";
+  severity: "suggestion" | "important";
+  title: string;
+  message: string;
+  original: string | null;
+  replacement: string | null;
+}
+
+export interface WritingLiveReview {
+  suggestions: WritingReviewSuggestion[];
+  reviewed_at: string;
+  mode: "ai" | "local";
+  model: string | null;
+  source_fingerprint: string;
+  limitations: string[];
+}
+
 export interface KnowledgeAskResult {
   answer: string;
   citations: Array<{ document_id: string; title: string; document_type: KnowledgeDocumentType; updated_at: string }>;

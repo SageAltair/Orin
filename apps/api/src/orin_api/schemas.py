@@ -337,6 +337,8 @@ class UserRead(BaseModel):
     email: EmailStr
     display_name: str
     created_at: datetime
+    is_admin: bool = False
+    is_disabled: bool = False
 
 
 class AuthTokenResponse(BaseModel):

@@ -203,12 +203,34 @@ class User(TimestampMixin, Base):
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    is_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     preferences: Mapped[UserPreferences] = relationship(back_populates="user", cascade="all, delete-orphan", uselist=False)
     capabilities: Mapped[list[UserCapability]] = relationship(back_populates="user", cascade="all, delete-orphan")
     projects: Mapped[list[Project]] = relationship(back_populates="owner")
     tasks: Mapped[list[Task]] = relationship(back_populates="owner", foreign_keys="Task.owner_id")
     auth_sessions: Mapped[list[AuthSession]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class SystemSetting(TimestampMixin, Base):
+    __tablename__ = "system_settings"
+
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value_json: Mapped[dict[str, object]] = mapped_column("value", JSON, nullable=False, default=dict, server_default="{}")
+    updated_by_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+
+
+class AdminAuditEvent(CreatedAtMixin, Base):
+    __tablename__ = "admin_audit_events"
+    __table_args__ = (Index("ix_admin_audit_created", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    action: Mapped[str] = mapped_column(String(80), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    target_id: Mapped[str | None] = mapped_column(String(120))
+    detail_json: Mapped[dict[str, object]] = mapped_column("detail", JSON, nullable=False, default=dict, server_default="{}")
 
 
 class UserPreferences(TimestampMixin, Base):

@@ -7,6 +7,7 @@ Orin connects human intention with digital execution. In the long term, users wi
 ## Architecture rules
 
 - Use a monorepo with clear `apps/web`, `apps/api`, and `apps/worker` boundaries.
+- Keep the native client in `apps/mobile`; it consumes the existing API and shared contracts and must not duplicate backend domain logic.
 - Start with a modular monolith; do not introduce microservices or unnecessary dependencies.
 - Keep domain logic separate from HTTP, persistence, and framework code.
 - Put public API shapes in `packages/contracts`; keep provider and worker implementations behind replaceable interfaces.
@@ -57,6 +58,14 @@ Orin connects human intention with digital execution. In the long term, users wi
 - `npm run test`
 - `npm run test:e2e` (requires a Playwright browser installed with `npx playwright install chromium`)
 - `npm run build`
+
+### Mobile (`apps/mobile`)
+
+- `npm install`
+- `npm run android` — launch the Expo Android development client.
+- `npm run typecheck`
+- `npm test`
+- `npm run export:android` — verify the Android JavaScript bundle.
 
 ### API (`apps/api`)
 

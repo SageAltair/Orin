@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from orin_api.background import maintenance_loop
 from orin_api.notification_router import router as notification_router
 from orin_api.privacy_router import router as privacy_router
+from orin_api.metrics import record_request
 
 from orin_api.config import get_settings
 from orin_api.auth_router import router as auth_router
@@ -29,6 +30,7 @@ from orin_api.template_router import router as template_router
 from orin_api.action_plan_router import router as action_plan_router
 from orin_api.proactive_router import router as proactive_router
 from orin_api.specialist_router import router as specialist_router
+from orin_api.admin_router import router as admin_router
 
 settings = get_settings()
 logger = logging.getLogger("orin_api.request")
@@ -51,7 +53,7 @@ app.add_middleware(
     allow_origins=settings.allowed_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Timezone"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Timezone", "X-Orin-Workspace-Id"],
 )
 app.include_router(privacy_router)
 app.include_router(notification_router)
@@ -70,6 +72,7 @@ app.include_router(template_router)
 app.include_router(action_plan_router)
 app.include_router(proactive_router)
 app.include_router(specialist_router)
+app.include_router(admin_router)
 
 app.include_router(creative_router)
 
@@ -84,12 +87,14 @@ async def disable_api_caching(request: Request, call_next: RequestResponseEndpoi
     try:
         response = await call_next(request)
     except Exception:
+        record_request("unhandled", 500, time.perf_counter() - started)
         logger.error("api_request_complete request_id=%s route=unhandled status=500 duration_ms=%.2f",
             request_id, (time.perf_counter() - started) * 1000)
         raise
     route = request.scope.get("route")
     route_template = getattr(route, "path", "unmatched")
     duration_ms = (time.perf_counter() - started) * 1000
+    record_request(route_template, response.status_code, duration_ms / 1000)
     logger.info("api_request_complete request_id=%s route=%s status=%d duration_ms=%.2f",
         request_id, route_template, response.status_code, duration_ms)
     response.headers["X-Request-ID"] = request_id

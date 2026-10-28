@@ -1,4 +1,4 @@
-const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:8100";
+const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? window.location.origin;
 let accessToken: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let activeWorkspaceId: string | null = null;
@@ -9,7 +9,7 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
-export interface User { id: string; email: string; display_name: string; created_at: string }
+export interface User { id: string; email: string; display_name: string; created_at: string; is_admin: boolean; is_disabled: boolean }
 export interface Task { id: string; title: string; description: string | null; verification_criteria?: string | null; status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"; focus_state?: "inbox" | "later" | "today" | "active" | "released" | null; first_step?: string | null; why?: string | null; energy_level?: "low" | "medium" | "high" | null; estimated_minutes?: number | null; is_anchor?: boolean; trigger?: string | null; last_touched_at?: string | null; decay_review_at?: string | null; skip_count_today?: number; skip_day_key?: string | null; today_day_key?: string | null; today_position?: number | null; completed_at?: string | null; released_at?: string | null; priority: "low" | "normal" | "high" | "urgent"; due_at: string | null; project_id: string | null; milestone_id?: string | null; created_at: string; updated_at: string }
 export interface Milestone { id: string; project_id: string; title: string; description: string | null; target_date: string | null; status: "pending" | "completed"; completion_criteria: string | null; created_at: string; updated_at: string }
 export interface CalendarEvent { id: string; user_id: string; project_id: string | null; title: string; description: string | null; is_all_day: boolean; start_at: string | null; end_at: string | null; start_date: string | null; end_date: string | null; timezone: string; reminder_minutes: 5 | 10 | 15 | 30 | 60 | null; created_at: string; updated_at: string }

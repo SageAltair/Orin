@@ -23,6 +23,7 @@ test("real API approval releases a signed job to a live worker and reports its r
     await page.getByRole("button", { name: "Create account" }).click();
     await expect(page.getByRole("button", { name: "Ask Orin", exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Preferences" }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Devices", exact: true }).click();
     await page.getByLabel("Device name").fill("E2E-Windows-Worker");
     await page.getByRole("button", { name: "Register", exact: true }).click();
     const token = await page.getByLabel("Worker token").inputValue();
@@ -46,11 +47,13 @@ test("real API approval releases a signed job to a live worker and reports its r
     worker.stderr?.on("data", chunk => { workerDiagnostics = (workerDiagnostics + String(chunk)).slice(-2000); });
     await expect(page.getByText("active", { exact: true }), workerDiagnostics).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Request approval" }).click();
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Approvals", exact: true }).click();
     await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
     await page.getByRole("button", { name: "Approve" }).click();
+    await expect(page.getByText(/executed · low risk/)).toBeVisible({ timeout: 45_000 });
+    await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Devices", exact: true }).click();
     await expect(page.getByText(/completed · Running an allowed capability/)).toBeVisible({ timeout: 45_000 });
     await expect(page.locator(".data-main pre").filter({ hasText: /platform/ })).toBeVisible();
-    await expect(page.getByText(/executed · low risk/)).toBeVisible({ timeout: 15_000 });
     const workers = page.getByRole("region", { name: "Connected workers" });
     page.once("dialog", dialog => dialog.accept());
     await workers.getByRole("button", { name: "Revoke" }).click();

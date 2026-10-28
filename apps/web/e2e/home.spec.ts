@@ -1,4 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+
+async function settingsSection(page: Page, name: string) {
+  await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name, exact: true }).click();
+}
 
 async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject = false) {
   let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "calendar", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
@@ -10,6 +15,7 @@ async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject
   const devices: Record<string, unknown>[] = [];
   const workerJobs: Record<string, Record<string, unknown>[]> = {};
   const approvals: Record<string, unknown>[] = [];
+  const knowledgeDocuments: Record<string, unknown>[] = [{ id: "note-1", user_id: "user-1", project_id: null, title: "Meeting notes", content: "A clear first paragraph.", document_type: "quick_note", tags: [], status: "inbox", archived: false, exclude_from_ai: false, review_at: null, version: 1, extraction_status: "not_requested", extracted_data: null, extraction_error: null, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }];
   const focusTasks: Record<string, unknown>[] = seedCalendarTask ? [{ id: "calendar-task-1", title: "Write project brief", status: "todo", focus_state: "today", first_step: null, why: null, energy_level: null, estimated_minutes: 45, project_id: null }] : [];
   const calendarEvents: Record<string, unknown>[] = [];
   const taskBlocks: Record<string, unknown>[] = [];
@@ -113,6 +119,23 @@ async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject
     if (/\/api\/v1\/calendar\/tasks\/[^/]+\/schedule$/.test(pathname) && route.request().method() === "PUT") { const taskId = pathname.split("/").at(-2); const task = tasks.find(item => item.id === taskId); if (!task) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); const body = await route.request().postDataJSON() as Record<string, unknown>; let block = taskBlocks.find(item => item.task_id === taskId); if (!block) { block = { id: `block-${taskBlocks.length + 1}`, task_id: taskId, title: task.title, description: task.description, status: task.status, project_id: task.project_id, project_name: null }; taskBlocks.push(block); } Object.assign(block, body, { start_at: body.start_at, end_at: body.end_at, estimated_minutes: body.estimated_minutes, timezone: body.timezone }); return route.fulfill({ json: block }); }
     if (/\/api\/v1\/calendar\/tasks\/[^/]+\/schedule$/.test(pathname) && route.request().method() === "DELETE") { const taskId = pathname.split("/").at(-2); const index = taskBlocks.findIndex(item => item.task_id === taskId); if (index >= 0) taskBlocks.splice(index, 1); return route.fulfill({ status: 204 }); }
     if (pathname.endsWith("/activity")) return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/knowledge/review-live" && route.request().method() === "POST") {
+      const draft = await route.request().postDataJSON() as { content: string };
+      return route.fulfill({ json: { suggestions: [{ id: `review-1-${draft.content.length}`, category: "clarity", severity: "suggestion", title: "Tighten the opening", message: "A direct opening is easier to follow.", original: "In order to", replacement: "To" }, { id: `review-2-${draft.content.length}`, category: "tone", severity: "suggestion", title: "Use a warmer audience word", message: "Audience is more specific in this passage.", original: "reader", replacement: "audience" }], reviewed_at: "2026-10-25T10:00:00Z", mode: "ai", model: "test-editor", source_fingerprint: String(draft.content.length), limitations: [] } });
+    }
+    if (pathname === "/api/v1/knowledge/documents" && route.request().method() === "GET") return route.fulfill({ json: knowledgeDocuments });
+    if (pathname === "/api/v1/knowledge/documents" && route.request().method() === "POST") {
+      const input = await route.request().postDataJSON() as Record<string, unknown>;
+      const document = { id: `note-${knowledgeDocuments.length + 1}`, user_id: "user-1", project_id: input.project_id ?? null, title: input.title ?? "Untitled", content: input.content ?? "", document_type: input.document_type ?? "quick_note", tags: input.tags ?? [], status: input.status ?? "inbox", archived: false, exclude_from_ai: input.exclude_from_ai ?? false, review_at: input.review_at ?? null, version: 1, extraction_status: "not_requested", extracted_data: null, extraction_error: null, created_at: "2026-10-25T10:00:00Z", updated_at: "2026-10-25T10:00:00Z" };
+      knowledgeDocuments.push(document);
+      return route.fulfill({ status: 201, json: document });
+    }
+    if (pathname === "/api/v1/knowledge/insights" || pathname === "/api/v1/knowledge/reviews") return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/knowledge/documents/note-1" && route.request().method() === "PATCH") { Object.assign(knowledgeDocuments[0], await route.request().postDataJSON(), { version: Number(knowledgeDocuments[0].version) + 1, updated_at: "2026-10-25T10:00:00Z" }); return route.fulfill({ json: knowledgeDocuments[0] }); }
+    if (/\/api\/v1\/knowledge\/documents\/[^/]+$/.test(pathname) && route.request().method() === "DELETE") { const index = knowledgeDocuments.findIndex(item => item.id === pathname.split("/").at(-1)); if (index >= 0) knowledgeDocuments.splice(index, 1); return route.fulfill({ status: 204 }); }
+    if (pathname === "/api/v1/knowledge/documents/note-1") return route.fulfill({ json: knowledgeDocuments[0] });
+    if (pathname === "/api/v1/knowledge/documents/note-1/versions") return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/knowledge/documents/note-1/links") return route.fulfill({ json: { links: [], backlinks: [] } });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 }
@@ -276,7 +299,8 @@ test("home shows the personal dashboard and offers Ask Orin", async ({ page }) =
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText("Recent requests")).toHaveCount(0);
-  await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Ask Orin", exact: true })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Ask Orin" }).first().click();
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("autocomplete", "off");
   await expect(page.getByRole("textbox", { name: "Ask Orin" })).toHaveAttribute("placeholder", "Ask Orin what you need");
@@ -298,6 +322,7 @@ test("workspace preferences control visible capabilities", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toBeVisible();
 });
@@ -307,18 +332,24 @@ test("settings expose profile security, autonomy, approvals, and worker enrollme
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Account");
   await expect(page.getByRole("heading", { name: "Email and sessions" })).toBeVisible();
+  await settingsSection(page, "Intelligence");
   await expect(page.getByRole("heading", { name: "Choose how Orin handles actions" })).toBeVisible();
+  await settingsSection(page, "Approvals");
   await expect(page.getByRole("heading", { name: "Requests and history" })).toBeVisible();
+  await settingsSection(page, "Devices");
   await expect(page.getByRole("heading", { name: "Connected workers" })).toBeVisible();
   await page.getByLabel("Device name").fill("Sage-Laptop");
   await page.getByRole("button", { name: "Register", exact: true }).click();
   await expect(page.getByLabel("Worker token")).toHaveValue("one-time-test-worker-token-that-is-long");
   await page.getByRole("button", { name: "Request approval" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Request sent for approval" })).toBeVisible();
-  await expect(page.getByRole("strong").filter({ hasText: "get system info" })).toBeVisible();
+  await settingsSection(page, "Approvals");
+  await expect(page.getByText("worker_get_system_info", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Approve" }).click();
   await expect(page.getByText(/approved · low risk/)).toBeVisible();
+  await settingsSection(page, "Devices");
   page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Revoke" }).click();
   await expect(page.getByText("revoked", { exact: true })).toBeVisible();
@@ -341,6 +372,7 @@ test("GitHub settings show the connected account and accessible repositories", a
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Integrations");
   await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
   await expect(page.getByText("Connected as").getByText("octo-test")).toBeVisible();
   await expect(page.getByText("octo-test/orin-demo")).toBeVisible();
@@ -393,6 +425,7 @@ test("project intelligence stores knowledge and starts a persistent focus sessio
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await page.getByRole("navigation").getByRole("button", { name: "Projects" }).click();
   await page.getByRole("textbox", { name: "Project name" }).fill("The Small Voice");
@@ -415,6 +448,7 @@ test("adaptive navigation can minimize, hide, recover, and reset tools", async (
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   const projects = page.getByRole("combobox", { name: "projects", exact: true });
   await projects.selectOption("minimized");
   await expect(page.getByRole("navigation").getByRole("button", { name: "Projects" })).toHaveClass(/minimized/);
@@ -447,6 +481,7 @@ test("activity links open related workspace records and exposes lifecycle event 
   await page.goto("/");
   await signIn(page);
   await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Workspace");
   await page.getByRole("checkbox", { name: "Show Projects" }).check();
   await page.getByRole("checkbox", { name: "Show Activity" }).check();
   await page.getByRole("navigation").getByRole("button", { name: "Activity" }).click();
@@ -627,4 +662,259 @@ test("quick capture saves an inbox task from the global workspace toolbar", asyn
   await page.locator(".quick-capture button[type=submit]").click();
   await expect(page.getByRole("status")).toContainText("Saved to your Inbox");
   await expect(page.getByText("Ask the ministry team about the venue", { exact: true })).toBeVisible();
+});
+
+
+test("settings theme controls persist across pages and section navigation preserves drafts", async ({ page }, testInfo) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const settingsNav = page.getByRole("navigation", { name: "Settings sections" });
+  await expect(settingsNav.getByRole("button", { name: "Appearance", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "A familiar kind of calm." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Email and sessions" })).not.toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("settings-light.png") });
+  await page.getByRole("button", { name: "Dark A softer light for late work", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.getByRole("combobox", { name: "Interface density", exact: true }).selectOption("compact");
+  await expect(page.locator(".orin-shell")).toHaveClass(/density-compact/);
+  await page.screenshot({ path: testInfo.outputPath("settings-dark.png") });
+  await settingsSection(page, "Account");
+  await page.getByLabel("Current password", { exact: true }).fill("unfinished-local-test-draft");
+  await settingsSection(page, "Appearance");
+  await settingsSection(page, "Account");
+  await expect(page.getByLabel("Current password", { exact: true })).toHaveValue("unfinished-local-test-draft");
+  await page.getByRole("navigation", { name: "Workspace", exact: true }).getByRole("button", { name: "Projects", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.reload();
+  await signIn(page);
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await expect(page.locator(".orin-shell")).toHaveClass(/density-compact/);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await settingsSection(page, "Appearance");
+  await page.getByRole("button", { name: "System Follow your device", exact: true }).click();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-system/);
+  const systemDark = await page.locator(".orin-shell").evaluate(el => getComputedStyle(el).backgroundColor);
+  await page.emulateMedia({ colorScheme: "light" });
+  const systemLight = await page.locator(".orin-shell").evaluate(el => getComputedStyle(el).backgroundColor);
+  expect(systemDark).not.toBe(systemLight);
+});
+
+test("settings stays usable on a phone and section navigation supports keyboard movement", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  const settingsNav = page.getByRole("navigation", { name: "Settings sections" });
+  const appearance = settingsNav.getByRole("button", { name: "Appearance", exact: true });
+  await appearance.focus();
+  await appearance.press("ArrowRight");
+  await expect(settingsNav.getByRole("button", { name: "Workspace", exact: true })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Choose what you see" })).toBeVisible();
+  await settingsNav.getByRole("button", { name: "Workspace", exact: true }).press("End");
+  await expect(settingsNav.getByRole("button", { name: "Your data", exact: true })).toBeFocused();
+  await expect(page.getByRole("button", { name: "Export my account", exact: true })).toBeVisible();
+  const size = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, view: window.innerWidth }));
+  expect(size.scroll).toBeLessThanOrEqual(size.view);
+  await settingsNav.getByRole("button", { name: "Your data", exact: true }).press("Home");
+  await page.getByRole("button", { name: "Dark A softer light for late work", exact: true }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await expect(page.getByRole("button", { name: "Dark A softer light for late work", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: testInfo.outputPath("settings-mobile.png") });
+});
+
+test("Writing provides collapsible navigation, note pane controls, and full screen editing", async ({ page }, testInfo) => {
+  test.setTimeout(120000);
+  await mockApi(page, false, true);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await settingsSection(page, "Workspace");
+  await page.getByRole("checkbox", { name: "Show Writing" }).check();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Writing", exact: true }).click();
+
+  const studio = page.locator(".writing-studio");
+  await expect(studio).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Notes" })).toHaveAttribute("aria-selected", "true");
+  let createdNotes = 0;
+  page.on("request", request => { if (new URL(request.url()).pathname === "/api/v1/knowledge/documents" && request.method() === "POST") createdNotes += 1; });
+  await page.getByRole("button", { name: /New note/ }).first().click();
+  await expect(page.getByLabel("Content", { exact: true })).toBeVisible();
+  await page.waitForTimeout(1100);
+  expect(createdNotes).toBe(0);
+  await expect(page.locator(".writing-save-status")).toContainText("Not saved yet");
+  await page.getByLabel("Content", { exact: true }).fill("A note now worth saving.");
+  await expect.poll(() => createdNotes).toBe(1);
+  await expect(page.locator(".writing-save-status")).toContainText("Saved");
+  await page.getByRole("button", { name: "Manage document" }).click();
+  await expect(page.getByRole("button", { name: "Details", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Document project")).toBeVisible();
+  await expect(page.getByLabel("Document notebook")).toBeVisible();
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", { name: "Delete note" }).click();
+  await expect(page.getByRole("button", { name: /Untitled/ })).toHaveCount(0);
+  const noteRow = page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: /Meeting notes/ });
+  await expect(noteRow).toHaveText("Meeting notes");
+  await noteRow.click();
+  await page.getByRole("button", { name: "Manage document" }).click();
+  await page.getByLabel("Document project").selectOption({ label: "Orin planning" });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
+  await page.getByRole("button", { name: "Export document…" }).click();
+  for (const [label, extension] of [["HTML", ".html"], ["DOCX", ".docx"], ["Markdown", ".md"], ["PDF", ".pdf"]] as const) {
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: new RegExp(`^${label}`) }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(`Meeting notes${extension}`);
+    expect(await download.failure()).toBeNull();
+    const downloadPath = await download.path();
+    expect(downloadPath).not.toBeNull();
+    const exported = await readFile(downloadPath!);
+    if (label === "HTML" || label === "Markdown") {
+      const markup = exported.toString("utf8");
+      expect(markup).toContain("writing-export-page");
+      expect(markup).toContain("font:");
+      expect(markup).toContain("Meeting notes");
+    }
+    if (label === "DOCX") expect(exported.toString("latin1")).toContain("word/media/");
+    if (label === "PDF") expect(exported.subarray(0, 4).toString("ascii")).toBe("%PDF");
+    if (label !== "PDF") {
+      await page.getByRole("button", { name: "Manage document" }).click();
+      await page.getByRole("button", { name: "Export document…" }).click();
+    }
+  }
+  await page.getByRole("button", { name: "Manage document" }).click();
+  await page.getByRole("button", { name: "Details", exact: true }).click();
+  await expect(page.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("toolbar", { name: "Document design tools" })).toBeVisible();
+  await expect(page.locator(".writing-toolbar-top").getByLabel("Document title")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Preview document" })).toBeVisible();
+  await expect(page.locator(".writing-formatbar")).toHaveCSS("position", "sticky");
+  await expect(page.locator(".writing-manuscript-stats")).toHaveCSS("position", "sticky");
+  await expect(page.locator(".writing-manuscript-stats")).toHaveCSS("bottom", "0px");
+  await expect(page.locator(".writing-cover-image")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Idea inbox" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Connections" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Manuscript" })).toHaveCount(0);
+  if (await page.getByRole("button", { name: "Open inspector" }).isVisible()) await page.getByRole("button", { name: "Open inspector" }).click();
+  await expect(page.getByRole("tab", { name: "AI Review" })).toBeVisible();
+  await page.getByRole("tab", { name: "AI Review" }).click();
+  await page.getByLabel("Content", { exact: true }).fill("In order to make this draft useful, the opening should be concise and easy for every reader to understand.");
+  await page.getByRole("button", { name: "Preview document" }).click();
+  await expect(page.getByLabel("Document preview")).toContainText("In order to make this draft useful");
+  await expect(page.getByRole("toolbar", { name: "Document design tools" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Return to editing" }).click();
+  await expect(page.getByLabel("Content", { exact: true })).toBeVisible();
+  await expect(page.getByText("Tighten the opening")).toBeVisible({ timeout: 5000 });
+  await page.getByText("Tighten the opening").locator("..").getByRole("button", { name: "Dismiss" }).click();
+  await page.getByLabel("Content", { exact: true }).press("End");
+  await page.getByLabel("Content", { exact: true }).pressSequentially(" More detail.");
+  await expect(page.getByText("Tighten the opening")).toHaveCount(0);
+  await expect(page.getByText("Use a warmer audience word")).toBeVisible({ timeout: 5000 });
+  await page.getByText("Use a warmer audience word").locator("..").getByRole("button", { name: "Apply change" }).click();
+  await expect(page.getByLabel("Content", { exact: true })).toContainText("audience");
+  await page.locator(".writing-inspector-close").click();
+  const editor = page.getByLabel("Content", { exact: true });
+  await page.locator(".writing-toolbar-menu summary").click();
+  await page.getByRole("button", { name: "Insert magazine columns" }).click();
+  await page.getByRole("button", { name: "Insert table" }).click();
+  await page.getByLabel("Table columns").fill("3");
+  await page.getByLabel("Table rows").fill("4");
+  await page.getByRole("button", { name: "Insert 4 × 3 table" }).click();
+  await page.getByRole("button", { name: "Insert styled text area" }).click();
+  await page.getByRole("button", { name: "Insert divider" }).click();
+  await expect(editor.locator(".magazine-columns")).toBeVisible();
+  await expect(editor.locator("table")).toBeVisible();
+  await expect(editor.locator("table tr")).toHaveCount(5);
+  await expect(editor.locator("table thead th")).toHaveCount(3);
+  await expect(editor.locator(".magazine-callout")).toBeVisible();
+  await expect(editor.locator("hr")).toHaveCount(1);
+  await expect(editor.locator("hr")).toHaveCSS("border-top-style", "solid");
+  await expect(editor).not.toContainText('<div class="magazine-columns">');
+  await page.locator(".writing-image-input").setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64") });
+  await expect(editor.locator("figure.magazine-image img")).toBeVisible();
+  const editRendering = await editor.evaluate(element => {
+    const snapshot = (target: Element | null) => {
+      if (!target) return null;
+      const style = getComputedStyle(target);
+      return { display: style.display, width: style.width, fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight, gridTemplateColumns: style.gridTemplateColumns, borderRadius: style.borderRadius, padding: style.padding, backgroundColor: style.backgroundColor };
+    };
+    return { surface: snapshot(element), columns: snapshot(element.querySelector(".magazine-columns")), table: snapshot(element.querySelector("table")), callout: snapshot(element.querySelector(".magazine-callout")), image: snapshot(element.querySelector(".magazine-image img")) };
+  });
+  await page.getByRole("button", { name: "Preview document" }).click();
+  const preview = page.getByLabel("Document preview");
+  const previewRendering = await preview.evaluate(element => {
+    const snapshot = (target: Element | null) => {
+      if (!target) return null;
+      const style = getComputedStyle(target);
+      return { display: style.display, width: style.width, fontFamily: style.fontFamily, fontSize: style.fontSize, lineHeight: style.lineHeight, gridTemplateColumns: style.gridTemplateColumns, borderRadius: style.borderRadius, padding: style.padding, backgroundColor: style.backgroundColor };
+    };
+    return { surface: snapshot(element), columns: snapshot(element.querySelector(".magazine-columns")), table: snapshot(element.querySelector("table")), callout: snapshot(element.querySelector(".magazine-callout")), image: snapshot(element.querySelector(".magazine-image img")) };
+  });
+  expect(previewRendering).toEqual(editRendering);
+  await page.getByRole("button", { name: "Return to editing" }).click();
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
+  await page.getByRole("button", { name: "Manage document" }).click();
+  await page.getByRole("button", { name: "Export document…" }).click();
+  const designedDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: /^HTML/ }).click();
+  const designedDownload = await designedDownloadPromise;
+  const designedPath = await designedDownload.path();
+  const designedHtml = (await readFile(designedPath!)).toString("utf8");
+  expect(designedHtml).toContain("magazine-columns");
+  expect(designedHtml).toContain("display: grid");
+  expect(designedHtml).toContain("<table");
+  expect(designedHtml).toContain("magazine-callout");
+  expect(designedHtml).toContain("figure class=\"magazine-image\"");
+  expect(designedHtml).toMatch(/data:image\/(?:png|jpeg);base64/);
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Home", exact: true }).click();
+  await page.getByRole("navigation", { name: "Workspace" }).getByRole("button", { name: "Writing", exact: true }).click();
+  await page.getByRole("navigation", { name: "Notes" }).getByRole("button", { name: /Meeting notes/ }).click();
+  await expect(page.getByLabel("Content", { exact: true }).locator(".magazine-columns")).toBeVisible();
+  await expect(page.getByLabel("Content", { exact: true }).locator("figure.magazine-image img")).toBeVisible();
+  const editorBox = await page.locator(".writing-editor").boundingBox();
+  const statsBox = await page.locator(".writing-manuscript-stats").boundingBox();
+  expect(Math.abs(statsBox!.y + statsBox!.height - (editorBox!.y + editorBox!.height))).toBeLessThanOrEqual(2);
+  await page.locator(".writing-editor").evaluate(element => { element.scrollTop = 0; element.scrollLeft = 0; });
+  await page.screenshot({ path: testInfo.outputPath("writing-magazine-editor.png"), fullPage: true });
+  await page.getByRole("button", { name: "Open inspector" }).click();
+  await page.getByRole("tab", { name: "Design" }).click();
+  await page.getByLabel("Content", { exact: true }).locator("table th").first().click();
+  await expect(page.locator(".writing-selected-element")).toContainText("Table");
+  await page.getByLabel("Selected element width").selectOption("75%");
+  await expect(page.getByLabel("Content", { exact: true }).locator("table")).toHaveAttribute("style", /width:\s*75%/);
+  await page.getByRole("button", { name: "Duplicate" }).click();
+  await expect(page.getByLabel("Content", { exact: true }).locator("table")).toHaveCount(2);
+  await page.getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByLabel("Content", { exact: true }).locator("table")).toHaveCount(1);
+  await page.getByRole("button", { name: "Filter notes", exact: true }).click();
+  await expect(page.getByLabel("Document type")).toBeVisible();
+  page.once("dialog", dialog => dialog.accept("Work articles"));
+  await page.getByRole("tab", { name: "Notebooks" }).click();
+  await page.getByRole("button", { name: "New notebook" }).click();
+  await expect(page.getByRole("button", { name: /Work articles/ })).toBeVisible();
+  await page.getByRole("tab", { name: "Notes" }).click();
+
+  const workspace = page.locator(".writing-workspace");
+  await page.getByRole("button", { name: "Collapse notes sidebar" }).click();
+  await expect(workspace).toHaveClass(/writing-list-collapsed/);
+  await expect(page.locator(".writing-list")).toBeVisible();
+  await expect(page.locator(".writing-list")).toHaveCSS("width", "56px");
+  await expect(page.getByRole("button", { name: "Expand notes sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show notes" })).toBeVisible();
+  await page.locator(".writing-more-menu summary").click();
+  await page.getByRole("button", { name: "Full screen", exact: true }).click();
+  await expect(workspace).toHaveClass(/writing-fullscreen/);
+  await expect(page.getByLabel("Content", { exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(workspace).not.toHaveClass(/writing-fullscreen/);
+
+  await page.getByRole("button", { name: "Minimize sidebar" }).click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/sidebar-collapsed/);
+  await expect(page.locator(".sidebar")).toHaveCSS("width", "68px");
+  await expect(page.locator(".sidebar .nav-link-label").first()).toBeHidden();
+  await expect(page.locator(".sidebar .workspace-item-label").first()).toBeHidden();
 });

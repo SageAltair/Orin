@@ -31,15 +31,17 @@ jobs:
       ORIN_WORKER_E2E: "true"
       CI: "true"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/mobile/package-lock.json
       - name: Install Python dependencies
         run: |
           python -m pip install -r apps/api/requirements-dev.lock
@@ -65,6 +67,13 @@ jobs:
           npm run lint
           npm test
           npm run build
+      - name: Mobile Android client checks
+        working-directory: apps/mobile
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run export:android
       - name: Start isolated API
         run: |
           uvicorn orin_api.main:app --host 127.0.0.1 --port 8100 > /tmp/orin-api.log 2>&1 &
@@ -72,7 +81,7 @@ jobs:
       - name: Browser workflows against mocks and the isolated API
         working-directory: apps/web
         run: npm run test:e2e -- --workers=2
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
           name: verification-diagnostics
@@ -84,7 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Prepare isolated production configuration
         run: |
           cp .env.example .env
@@ -104,6 +113,8 @@ jobs:
         run: |
           curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:5274/health/ready
           curl --fail http://127.0.0.1:5274/health/live
+          ! curl --fail http://127.0.0.1:5274/health/metrics
+          docker compose --project-name orin-production-ci -f docker-compose.production.yml exec -T api python -c "import urllib.request; data=urllib.request.urlopen('http://127.0.0.1:8000/health/metrics').read(); assert b'orin_http_requests_total' in data"
           curl --fail http://127.0.0.1:5274/ | grep 'id="root"'
           docker build -f infrastructure/docker/worker.Dockerfile -t orin-worker-ci .
       - name: Capture container diagnostics
@@ -112,3 +123,63 @@ jobs:
       - name: Remove only the isolated CI stack and its test volumes
         if: always()
         run: docker compose --project-name orin-production-ci -f docker-compose.production.yml down -v
+
+  security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Audit locked dependencies
+        run: |
+          python -m pip install pip-audit==2.9.0
+          python -m pip_audit -r apps/api/requirements.lock
+          python -m pip_audit -r apps/worker/requirements.lock
+          cd apps/web
+          npm ci
+          npm audit --omit=dev --audit-level=high
+      - name: Scan repository for secrets and unsafe configuration
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Build production images for scanning
+        run: |
+          docker build -f infrastructure/docker/api.Dockerfile -t orin-api:ci .
+          docker build -f infrastructure/docker/web.production.Dockerfile -t orin-web:ci .
+      - name: Scan API image
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: orin-api:ci
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Scan web image
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # v0.32.0
+        with:
+          image-ref: orin-web:ci
+          format: table
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+      - name: Generate release SBOM
+        uses: anchore/sbom-action@7b36ad622f042cab6f59a75c2ac24ccb256e9b45 # v0.20.4
+        with:
+          path: .
+          format: spdx-json
+          output-file: orin-sbom.spdx.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: orin-sbom
+          path: orin-sbom.spdx.json

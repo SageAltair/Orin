@@ -1,11 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { AdminPortal } from "./AdminPortal";
 import "./styles.css";
 import "./design-system.css";
+import "./workspace-theme.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    {window.location.pathname.startsWith("/admin") ? <AdminPortal /> : <App />}
   </React.StrictMode>,
 );

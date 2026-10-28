@@ -1,7 +1,5 @@
-import { Pencil, Plus, Search, FileText } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Pencil, Plus, Search, FileText, BookOpen, PanelLeftClose, PanelLeftOpen, SlidersHorizontal, Sparkles, Palette, FileSliders, X, MoreVertical, Bold, Italic, Underline, List, ListChecks, Quote, Link2, Minus, Table2, Columns3, ImagePlus, Highlighter, Heading2, AlignLeft, AlignCenter, AlignRight, ChevronDown, Eye, Trash2, Archive, FolderKanban, FileDown } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type {
   KnowledgeAskResult,
   KnowledgeDocumentRecord,
@@ -9,6 +7,8 @@ import type {
   KnowledgeInsightRecord,
   KnowledgeReport,
   KnowledgeReviewRecord,
+  WritingLiveReview,
+  WritingReviewSuggestion,
 } from "@orin/contracts";
 import { ApiError, type Project, request } from "./api";
 
@@ -60,19 +60,130 @@ type ExtractionState = {
 };
 const readable = (value: string) =>
   value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
-const relativeTime = (value: string) => {
-  const minutes = Math.max(
-    0,
-    Math.floor((Date.now() - new Date(value).getTime()) / 60000),
-  );
-  return minutes < 1
-    ? "Just now"
-    : minutes < 60
-      ? `${minutes} min ago`
-      : minutes < 1440
-        ? `${Math.floor(minutes / 60)} hr ago`
-        : new Date(value).toLocaleDateString();
+const RICH_DOCUMENT_PREFIX = "<!--orin-rich-v1-->";
+const escapeHtml = (value: string) => value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
+const richHtmlFromContent = (value: string) => {
+  if (value.startsWith(RICH_DOCUMENT_PREFIX)) return value.slice(RICH_DOCUMENT_PREFIX.length);
+  return value.split(/\n{2,}/).map(block => `<p>${escapeHtml(block).replaceAll("\n", "<br>") || "<br>"}</p>`).join("");
 };
+const richTextFromContent = (value: string) => {
+  if (!value.startsWith(RICH_DOCUMENT_PREFIX) || typeof document === "undefined") return value;
+  const parsed = new DOMParser().parseFromString(value.slice(RICH_DOCUMENT_PREFIX.length), "text/html");
+  return parsed.body.textContent?.replace(/\s+/g, " ").trim() ?? "";
+};
+const sanitizeRichHtml = (value: string) => {
+  const parsed = new DOMParser().parseFromString(value, "text/html");
+  const allowed = new Set(["P","BR","H1","H2","H3","BLOCKQUOTE","UL","OL","LI","STRONG","B","EM","I","U","S","A","HR","TABLE","THEAD","TBODY","TR","TH","TD","SECTION","DIV","ASIDE","FIGURE","FIGCAPTION","IMG","SPAN","FONT"]);
+  parsed.body.querySelectorAll("*").forEach(node => {
+    if (!allowed.has(node.tagName)) { node.replaceWith(...node.childNodes); return; }
+    [...node.attributes].forEach(attribute => {
+      const name = attribute.name.toLowerCase();
+      const permitted = ["class","href","target","rel","src","alt","face","color","size","style"].includes(name);
+      if (!permitted || name.startsWith("on") || name === "id") node.removeAttribute(attribute.name);
+    });
+    if (node instanceof HTMLElement && node.classList.contains("is-editor-selected")) {
+      node.classList.remove("is-editor-selected");
+      if (!node.className) node.removeAttribute("class");
+    }
+    if (node instanceof HTMLElement && node.hasAttribute("style")) {
+      const allowedStyles = new Set(["background-color","color","font-family","font-size","text-align","width","max-width","border-radius","padding","column-gap","object-fit"]);
+      [...node.style].forEach(property => { if (!allowedStyles.has(property)) node.style.removeProperty(property); });
+      if (!node.getAttribute("style")?.trim()) node.removeAttribute("style");
+    }
+    if (node instanceof HTMLAnchorElement && !/^(https?:|mailto:)/i.test(node.href)) node.removeAttribute("href");
+    if (node instanceof HTMLImageElement && !/^data:image\/(?:png|jpe?g|webp|gif);base64,/i.test(node.src)) node.remove();
+  });
+  return parsed.body.innerHTML;
+};
+const replaceRichText = (content: string, original: string, replacement: string) => {
+  if (!content.startsWith(RICH_DOCUMENT_PREFIX)) return content.replace(original, replacement);
+  const parsed = new DOMParser().parseFromString(content.slice(RICH_DOCUMENT_PREFIX.length), "text/html");
+  const walker = document.createTreeWalker(parsed.body, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let text = "";
+  while (walker.nextNode()) { const node = walker.currentNode as Text; nodes.push(node); text += node.data; }
+  const start = text.indexOf(original);
+  if (start < 0) return content;
+  let offset = 0;
+  for (const node of nodes) {
+    const end = offset + node.data.length;
+    if (start >= offset && start + original.length <= end) {
+      const local = start - offset;
+      node.data = `${node.data.slice(0, local)}${replacement}${node.data.slice(local + original.length)}`;
+      return RICH_DOCUMENT_PREFIX + parsed.body.innerHTML;
+    }
+    offset = end;
+  }
+  return content;
+};
+const suggestionDismissKey = (suggestion: WritingReviewSuggestion) => `${suggestion.category}|${suggestion.title.trim().toLowerCase()}|${(suggestion.original ?? "").trim().toLowerCase()}`;
+const isLocalDraft = (document: Document | null) => document?.id.startsWith("local-draft:") ?? false;
+const hasWrittenContent = (value: string) => richTextFromContent(value).trim().length > 0;
+const localDraftDocument = (notebook: string): Document => {
+  const now = new Date().toISOString();
+  return { id: `local-draft:${crypto.randomUUID()}`, project_id: null, title: "Untitled", content: "", document_type: "quick_note", status: "inbox", tags: notebook ? [`notebook:${notebook}`] : [], archived: false, exclude_from_ai: false, review_at: null, version: 1, extraction_status: "not_requested", extraction_version: 0, extracted_data: null, extraction_error: null, created_at: now, updated_at: now };
+};
+const saveBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
+const EXPORT_STYLE_PROPERTIES = [
+  "display", "box-sizing", "position", "float", "clear", "overflow", "overflow-wrap",
+  "width", "min-width", "max-width", "height", "min-height", "max-height", "aspect-ratio",
+  "margin", "padding", "gap", "column-gap", "columns", "grid-template-columns", "grid-template-rows",
+  "align-items", "align-content", "justify-items", "justify-content", "place-items",
+  "font", "font-family", "font-size", "font-style", "font-weight", "font-variant", "line-height",
+  "letter-spacing", "text-align", "text-decoration", "text-transform", "text-indent", "white-space",
+  "color", "background", "background-color", "border", "border-top", "border-right", "border-bottom",
+  "border-left", "border-radius", "border-collapse", "border-spacing", "box-shadow", "opacity",
+  "object-fit", "object-position", "vertical-align", "list-style", "list-style-position",
+] as const;
+const copyRenderedStyles = (source: HTMLElement, target: HTMLElement) => {
+  const computed = window.getComputedStyle(source);
+  EXPORT_STYLE_PROPERTIES.forEach(property => {
+    const value = computed.getPropertyValue(property);
+    if (value) target.style.setProperty(property, value);
+  });
+  target.removeAttribute("contenteditable");
+  target.removeAttribute("role");
+  target.removeAttribute("aria-label");
+  target.removeAttribute("aria-multiline");
+  target.removeAttribute("data-placeholder");
+  const sourceChildren = [...source.children].filter((child): child is HTMLElement => child instanceof HTMLElement);
+  const targetChildren = [...target.children].filter((child): child is HTMLElement => child instanceof HTMLElement);
+  sourceChildren.forEach((child, index) => { if (targetChildren[index]) copyRenderedStyles(child, targetChildren[index]); });
+};
+const dataUrlBytes = (dataUrl: string) => {
+  const binary = window.atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+  return Uint8Array.from(binary, character => character.charCodeAt(0));
+};
+const splitCanvasIntoPages = (canvas: HTMLCanvasElement, background: string, pageAspect = 297 / 210) => {
+  const pageHeight = Math.max(1, Math.floor(canvas.width * pageAspect));
+  const pages: Array<{ data: Uint8Array; width: number; height: number }> = [];
+  for (let top = 0; top < canvas.height; top += pageHeight) {
+    const sliceHeight = Math.min(pageHeight, canvas.height - top);
+    const page = document.createElement("canvas");
+    page.width = canvas.width;
+    page.height = sliceHeight;
+    const context = page.getContext("2d");
+    if (!context) throw new Error("Canvas export is unavailable.");
+    context.fillStyle = background;
+    context.fillRect(0, 0, page.width, page.height);
+    context.drawImage(canvas, 0, top, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+    pages.push({ data: dataUrlBytes(page.toDataURL("image/png")), width: page.width, height: page.height });
+  }
+  return pages;
+};
+function RichDocumentSurface({ documentId, initialHtml, editorRef, onChange, onSelect }: { documentId: string; initialHtml: string; editorRef: { current: HTMLDivElement | null }; onChange: () => void; onSelect: (target: EventTarget | null) => void }) {
+  useEffect(() => {
+    if (editorRef.current) editorRef.current.innerHTML = sanitizeRichHtml(initialHtml);
+  }, [documentId]);
+  return <div ref={editorRef} className="writing-rich-editor" role="textbox" aria-label="Content" aria-multiline="true" contentEditable suppressContentEditableWarning spellCheck onInput={onChange} onClick={event => onSelect(event.target)} data-placeholder="Start writing…" />;
+}
 
 export function KnowledgeWorkspace({
   projects,
@@ -89,6 +200,33 @@ export function KnowledgeWorkspace({
   const [selected, setSelected] = useState<Document | null>(null);
   const [mobileEditor, setMobileEditor] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [listCollapsed, setListCollapsed] = useState(
+    () => typeof window !== "undefined" && window.localStorage.getItem("orin.writing-list-collapsed.v1") === "true",
+  );
+  const [listWidth, setListWidth] = useState(
+    () => typeof window !== "undefined" ? Number(window.localStorage.getItem("orin.writing-list-width.v1")) || 320 : 320,
+  );
+  const [libraryMode, setLibraryMode] = useState<"notes" | "notebooks">("notes");
+  const [fullScreen, setFullScreen] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 1480);
+  const [inspectorTab, setInspectorTab] = useState<"review" | "design" | "details">("review");
+  const [liveReview, setLiveReview] = useState(() => typeof window === "undefined" || window.localStorage.getItem("orin.writing-live-review.v1") !== "false");
+  const [reviewState, setReviewState] = useState<"idle" | "reviewing" | "ready" | "error">("idle");
+  const [writingReview, setWritingReview] = useState<WritingLiveReview | null>(null);
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<string[]>([]);
+  const [tableDialogOpen, setTableDialogOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exporting, setExporting] = useState<"html" | "docx" | "md" | "pdf" | null>(null);
+  const [tableRows, setTableRows] = useState(3);
+  const [tableColumns, setTableColumns] = useState(3);
+  const [selectedDesignKind, setSelectedDesignKind] = useState("");
+  const [notebooks, setNotebooks] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try { return JSON.parse(window.localStorage.getItem(`orin.writing-notebooks.${userId}.v1`) ?? "[]"); } catch { return []; }
+  });
+  const [notebookFilter, setNotebookFilter] = useState("");
   const [recovery, setRecovery] = useState<Recovery | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [title, setTitle] = useState("");
@@ -110,7 +248,6 @@ export function KnowledgeWorkspace({
   const [versions, setVersions] = useState<Version[]>([]);
   const [links, setLinks] = useState<Links>({ links: [], backlinks: [] });
   const [linkTarget, setLinkTarget] = useState("");
-  const [preview, setPreview] = useState(false);
   const [insights, setInsights] = useState<KnowledgeInsightRecord[]>([]);
   const [reviews, setReviews] = useState<KnowledgeReviewRecord[]>([]);
   const [intelligenceError, setIntelligenceError] = useState("");
@@ -123,7 +260,9 @@ export function KnowledgeWorkspace({
     null,
   );
   const [reporting, setReporting] = useState(false);
-  const editor = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<HTMLDivElement>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const selectedDesignElement = useRef<HTMLElement | null>(null);
   const activeDocumentId = useRef<string | null>(null);
   const draft: Draft = {
     title: title.trim() || "Untitled",
@@ -142,6 +281,21 @@ export function KnowledgeWorkspace({
     exclude_from_ai: excludeAI,
     review_at: reviewAt ? new Date(reviewAt).toISOString() : null,
   };
+  const visibleDocuments = useMemo(() => notebookFilter
+    ? documents.filter(document => document.tags.includes(`notebook:${notebookFilter}`))
+    : documents, [documents, notebookFilter]);
+  const allNotebooks = useMemo(() => [...new Set([
+    ...notebooks,
+    ...documents.flatMap(document => document.tags.filter(tag => tag.startsWith("notebook:")).map(tag => tag.slice(9))),
+  ])].filter(Boolean).sort((a, b) => a.localeCompare(b)), [notebooks, documents]);
+  const createNotebook = () => {
+    const name = window.prompt("Notebook name")?.trim();
+    if (!name || notebooks.includes(name)) return;
+    const next = [...notebooks, name].sort((a, b) => a.localeCompare(b));
+    setNotebooks(next);
+    setNotebookFilter(name);
+    window.localStorage.setItem(`orin.writing-notebooks.${userId}.v1`, JSON.stringify(next));
+  };
   const latest = useRef<{ selected: Document | null; draft: Draft }>({
     selected,
     draft,
@@ -153,6 +307,59 @@ export function KnowledgeWorkspace({
   const dirty =
     !!selected &&
     JSON.stringify(draft) !== JSON.stringify(documentDraft(selected));
+  useEffect(() => {
+    window.localStorage.setItem("orin.writing-live-review.v1", String(liveReview));
+    const reviewText = richTextFromContent(content);
+    if (!selected || !liveReview || excludeAI || reviewText.length < 40) {
+      setReviewState("idle");
+      setWritingReview(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setReviewState("reviewing");
+      void request<WritingLiveReview>("/knowledge/review-live", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({ title: title.trim() || "Untitled", content: reviewText }),
+      }).then(result => {
+        if (controller.signal.aborted) return;
+        setWritingReview(result);
+        setReviewState("ready");
+      }).catch(cause => {
+        if (controller.signal.aborted) return;
+        setReviewState("error");
+        if (!(cause instanceof ApiError && cause.status === 429)) setWritingReview(null);
+      });
+    }, 550);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [selected?.id, title, content, liveReview, excludeAI]);
+  useEffect(() => {
+    if (!selected) { setDismissedSuggestions([]); return; }
+    try { setDismissedSuggestions(JSON.parse(localStorage.getItem(`orin.writing-dismissed.${userId}.${selected.id}`) ?? "[]")); }
+    catch { setDismissedSuggestions([]); }
+  }, [selected?.id, userId]);
+  const dismissWritingSuggestion = (suggestion: WritingReviewSuggestion) => {
+    const key = suggestionDismissKey(suggestion);
+    setDismissedSuggestions(current => {
+      const next = [...new Set([...current, key])].slice(-100);
+      if (selected) localStorage.setItem(`orin.writing-dismissed.${userId}.${selected.id}`, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const applyWritingSuggestion = (suggestion: WritingReviewSuggestion) => {
+    if (!suggestion.original || !suggestion.replacement) return;
+    const next = replaceRichText(content, suggestion.original, suggestion.replacement);
+    if (next === content) {
+      setMessage("The draft changed, so this suggestion is no longer applicable.");
+      return;
+    }
+    setContent(next);
+    if (editor.current) editor.current.innerHTML = sanitizeRichHtml(richHtmlFromContent(next));
+    dismissWritingSuggestion(suggestion);
+    setMessage("Suggestion applied · Unsaved changes");
+  };
   useEffect(() => {
     if (!selected || !dirty) return;
     try {
@@ -418,7 +625,6 @@ export function KnowledgeWorkspace({
       setVersions(history);
       setLinks(relations);
       setMessage("Saved");
-      setPreview(false);
     } catch (e) {
       if (activeDocumentId.current === doc.id)
         setError(
@@ -433,11 +639,30 @@ export function KnowledgeWorkspace({
   }) => {
     if (creating || !(await save())) return;
     setCreating(true);
-    activeDocumentId.current = null;
-    setSelected(null);
     setMobileEditor(true);
     setError("");
     try {
+      if (!template) {
+        const local = localDraftDocument(notebookFilter);
+        activeDocumentId.current = local.id;
+        setSelected(local);
+        setTitle(local.title);
+        setContent("");
+        setType(local.document_type);
+        setTagsInput(local.tags.join(", "));
+        setStatus(local.status);
+        setProjectId("");
+        setExcludeAI(false);
+        setReviewAt("");
+        setVersions([]);
+        setLinks({ links: [], backlinks: [] });
+        setRecovery(null);
+        setMessage("Not saved yet");
+        requestAnimationFrame(() => editor.current?.focus());
+        return;
+      }
+      activeDocumentId.current = null;
+      setSelected(null);
       const doc = await request<Document>("/knowledge/documents", {
         method: "POST",
         body: JSON.stringify({
@@ -445,6 +670,7 @@ export function KnowledgeWorkspace({
           content: template?.content ?? "",
           document_type: template?.document_type ?? "quick_note",
           status: template ? "developing" : "inbox",
+          tags: notebookFilter ? [`notebook:${notebookFilter}`] : [],
         }),
       });
       await refresh();
@@ -473,6 +699,23 @@ export function KnowledgeWorkspace({
       setError("");
       setMessage("Saving…");
       try {
+        if (isLocalDraft(latest.current.selected)) {
+          const snapshot = latest.current.draft;
+          if (!hasWrittenContent(snapshot.content)) {
+            setMessage("Not saved yet");
+            return true;
+          }
+          const created = await request<Document>("/knowledge/documents", {
+            method: "POST",
+            body: JSON.stringify(snapshot),
+          });
+          latest.current = { selected: created, draft: documentDraft(created) };
+          setSelected(created);
+          activeDocumentId.current = created.id;
+          setMessage("Saved");
+          void refresh().catch(() => undefined);
+          return true;
+        }
         while (latest.current.selected) {
           const { selected: base, draft: snapshot } = latest.current;
           if (JSON.stringify(snapshot) === JSON.stringify(documentDraft(base)))
@@ -573,6 +816,10 @@ export function KnowledgeWorkspace({
   ]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && fullScreen) {
+        setFullScreen(false);
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
         event.preventDefault();
         void create();
@@ -580,24 +827,95 @@ export function KnowledgeWorkspace({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  });
-  const format = (prefix: string, suffix = "", placeholder = "text") => {
-    const area = editor.current;
-    if (!area) return;
-    const start = area.selectionStart;
-    const end = area.selectionEnd;
-    const value = content.slice(start, end) || placeholder;
-    setContent(
-      `${content.slice(0, start)}${prefix}${value}${suffix}${content.slice(end)}`,
-    );
+  }, [fullScreen]);
+  const resizeList = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = listWidth;
+    const move = (moveEvent: PointerEvent) => {
+      const next = Math.min(480, Math.max(240, startWidth + moveEvent.clientX - startX));
+      setListWidth(next);
+    };
+    const finish = (upEvent: PointerEvent) => {
+      const next = Math.min(480, Math.max(240, startWidth + upEvent.clientX - startX));
+      setListWidth(next);
+      window.localStorage.setItem("orin.writing-list-width.v1", String(next));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+  };
+  const syncRichEditor = () => {
+    if (!editor.current) return;
+    setContent(RICH_DOCUMENT_PREFIX + sanitizeRichHtml(editor.current.innerHTML));
     setMessage("Unsaved changes");
-    requestAnimationFrame(() => {
-      area.focus();
-      area.setSelectionRange(
-        start + prefix.length,
-        start + prefix.length + value.length,
-      );
+  };
+  const editorCommand = (command: string, value?: string) => {
+    editor.current?.focus();
+    document.execCommand(command, false, value);
+    syncRichEditor();
+  };
+  const insertVisualBlock = (html: string) => {
+    const surface = editor.current;
+    if (!surface) return;
+    const selection = window.getSelection();
+    let anchor = selection?.rangeCount ? selection.getRangeAt(0).startContainer : null;
+    let block = anchor instanceof HTMLElement ? anchor : anchor?.parentElement ?? null;
+    while (block?.parentElement && block.parentElement !== surface) block = block.parentElement;
+    const template = document.createElement("template");
+    template.innerHTML = sanitizeRichHtml(html);
+    const inserted = [...template.content.childNodes];
+    if (block?.parentElement === surface) block.after(template.content); else surface.append(template.content);
+    const last = inserted.at(-1);
+    if (last && selection) {
+      const range = document.createRange();
+      range.selectNodeContents(last);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    surface.focus();
+    syncRichEditor();
+  };
+  const insertTable = () => {
+    const headers = Array.from({length: tableColumns}, (_, index) => `<th>Heading ${index + 1}</th>`).join("");
+    const rows = Array.from({length: tableRows}, () => `<tr>${Array.from({length: tableColumns}, () => "<td>Cell</td>").join("")}</tr>`).join("");
+    insertVisualBlock(`<table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table><p><br></p>`);
+    setTableDialogOpen(false);
+  };
+  const chooseDesignElement = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return;
+    const element = target.closest<HTMLElement>("table,.magazine-columns,.magazine-callout,.magazine-shape,.magazine-image,blockquote,h1,h2,h3,p");
+    selectedDesignElement.current?.classList.remove("is-editor-selected");
+    selectedDesignElement.current = element;
+    element?.classList.add("is-editor-selected");
+    setSelectedDesignKind(element ? (element.classList.contains("magazine-columns") ? "Columns" : element.classList.contains("magazine-callout") ? "Callout" : element.classList.contains("magazine-shape") ? "Shape" : element.classList.contains("magazine-image") ? "Image" : element.tagName === "TABLE" ? "Table" : readable(element.tagName.toLowerCase())) : "");
+  };
+  const updateSelectedDesign = (property: string, value: string) => {
+    const element = selectedDesignElement.current;
+    if (!element) { setMessage("Select an element in the page first."); return; }
+    element.style.setProperty(property, value);
+    syncRichEditor();
+  };
+  const removeSelectedDesign = () => {
+    const element = selectedDesignElement.current;
+    if (!element) return;
+    const next = element.nextElementSibling;
+    element.remove();
+    selectedDesignElement.current = null;
+    setSelectedDesignKind("");
+    syncRichEditor();
+    (next as HTMLElement | null)?.focus?.();
+  };
+  const insertImage = async (file: File) => {
+    if (!file.type.startsWith("image/")) { setError("Choose a PNG, JPEG, WebP, or GIF image."); return; }
+    if (file.size > 8 * 1024 * 1024) { setError("Images must be smaller than 8 MB."); return; }
+    const source = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(file); });
+    const compressed = await new Promise<string>((resolve, reject) => {
+      const image = new Image(); image.onload = () => { const scale = Math.min(1, 1600 / Math.max(image.width, image.height)); const canvas = document.createElement("canvas"); canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale)); canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height); resolve(canvas.toDataURL("image/jpeg", .82)); }; image.onerror = reject; image.src = source;
     });
+    insertVisualBlock(`<figure class="magazine-image"><img src="${compressed}" alt="${escapeHtml(file.name.replace(/\.[^.]+$/, ""))}"><figcaption>Write a caption…</figcaption></figure><p><br></p>`);
   };
   const archive = async () => {
     if (!selected || !(await save())) return;
@@ -616,6 +934,29 @@ export function KnowledgeWorkspace({
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Could not update note.");
     }
+  };
+  const deleteDocument = async () => {
+    if (!selected || !window.confirm(`Delete “${title.trim() || "Untitled"}” permanently? This cannot be undone.`)) return;
+    if (!isLocalDraft(selected)) {
+      try {
+        await request(`/knowledge/documents/${selected.id}`, { method: "DELETE" });
+      } catch (e) {
+        setError(e instanceof ApiError ? e.message : "Note could not be deleted.");
+        return;
+      }
+    }
+    try { localStorage.removeItem(draftKey(selected.id)); } catch { /* Storage may be restricted. */ }
+    activeDocumentId.current = null;
+    setSelected(null);
+    setTitle("");
+    setContent("");
+    setMessage("Note deleted.");
+    await refresh();
+  };
+  const selectNotebook = (notebook: string) => {
+    const ordinary = tagsInput.split(",").map(tag => tag.trim()).filter(tag => tag && !tag.startsWith("notebook:"));
+    setTagsInput([...ordinary, ...(notebook ? [`notebook:${notebook}`] : [])].join(", "));
+    setMessage(isLocalDraft(selected) ? "Not saved yet" : "Unsaved changes");
   };
   const addLink = async () => {
     if (!selected || !linkTarget) return;
@@ -683,20 +1024,91 @@ export function KnowledgeWorkspace({
     } catch (e) { setError(e instanceof ApiError ? e.message : "The newer note could not be loaded."); }
   };
   const candidates = documents.filter((item) => item.id !== selected?.id);
-  const wordCount = content.trim() ? content.trim().split(/\s+/u).length : 0;
-  const characterCount = content.length;
+  const manuscriptText = richTextFromContent(content);
+  const wordCount = manuscriptText.trim() ? manuscriptText.trim().split(/\s+/u).length : 0;
+  const characterCount = manuscriptText.length;
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 200));
-  const downloadDocument = () => {
+  const exportDocument = async (format: "html" | "docx" | "md" | "pdf") => {
     if (!selected) return;
-    const blob = new Blob([`# ${title.trim() || "Untitled"}\n\n${content}`], {
-      type: "text/markdown;charset=utf-8",
-    });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${(title.trim() || "untitled").replace(/[\\/:*?\"<>|]/g, "-")}.md`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    setExporting(format);
+    setError("");
+    const safeTitle = escapeHtml(title.trim() || "Untitled");
+    const body = sanitizeRichHtml(richHtmlFromContent(content));
+    const filename = (title.trim() || "untitled").replace(/[\\/:*?\"<>|]/g, "-");
+    let renderedPage: HTMLElement | null = null;
+    let exportBackground = "#fffdf8";
+    try {
+      const visibleSurface = editor.current ?? document.querySelector<HTMLElement>(".writing-document-preview");
+      const stagingSurface = document.createElement("article");
+      stagingSurface.className = "writing-rich-editor writing-document-preview writing-export-staging";
+      stagingSurface.innerHTML = body;
+      if (!visibleSurface) {
+        const host = document.querySelector<HTMLElement>(".writing-paper") ?? document.body;
+        host.append(stagingSurface);
+      }
+      const sourceSurface = visibleSurface ?? stagingSurface;
+      const sourceWidth = Math.max(620, Math.round(sourceSurface.getBoundingClientRect().width || 820));
+      const clonedSurface = sourceSurface.cloneNode(true) as HTMLElement;
+      copyRenderedStyles(sourceSurface, clonedSurface);
+      clonedSurface.style.width = "100%";
+      clonedSurface.style.minHeight = "0";
+      clonedSurface.style.height = "auto";
+      clonedSurface.style.paddingBottom = "0";
+      clonedSurface.style.outline = "0";
+      renderedPage = document.createElement("article");
+      renderedPage.className = "writing-export-page";
+      renderedPage.style.width = `${sourceWidth + 144}px`;
+      renderedPage.style.minHeight = "0";
+      const paperStyle = window.getComputedStyle(sourceSurface.closest(".writing-paper") ?? sourceSurface);
+      exportBackground = paperStyle.backgroundColor === "rgba(0, 0, 0, 0)" ? "#fffdf8" : paperStyle.backgroundColor;
+      renderedPage.style.backgroundColor = exportBackground;
+      renderedPage.style.color = window.getComputedStyle(sourceSurface).color;
+      renderedPage.innerHTML = `<h1 class="writing-export-title">${safeTitle}</h1>`;
+      const exportTitle = renderedPage.querySelector<HTMLElement>(".writing-export-title");
+      if (exportTitle) exportTitle.style.cssText = "margin:0 0 1.05em;font:700 46px/1.08 Georgia,'Times New Roman',serif;letter-spacing:-.035em;color:inherit";
+      renderedPage.append(clonedSurface);
+      document.body.append(renderedPage);
+      stagingSurface.remove();
+      const exactMarkup = renderedPage.outerHTML;
+      const completeHtml = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>html{background:#e9ece9}body{margin:0;padding:32px}.writing-export-page{position:relative!important;left:auto!important;top:auto!important;z-index:auto!important;margin:0 auto;max-width:calc(100vw - 64px);box-shadow:0 18px 70px #17271e26}.writing-export-page *{box-sizing:border-box}@media(max-width:700px){body{padding:0}.writing-export-page{max-width:100%;padding:36px 24px!important;box-shadow:none}}</style></head><body>${exactMarkup}</body></html>`;
+      const styledMarkdown = `<!-- This Markdown file contains styled HTML so the note keeps its original Orin layout. -->\n\n<style>html{background:#e9ece9}body{margin:0;padding:32px}.writing-export-page{position:relative!important;left:auto!important;top:auto!important;z-index:auto!important;margin:0 auto;max-width:calc(100vw - 64px);box-shadow:0 18px 70px #17271e26}.writing-export-page *{box-sizing:border-box}</style>\n\n${exactMarkup}\n`;
+      if (format === "html") saveBlob(new Blob([completeHtml], { type: "text/html;charset=utf-8" }), `${filename}.html`);
+      if (format === "md") saveBlob(new Blob([styledMarkdown], { type: "text/markdown;charset=utf-8" }), `${filename}.md`);
+      let renderedCanvas: HTMLCanvasElement | null = null;
+      if (format === "docx" || format === "pdf") {
+        const { default: html2canvas } = await import("html2canvas");
+        renderedCanvas = await html2canvas(renderedPage, { scale: 2, backgroundColor: exportBackground, useCORS: true, logging: false, imageTimeout: 15000 });
+      }
+      if (format === "docx") {
+        if (!renderedCanvas) throw new Error("The document could not be rendered.");
+        const { Document: DocxDocument, Packer, Paragraph, ImageRun } = await import("docx");
+        const pages = splitCanvasIntoPages(renderedCanvas, exportBackground);
+        const pageWidth = 746;
+        const children = pages.map((page, index) => new Paragraph({
+          pageBreakBefore: index > 0,
+          spacing: { before: 0, after: 0 },
+          children: [new ImageRun({ data: page.data, type: "png", transformation: { width: pageWidth, height: Math.round(pageWidth * page.height / page.width) }, altText: { title: title.trim() || "Untitled", description: `Styled page ${index + 1}`, name: `Page ${index + 1}` } })],
+        }));
+        saveBlob(await Packer.toBlob(new DocxDocument({ sections: [{ properties: { page: { margin: { top: 360, right: 360, bottom: 360, left: 360 } } }, children }] })), `${filename}.docx`);
+      }
+      if (format === "pdf") {
+        if (!renderedCanvas) throw new Error("The document could not be rendered.");
+        const { jsPDF } = await import("jspdf");
+        const pages = splitCanvasIntoPages(renderedCanvas, exportBackground);
+        const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+        pages.forEach((page, index) => {
+          if (index) pdf.addPage();
+          const height = 210 * page.height / page.width;
+          pdf.addImage(page.data, "PNG", 0, 0, 210, height, undefined, "FAST");
+        });
+        pdf.save(`${filename}.pdf`);
+      }
+      setExportDialogOpen(false);
+      setMessage(`Exported ${format.toUpperCase()}`);
+    } catch (exception) {
+      console.error("Document export failed", exception);
+      setError(`The ${format.toUpperCase()} export could not be created.`);
+    } finally { renderedPage?.remove(); setExporting(null); }
   };
   const restoreVersion = async (version: Version) => {
     if (!selected || !(await save())) return;
@@ -739,7 +1151,8 @@ export function KnowledgeWorkspace({
   };
   return (
     <section
-      className={`writing-workspace ${mobileEditor ? "writing-mobile-editor" : ""} ${focusMode ? "writing-focus-mode" : ""}`}
+      className={`writing-workspace ${mobileEditor ? "writing-mobile-editor" : ""} ${focusMode ? "writing-focus-mode" : ""} ${listCollapsed ? "writing-list-collapsed" : ""} ${inspectorOpen ? "writing-inspector-open" : ""} ${fullScreen ? "writing-fullscreen" : ""}`}
+      style={{ "--writing-list-width": `${listWidth}px` } as CSSProperties}
       aria-label="Creative Studio"
     >
       <aside className="writing-list">
@@ -747,10 +1160,34 @@ export function KnowledgeWorkspace({
           <div className="writing-brand">
             <Pencil aria-hidden="true" size={20} />
             <div>
-              <h2>Notes</h2>
-              <p>Capture thoughts and develop ideas.</p>
+              <h2>Writing</h2>
+              <p>{notebookFilter || "All notes"}</p>
             </div>
+            <button className="writing-sidebar-toggle" type="button"
+              aria-label={listCollapsed ? "Expand notes sidebar" : "Collapse notes sidebar"}
+              title={listCollapsed ? "Expand notes sidebar" : "Collapse notes sidebar"}
+              onClick={() => setListCollapsed((value) => {
+                const next = !value;
+                window.localStorage.setItem("orin.writing-list-collapsed.v1", String(next));
+                return next;
+              })}>
+              {listCollapsed ? <PanelLeftOpen size={17}/> : <PanelLeftClose size={17}/>}
+            </button>
           </div>
+          <div className="writing-collapsed-tools" aria-label="Collapsed writing tools">
+            <button type="button" aria-label="Show notes" title="Notes" onClick={() => setLibraryMode("notes")}><FileText size={17}/></button>
+            <button type="button" aria-label="Show notebooks" title="Notebooks" onClick={() => setLibraryMode("notebooks")}><BookOpen size={17}/></button>
+            <button type="button" aria-label="Create note" title="New note" onClick={() => void create()}><Plus size={17}/></button>
+          </div>
+          <div className="writing-library-switch" role="tablist" aria-label="Writing library">
+            <button type="button" role="tab" aria-selected={libraryMode === "notebooks"} onClick={() => setLibraryMode("notebooks")}>Notebooks</button>
+            <button type="button" role="tab" aria-selected={libraryMode === "notes"} onClick={() => setLibraryMode("notes")}>Notes</button>
+          </div>
+          {libraryMode === "notebooks" && <div className="writing-notebooks" aria-label="Notebooks">
+            <div className="writing-notebooks-heading"><strong>Notebooks</strong><button type="button" onClick={createNotebook} aria-label="New notebook"><Plus size={14}/></button></div>
+            <button type="button" className={!notebookFilter ? "active" : ""} onClick={() => {setNotebookFilter("");setLibraryMode("notes");}}>All notes <span>{documents.length}</span></button>
+            {allNotebooks.map(notebook => <button type="button" key={notebook} className={notebookFilter === notebook ? "active" : ""} onClick={() => {setNotebookFilter(notebook);setLibraryMode("notes");}}>{notebook}<span>{documents.filter(document => document.tags.includes(`notebook:${notebook}`)).length}</span></button>)}
+          </div>}
           <button
             className="writing-new"
             disabled={creating}
@@ -811,42 +1248,21 @@ export function KnowledgeWorkspace({
               Essay
             </button>
           </details>
-          <div className="writing-search">
-            <Search aria-hidden="true" size={14} />
-            <input
-              aria-label="Search documents"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search notes…"
-            />
-          </div>
-          <div className="writing-list-tools">
-            <label>
-              Show
-              <select
-                aria-label="Filter notes"
-                value={documentTypeFilter}
-                onChange={(e) => setDocumentTypeFilter(e.target.value)}
-              >
-                <option value="">All notes</option>
-                <option value="idea">Idea inbox</option>
-                <option value="draft">Drafts</option>
-                <option value="research">Research</option>
-                <option value="quick_note">Quick notes</option>
-              </select>
-            </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={includeArchived}
-                onChange={(e) => setIncludeArchived(e.target.checked)}
-              />{" "}
-              Archived
-            </label>
-          </div>
+          {libraryMode === "notes" && <div className="writing-search-row">
+            <div className="writing-search">
+              <Search aria-hidden="true" size={14} />
+              <input aria-label="Search documents" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes…" />
+            </div>
+            <button className="writing-filter-button" type="button" aria-label="Filter notes" aria-expanded={filterOpen} onClick={() => setFilterOpen(value => !value)}><SlidersHorizontal size={16}/></button>
+            {filterOpen && <div className="writing-library-filter">
+              <label>Type<select aria-label="Document type" value={documentTypeFilter} onChange={(event) => setDocumentTypeFilter(event.target.value)}><option value="">All notes</option><option value="idea">Ideas</option><option value="draft">Drafts</option><option value="research">Research</option><option value="quick_note">Quick notes</option></select></label>
+              <label><input type="checkbox" checked={includeArchived} onChange={(event) => setIncludeArchived(event.target.checked)}/> Include archived</label>
+            </div>}
+          </div>}
+
         </header>
-        <nav className="writing-documents" aria-label="Notes">
-          {documents.map((doc) => (
+        {libraryMode === "notes" && <nav className="writing-documents" aria-label="Notes">
+          {visibleDocuments.map((doc) => (
             <button
               key={doc.id}
               className={`writing-document ${selected?.id === doc.id ? "selected" : ""}`}
@@ -857,16 +1273,6 @@ export function KnowledgeWorkspace({
               </span>
               <span className="writing-document-copy">
                 <strong>{doc.title || "Untitled"}</strong>
-                <span>
-                  {doc.content
-                    .replace(/[#>*_`\[\]-]/g, " ")
-                    .trim()
-                    .slice(0, 90) || "Start writing…"}
-                </span>
-                <small>
-                  {relativeTime(doc.updated_at)}
-                  {doc.archived ? " · Archived" : ""}
-                </small>
               </span>
             </button>
           ))}
@@ -879,15 +1285,15 @@ export function KnowledgeWorkspace({
               Load more notes
             </button>
           )}
-          {!documents.length && (
+          {!visibleDocuments.length && (
             <p className="writing-empty-list">
               {query
                 ? "No notes match your search."
                 : "Your notes will appear here."}
             </p>
           )}
-        </nav>
-        <details className="writing-tools">
+        </nav>}
+        <details id="writing-tools-popover" className="writing-tools writing-tools-popup">
           <summary>
             Writing tools{" "}
             <span>
@@ -1158,6 +1564,8 @@ export function KnowledgeWorkspace({
           </div>
         </details>
       </aside>
+      {!listCollapsed && <button type="button" className="writing-list-resizer" aria-label="Resize notes sidebar" title="Drag to resize notes sidebar" onPointerDown={resizeList} />}
+
       <main className="writing-editor">
         {error && (
           <p role="alert" className="api-error writing-error">
@@ -1181,11 +1589,17 @@ export function KnowledgeWorkspace({
               >
                 Back to notes
               </button>
-              <div className="writing-breadcrumb">
-                <span>Writing</span>
-                <span>›</span>
-                <strong>{title || "Untitled"}</strong>
-              </div>
+              <button className="writing-preview-toggle" type="button" aria-label={previewMode ? "Return to editing" : "Preview document"} aria-pressed={previewMode} onClick={() => setPreviewMode(value => !value)}><Eye size={16}/><span>{previewMode ? "Edit" : "Preview"}</span></button>
+              <input
+                className="writing-toolbar-title"
+                aria-label="Document title"
+                value={title}
+                onChange={(event) => {
+                  setTitle(event.target.value);
+                  setMessage("Unsaved changes");
+                }}
+                placeholder="Untitled"
+              />
               <span
                 role="status"
                 className={`writing-save-status ${saving ? "is-saving" : ""}`}
@@ -1196,30 +1610,54 @@ export function KnowledgeWorkspace({
                     ? "! Save failed"
                     : "✓ " + (message || "Saved")}
               </span>
-              <button
-                className="writing-quiet-action"
-                type="button"
-                onClick={downloadDocument}
-              >
-                Export .md
-              </button>
-              <button
-                className="writing-quiet-action"
-                type="button"
-                aria-pressed={focusMode}
-                onClick={() => setFocusMode((value) => !value)}
-              >
-                {focusMode ? "Exit focus" : "Focus"}
-              </button>
-              <button
-                className="writing-quiet-action"
-                type="button"
-                onClick={() => void archive()}
-              >
-                {selected.archived ? "Restore" : "Archive"}
-              </button>
+              <button className="writing-quiet-action" type="button" aria-pressed={focusMode} onClick={() => setFocusMode((value) => !value)}>{focusMode ? "Exit focus" : "Focus"}</button>
+              <button className="writing-inspector-toggle" type="button" aria-label={inspectorOpen ? "Close inspector" : "Open inspector"} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}><FileSliders size={17}/></button>
+              <details className="writing-more-menu"><summary role="button" aria-label="Manage document"><MoreVertical size={19}/></summary><div className="writing-document-menu">
+                <button type="button" onClick={event => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); setInspectorTab("details"); setInspectorOpen(true); }}><FileSliders size={15}/>Details</button>
+                <label><FolderKanban size={15}/><span>Project</span><select aria-label="Document project" value={projectId} onChange={event => {setProjectId(event.target.value);setMessage(isLocalDraft(selected) ? "Not saved yet" : "Unsaved changes");}}><option value="">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>
+                <label><BookOpen size={15}/><span>Notebook</span><select aria-label="Document notebook" value={tagsInput.split(",").map(tag=>tag.trim()).find(tag=>tag.startsWith("notebook:"))?.slice(9) ?? ""} onChange={event => selectNotebook(event.target.value)}><option value="">No notebook</option>{allNotebooks.map(notebook => <option key={notebook}>{notebook}</option>)}</select></label>
+                <button type="button" onClick={event => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); setExportDialogOpen(true); }} disabled={isLocalDraft(selected)}><FileDown size={15}/>Export document…</button>
+                <button type="button" onClick={() => setFullScreen(value => !value)}><PanelLeftOpen size={15}/>{fullScreen ? "Exit full screen" : "Full screen"}</button>
+                <button type="button" onClick={() => void archive()} disabled={isLocalDraft(selected)}><Archive size={15}/>{selected.archived ? "Restore note" : "Archive note"}</button>
+                <button className="danger" type="button" onClick={() => void deleteDocument()}><Trash2 size={15}/>Delete note</button>
+              </div></details>
             </header>
-            <div className="writing-paper">
+            {!previewMode && <div
+              className="writing-formatbar"
+              role="toolbar"
+              aria-label="Document design tools"
+            >
+              <select aria-label="Text style" defaultValue="p" onChange={event => editorCommand("formatBlock", event.target.value)}><option value="p">Body</option><option value="h1">Title</option><option value="h2">Heading</option><option value="h3">Subheading</option><option value="blockquote">Quote</option></select>
+              <select aria-label="Font family" defaultValue="Georgia" onChange={event => editorCommand("fontName", event.target.value)}><option value="Georgia">Editorial serif</option><option value="DM Sans">Clean sans</option><option value="Manrope">Display</option><option value="monospace">Mono</option></select>
+              <select aria-label="Font size" defaultValue="3" onChange={event => editorCommand("fontSize", event.target.value)}><option value="2">14</option><option value="3">16</option><option value="4">18</option><option value="5">24</option><option value="6">32</option></select>
+              <span className="writing-toolbar-group">
+                <button type="button" title="Bold" aria-label="Bold" onClick={() => editorCommand("bold")}><Bold size={15}/></button>
+                <button type="button" title="Italic" aria-label="Italic" onClick={() => editorCommand("italic")}><Italic size={15}/></button>
+                <button type="button" title="Underline" aria-label="Underline" onClick={() => editorCommand("underline")}><Underline size={15}/></button>
+              </span>
+              <span className="writing-toolbar-group">
+                <button type="button" title="Bulleted list" aria-label="Bulleted list" onClick={() => editorCommand("insertUnorderedList")}><List size={15}/></button>
+                <button type="button" title="Numbered list" aria-label="Numbered list" onClick={() => editorCommand("insertOrderedList")}><ListChecks size={15}/></button>
+                <button type="button" title="Quote" aria-label="Quote" onClick={() => editorCommand("formatBlock", "blockquote")}><Quote size={15}/></button>
+                <button type="button" title="Link" aria-label="Link" onClick={() => { const url=window.prompt("Paste a link"); if(url) editorCommand("createLink",url); }}><Link2 size={15}/></button>
+              </span>
+              <label className="writing-color-control" title="Text color"><span className="writing-color-letter">A</span><input aria-label="Text color" type="color" defaultValue="#223129" onInput={event => editorCommand("foreColor", event.currentTarget.value)}/></label>
+              <label className="writing-color-control" title="Highlight"><Highlighter size={15}/><input aria-label="Highlight color" type="color" defaultValue="#f6e59f" onInput={event => editorCommand("hiliteColor", event.currentTarget.value)}/></label>
+              <span className="writing-toolbar-group"><button type="button" aria-label="Align left" title="Align left" onClick={() => editorCommand("justifyLeft")}><AlignLeft size={15}/></button><button type="button" aria-label="Align center" title="Align center" onClick={() => editorCommand("justifyCenter")}><AlignCenter size={15}/></button><button type="button" aria-label="Align right" title="Align right" onClick={() => editorCommand("justifyRight")}><AlignRight size={15}/></button></span>
+              <span className="writing-toolbar-group writing-insert-group">
+                <details className="writing-toolbar-menu"><summary>Insert <ChevronDown size={13}/></summary><div>
+                  <button type="button" aria-label="Insert divider" onClick={() => insertVisualBlock('<hr><p><br></p>')}><Minus size={15}/>Divider</button>
+                  <button type="button" aria-label="Insert table" onClick={() => setTableDialogOpen(true)}><Table2 size={15}/>Table</button>
+                  <button type="button" aria-label="Insert magazine columns" onClick={() => insertVisualBlock('<section class="magazine-columns"><div><h3>First story</h3><p>Write the first column…</p></div><div><h3>Second story</h3><p>Write the second column…</p></div></section><p><br></p>')}><Columns3 size={15}/>Columns</button>
+                  <button type="button" aria-label="Insert three columns" onClick={() => insertVisualBlock('<section class="magazine-columns magazine-columns-three"><div><h3>Story one</h3><p>Write here…</p></div><div><h3>Story two</h3><p>Write here…</p></div><div><h3>Story three</h3><p>Write here…</p></div></section><p><br></p>')}><Columns3 size={15}/>Three columns</button>
+                  <button type="button" aria-label="Insert styled text area" onClick={() => insertVisualBlock('<aside class="magazine-callout"><h3>Key idea</h3><p>Add supporting text here…</p></aside><p><br></p>')}><Heading2 size={15}/>Callout</button>
+                  <button type="button" aria-label="Insert pull quote" onClick={() => insertVisualBlock('<blockquote>Write a memorable pull quote…</blockquote><p><br></p>')}><Quote size={15}/>Pull quote</button>
+                  <button type="button" aria-label="Insert feature shape" onClick={() => insertVisualBlock('<div class="magazine-shape">Feature</div><p><br></p>')}><Sparkles size={15}/>Feature badge</button>
+                  <button type="button" aria-label="Insert image" onClick={() => imageInput.current?.click()}><ImagePlus size={15}/>Image</button>
+                </div></details><input ref={imageInput} className="writing-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={event => { const file=event.target.files?.[0]; if(file) void insertImage(file); event.currentTarget.value=""; }}/>
+              </span>
+            </div>}
+            <div className={`writing-paper ${previewMode ? "writing-paper-preview" : ""}`}>
               {recovery && (
                 <div className="writing-recovery" role="status">
                   <span>
@@ -1260,76 +1698,14 @@ export function KnowledgeWorkspace({
                   </button>
                 </div>
               )}
-              <input
-                className="writing-title"
-                aria-label="Document title"
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  setMessage("Unsaved changes");
-                }}
-                placeholder="Untitled"
-              />
-              <div
-                className="writing-formatbar"
-                role="toolbar"
-                aria-label="Markdown formatting"
-              >
-                {[
-                  ["B", "**", "**"],
-                  ["I", "*", "*"],
-                  ["H1", "# ", ""],
-                  ["H2", "## ", ""],
-                  ["• List", "- ", ""],
-                  ["☑", "- [ ] ", ""],
-                  ["❝", "> ", ""],
-                  ["Link", "[", "](https://)"],
-                  [preview ? "Edit" : "Preview", "", ""],
-                ].map(([label, prefix, suffix]) => (
-                  <button
-                    type="button"
-                    key={label}
-                    title={label}
-                    aria-label={
-                      label === "B"
-                        ? "Bold"
-                        : label === "I"
-                          ? "Italic"
-                          : label === "Preview"
-                            ? "Preview formatting"
-                            : label === "Edit"
-                              ? "Edit markdown"
-                              : label
-                    }
-                    onClick={() =>
-                      label === "Preview" || label === "Edit"
-                        ? setPreview(!preview)
-                        : format(prefix, suffix)
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {preview ? (
-                <article className="writing-preview">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {content}
-                  </ReactMarkdown>
-                </article>
-              ) : (
-                <textarea
-                  ref={editor}
-                  aria-label="Content"
-                  value={content}
-                  onChange={(e) => {
-                    setContent(e.target.value);
-                    setMessage("Unsaved changes");
-                  }}
-                  placeholder="Start writing…"
-                  spellCheck
-                />
-              )}
+              {previewMode ? <article className="writing-rich-editor writing-document-preview" aria-label="Document preview" dangerouslySetInnerHTML={{__html:sanitizeRichHtml(richHtmlFromContent(content))}} /> : <RichDocumentSurface documentId={selected.id} initialHtml={richHtmlFromContent(content)} editorRef={editor} onChange={syncRichEditor} onSelect={chooseDesignElement} />}
+              {tableDialogOpen && <div className="writing-table-dialog-backdrop" role="presentation"><section className="writing-table-dialog" role="dialog" aria-modal="true" aria-labelledby="table-dialog-title"><header><div><h2 id="table-dialog-title">Insert table</h2><p>Choose the exact structure. You can edit every cell after inserting.</p></div><button type="button" aria-label="Close table dialog" onClick={() => setTableDialogOpen(false)}><X size={17}/></button></header><div><label>Columns<input aria-label="Table columns" type="number" min="1" max="12" value={tableColumns} onChange={event => setTableColumns(Math.min(12,Math.max(1,Number(event.target.value))))}/></label><label>Rows<input aria-label="Table rows" type="number" min="1" max="30" value={tableRows} onChange={event => setTableRows(Math.min(30,Math.max(1,Number(event.target.value))))}/></label></div><div className="writing-table-preview" style={{gridTemplateColumns:`repeat(${tableColumns},1fr)`}}>{Array.from({length:Math.min(tableRows,6)*tableColumns},(_,index)=><i key={index}/>)}</div><footer><button type="button" onClick={() => setTableDialogOpen(false)}>Cancel</button><button type="button" onClick={insertTable}>Insert {tableRows} × {tableColumns} table</button></footer></section></div>}
+              {exportDialogOpen && <div className="writing-table-dialog-backdrop" role="presentation"><section className="writing-export-dialog" role="dialog" aria-modal="true" aria-labelledby="export-dialog-title"><header><div><h2 id="export-dialog-title">Export document</h2><p>Choose a format for this note.</p></div><button type="button" aria-label="Close export dialog" onClick={() => setExportDialogOpen(false)} disabled={!!exporting}><X size={17}/></button></header><div className="writing-export-options">
+                <button type="button" onClick={() => void exportDocument("html")} disabled={!!exporting}><strong>HTML</strong><span>Styled web page</span></button>
+                <button type="button" onClick={() => void exportDocument("docx")} disabled={!!exporting}><strong>DOCX</strong><span>Microsoft Word document</span></button>
+                <button type="button" onClick={() => void exportDocument("md")} disabled={!!exporting}><strong>Markdown</strong><span>Portable plain text</span></button>
+                <button type="button" onClick={() => void exportDocument("pdf")} disabled={!!exporting}><strong>PDF</strong><span>Print-ready fixed layout</span></button>
+              </div>{exporting && <p role="status" className="writing-export-progress">Creating {exporting.toUpperCase()}…</p>}</section></div>}
               <div className="writing-manuscript-stats" aria-live="polite">
                 <span>{wordCount.toLocaleString()} words</span>
                 <span>{characterCount.toLocaleString()} characters</span>
@@ -1387,6 +1763,18 @@ export function KnowledgeWorkspace({
                         {readable(item)}
                       </option>
                     ))}
+                  </select>
+                </label>
+                <label>
+                  Notebook
+                  <select aria-label="Notebook" value={tagsInput.split(",").map(tag => tag.trim()).find(tag => tag.startsWith("notebook:"))?.slice(9) ?? ""}
+                    onChange={event => {
+                      const ordinary = tagsInput.split(",").map(tag => tag.trim()).filter(tag => tag && !tag.startsWith("notebook:"));
+                      setTagsInput([...ordinary, ...(event.target.value ? [`notebook:${event.target.value}`] : [])].join(", "));
+                      setMessage("Unsaved changes");
+                    }}>
+                    <option value="">No notebook</option>
+                    {allNotebooks.map(notebook => <option key={notebook} value={notebook}>{notebook}</option>)}
                   </select>
                 </label>
                 <label>
@@ -1607,6 +1995,39 @@ export function KnowledgeWorkspace({
           </div>
         )}
       </main>
+      {selected && inspectorOpen && <aside className="writing-inspector" aria-label="Document inspector">
+        <div className="writing-inspector-tabs" role="tablist" aria-label="Inspector views">
+          <button role="tab" aria-selected={inspectorTab === "review"} onClick={() => setInspectorTab("review")}>AI Review</button>
+          <button role="tab" aria-selected={inspectorTab === "design"} onClick={() => setInspectorTab("design")}>Design</button>
+          <button role="tab" aria-selected={inspectorTab === "details"} onClick={() => setInspectorTab("details")}>Note details</button>
+          <button type="button" className="writing-inspector-close" aria-label="Close inspector" onClick={() => setInspectorOpen(false)}><X size={17}/></button>
+        </div>
+        <div className="writing-inspector-body">
+          {inspectorTab === "review" && <section className="writing-review-panel">
+            <header><Sparkles size={20}/><div><h2>AI Review</h2><p>Live editorial guidance while you write.</p></div></header>
+            <label className="writing-live-toggle"><span><strong>Review as I type</strong><small>{excludeAI ? "Disabled for this private note" : reviewState === "reviewing" ? "Reviewing your latest changes…" : writingReview?.mode === "ai" ? `Live · ${writingReview.model}` : writingReview ? "Fast local review" : "Starts after 40 characters"}</small></span><input type="checkbox" checked={liveReview} disabled={excludeAI} onChange={event => setLiveReview(event.target.checked)}/></label>
+            {reviewState === "reviewing" && <div className="writing-review-progress" role="status"><i/><span>Reading for clarity, flow, and tone</span></div>}
+            {reviewState === "error" && <div className="writing-review-notice" role="alert">Live review paused. Keep writing—we’ll try again after your next change.</div>}
+            {writingReview?.limitations.map(item => <div className="writing-review-notice" key={item}>{item}</div>)}
+            {writingReview?.suggestions.filter(item => !dismissedSuggestions.includes(suggestionDismissKey(item))).map((item, index) => <article key={item.id} className={`review-${item.severity}`}>
+              <span>{index + 1}</span><div><small>{item.category}</small><h3>{item.title}</h3><p>{item.message}</p>
+              {item.original && <blockquote>{item.original}</blockquote>}
+              <div>{item.replacement && <button type="button" onClick={() => applyWritingSuggestion(item)}>Apply change</button>}<button type="button" onClick={() => dismissWritingSuggestion(item)}>Dismiss</button></div></div>
+            </article>)}
+            {reviewState !== "reviewing" && manuscriptText.length >= 40 && writingReview && writingReview.suggestions.filter(item => !dismissedSuggestions.includes(suggestionDismissKey(item))).length === 0 && <div className="writing-inspector-empty"><strong>Looking polished.</strong><p>No new suggestions for this draft. Dismissed findings stay dismissed unless you restore them.</p></div>}
+            {manuscriptText.length < 40 && <div className="writing-inspector-empty"><strong>Start writing freely.</strong><p>Live review begins once there is enough context to give useful feedback.</p></div>}
+          </section>}
+          {inspectorTab === "design" && <section className="writing-design-panel"><header><Palette size={20}/><div><h2>Design</h2><p>Click any element in the page, then edit its appearance here.</p></div></header>
+            <div className="writing-selected-element"><span>Selected</span><strong>{selectedDesignKind || "Nothing selected"}</strong><small>{selectedDesignKind ? "Changes apply immediately." : "Choose a table, image, callout, columns, shape, heading, or paragraph."}</small></div>
+            <h3>Layout</h3><div className="writing-design-controls"><label>Width<select aria-label="Selected element width" defaultValue="100%" disabled={!selectedDesignKind} onChange={event => updateSelectedDesign("width",event.target.value)}><option value="100%">Full width</option><option value="75%">Wide</option><option value="50%">Half</option><option value="33%">Third</option></select></label><label>Alignment<select aria-label="Selected element alignment" defaultValue="left" disabled={!selectedDesignKind} onChange={event => updateSelectedDesign("text-align",event.target.value)}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label><label>Padding<input aria-label="Selected element padding" type="range" min="0" max="48" defaultValue="20" disabled={!selectedDesignKind} onChange={event => updateSelectedDesign("padding",`${event.target.value}px`)}/></label><label>Corners<input aria-label="Selected element corners" type="range" min="0" max="40" defaultValue="4" disabled={!selectedDesignKind} onChange={event => updateSelectedDesign("border-radius",`${event.target.value}px`)}/></label></div>
+            <h3>Color</h3><div className="writing-design-colors"><label>Text<input aria-label="Selected element text color" type="color" defaultValue="#223129" disabled={!selectedDesignKind} onInput={event => updateSelectedDesign("color",event.currentTarget.value)}/></label><label>Background<input aria-label="Selected element background" type="color" defaultValue="#edf1e8" disabled={!selectedDesignKind} onInput={event => updateSelectedDesign("background-color",event.currentTarget.value)}/></label></div>
+            {selectedDesignKind === "Image" && <label className="writing-design-fit">Image crop<select aria-label="Selected image fit" defaultValue="cover" onChange={event => { const image=selectedDesignElement.current?.querySelector("img"); if(image){image.style.objectFit=event.target.value;syncRichEditor();}}}><option value="cover">Fill frame</option><option value="contain">Show whole image</option></select></label>}
+            <div className="writing-design-actions"><button type="button" disabled={!selectedDesignKind} onClick={() => {const element=selectedDesignElement.current;if(element){element.insertAdjacentHTML("afterend",element.outerHTML);syncRichEditor();}}}>Duplicate</button><button type="button" className="danger" disabled={!selectedDesignKind} onClick={removeSelectedDesign}>Remove</button></div>
+            <h3>Add element</h3><div className="writing-inspector-grid"><button onClick={() => setTableDialogOpen(true)}>Table</button><button onClick={() => insertVisualBlock('<section class="magazine-columns"><div><h3>First story</h3><p>Write here…</p></div><div><h3>Second story</h3><p>Write here…</p></div></section><p><br></p>')}>2 columns</button><button onClick={() => insertVisualBlock('<section class="magazine-columns magazine-columns-three"><div><h3>One</h3><p>Write here…</p></div><div><h3>Two</h3><p>Write here…</p></div><div><h3>Three</h3><p>Write here…</p></div></section><p><br></p>')}>3 columns</button><button onClick={() => insertVisualBlock('<aside class="magazine-callout"><h3>Key idea</h3><p>Add supporting text…</p></aside><p><br></p>')}>Callout</button><button onClick={() => insertVisualBlock('<blockquote>Write a pull quote…</blockquote><p><br></p>')}>Pull quote</button><button onClick={() => insertVisualBlock('<div class="magazine-shape">Feature</div><p><br></p>')}>Badge</button><button onClick={() => insertVisualBlock('<hr><p><br></p>')}>Divider</button><button onClick={() => imageInput.current?.click()}>Image</button></div>
+          </section>}
+          {inspectorTab === "details" && <section className="writing-note-panel"><header><FileSliders size={20}/><div><h2>Note details</h2><p>Organization, status, and document settings.</p></div></header><label>Project<select aria-label="Inspector project" value={projectId} onChange={event => {setProjectId(event.target.value);setMessage(isLocalDraft(selected) ? "Not saved yet" : "Unsaved changes");}}><option value="">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><label>Notebook<select aria-label="Inspector notebook" value={tagsInput.split(",").map(tag => tag.trim()).find(tag => tag.startsWith("notebook:"))?.slice(9) ?? ""} onChange={event => selectNotebook(event.target.value)}><option value="">No notebook</option>{allNotebooks.map(notebook => <option key={notebook}>{notebook}</option>)}</select></label><label>Status<select value={status} onChange={event => {setStatus(event.target.value);setMessage(isLocalDraft(selected) ? "Not saved yet" : "Unsaved changes");}}><option value="inbox">Inbox</option><option value="developing">Developing</option><option value="waiting">Waiting</option><option value="ready_to_resume">Ready to resume</option><option value="completed">Completed</option><option value="parked">Parked</option><option value="abandoned">Abandoned</option></select></label><p>{content.trim().split(/\s+/).filter(Boolean).length} words · {content.length} characters</p></section>}
+        </div>
+      </aside>}
     </section>
   );
 }

@@ -62,7 +62,7 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
     <div className="workspace-list">
       {items.map(item => <button type="button" className={`workspace-item ${activeId === item.id ? "active" : ""}`} key={item.id} onClick={() => select(item)} aria-label={item.name} title={item.name}>
         <span className="workspace-item-icon" style={{ "--workspace-color": item.color } as CSSProperties}>{item.name.slice(0, 1).toUpperCase()}</span>
-        <span>{item.name}</span>
+        <span className="workspace-item-label">{item.name}</span>
         <span className="workspace-status" style={{ background: item.color }} />
         {activeId === item.id && <Check className="workspace-check" size={12} />}
       </button>)}

@@ -78,7 +78,7 @@ describe("Markdown response rendering", () => {
     const capture = renderToStaticMarkup(<QuickKnowledgeCapture onClose={() => undefined} onSaved={() => undefined} />);
     expect(workspace).toContain('aria-label="Creative Studio"');
     expect(workspace).toContain("Notes");
-    expect(workspace).toContain("Capture thoughts and develop ideas");
+    expect(workspace).toContain("Notebooks");
     expect(workspace).toContain("New note");
     expect(capture).toContain("Saved to Writing");
     expect(capture).toContain('aria-modal="true"');

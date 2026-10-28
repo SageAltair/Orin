@@ -169,9 +169,10 @@ def test_risk_update_and_resolution(client):
 
 
 def test_routine_recurrence_checkin_and_undo(client):
-    from datetime import date, timedelta
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
 
-    today = date.today()
+    today = datetime.now(ZoneInfo("UTC")).date()
     data = {
         "title": "A small beginning",
         "start_date": today.isoformat(),

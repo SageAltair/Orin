@@ -12,3 +12,11 @@ def test_liveness_does_not_require_database() -> None:
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["x-request-id"] == request_id
+
+
+def test_private_metrics_are_prometheus_compatible() -> None:
+    response = TestClient(app).get("/health/metrics")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "orin_http_requests_total" in response.text
+    assert "orin_background_maintenance_failures_total" in response.text

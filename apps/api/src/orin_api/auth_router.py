@@ -21,7 +21,7 @@ from orin_api.auth import (
 )
 from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
-from orin_api.models import User, AuthSession, RefreshToken
+from orin_api.models import User, AuthSession, RefreshToken, SystemSetting
 from orin_api.schemas import AuthTokenResponse, LoginRequest, RegisterRequest, UserRead, ProfileUpdate, PasswordChange, EmailChange
 from sqlalchemy import select
 from datetime import UTC, datetime
@@ -42,6 +42,9 @@ def register(
     settings: Settings = Depends(get_settings),
 ) -> UserRead:
     _auth_secret(settings)
+    access = session.get(SystemSetting, "access")
+    if access is not None and access.value_json.get("registration_enabled") is False:
+        raise HTTPException(status_code=403, detail="New account registration is currently closed")
     enforce_auth_limit(request, session, route="register", limit=5)
     return register_user(data, session)
 

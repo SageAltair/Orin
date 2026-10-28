@@ -1,0 +1,9 @@
+# AI data and provider disclosure
+
+Orin sends data to an AI provider only when an administrator or user enables a provider and an AI-backed feature is invoked. Depending on the feature, the request can include the user's instruction, recent conversation, selected workspace/project/task context, selected knowledge excerpts and supported image attachments. Passwords, refresh tokens, provider keys, worker credentials and excluded knowledge documents must never be added to model context.
+
+Automatic routing can retry or continue a request with another enabled provider when the selected provider is unavailable, rate limited or out of quota. The AI settings page shows enabled providers, routing order and usage. Public deployments must clearly identify every enabled provider before users enable automatic fallback. Disabling fallback is appropriate when content must remain with one provider.
+
+Provider credentials are encrypted at rest by Orin. Requests still leave the Orin deployment and are processed under the selected provider's current privacy, retention, training, residency and abuse-monitoring terms. Operators must link the applicable provider policies in their public privacy notice and verify those terms before launch and after provider changes. Orin account deletion removes Orin's active records and attachment bytes, subject to the disclosed backup-retention period; it cannot guarantee deletion from a provider beyond that provider's contract and controls.
+
+Deployments should minimize context, allow users to exclude sensitive knowledge, avoid sending unnecessary attachments, restrict outbound provider access to configured endpoints and monitor provider/model changes. Logs and metrics must record provider/model outcomes without prompts, document text, credentials or attachment contents.

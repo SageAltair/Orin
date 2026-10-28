@@ -17,6 +17,7 @@ from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
 from orin_api.models import ActivityType, CalendarEvent, KnowledgeExtractionJob, Notification, Routine, RoutineCheckin, WorkerJob, WorkerJobStatus
 from orin_api.specialist_router import run_due_automations
+from orin_api.metrics import record_maintenance_failure
 
 logger = logging.getLogger(__name__)
 
@@ -98,5 +99,6 @@ def maintenance_loop(stopping: threading.Event, settings: Settings) -> None:
         try:
             maintenance_tick(settings)
         except Exception:
+            record_maintenance_failure()
             logger.error("Background maintenance failed; retrying without exposing job contents.")
         stopping.wait(15)
