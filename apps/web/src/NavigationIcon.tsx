@@ -1,4 +1,4 @@
-import type { SVGProps } from "react";
+import type { ReactNode, SVGProps } from "react";
 import type { CapabilityId } from "./capabilities";
 
 type IconProps = SVGProps<SVGSVGElement> & { id: CapabilityId; size?: number };
@@ -6,7 +6,7 @@ type IconProps = SVGProps<SVGSVGElement> & { id: CapabilityId; size?: number };
 /** A compact, platform-neutral navigation set, drawn specifically for Orin. */
 export function NavigationIcon({ id, size = 19, ...props }: IconProps) {
   const common = { fill: "none", stroke: "currentColor", strokeWidth: 1.65, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  const paths: Record<CapabilityId, React.ReactNode> = {
+  const paths: Record<CapabilityId, ReactNode> = {
     home: <><path d="M3.5 10.5 12 3.5l8.5 7v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1z"/><path d="M9 20.5v-7h6v7"/></>,
     opportunities: <><circle cx="12" cy="12" r="8.5"/><path d="m15.6 8.4-2.1 5.1-5.1 2.1 2.1-5.1z"/></>,
     calendar: <><rect x="3.5" y="5.5" width="17" height="15" rx="2"/><path d="M7.5 3.5v4m9-4v4m-13 3h17M8 14h3m3 0h3M8 17.5h3"/></>,
