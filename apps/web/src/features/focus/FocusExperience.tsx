@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Command, Plus, X } from "lucide-react";
+import { ActionIcon } from "../../ActionIcon";
 import { request } from "../../api";
 import { Capture } from "./Capture";
 import { Close } from "./Close";
@@ -109,8 +109,8 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
 
   return <div className={`focus-shell ${embedded ? "focus-embedded" : ""} ${dark ? "focus-dark" : "focus-light"} ${reduce ? "focus-reduced-motion" : ""}`}>
     <a className="focus-skip" href="#focus-main">Skip to content</a>
-    {!embedded && <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><Command size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><X size={18} /></button></header>}
-    {embedded && <header className="task-workspace-heading"><div><span className="eyebrow">YOUR WORKSPACE</span><h1>Tasks</h1><p>Capture what matters. Choose a small step. Make room to focus.</p></div><button className="primary-button" type="button" aria-label="Capture a task" onClick={() => navClick("capture")}><Plus size={16}/> Add task</button></header>}
+    {!embedded && <header className="focus-header"><div className="focus-brand"><span className="focus-brand-mark"><ActionIcon name="command" size={17} /></span><span>orin</span></div><span className="focus-greeting">Here with you, {name.split(" ")[0]}</span><button className="focus-signout" type="button" aria-label="Sign out" onClick={onSignOut}><ActionIcon name="close" size={18} /></button></header>}
+    {embedded && <header className="task-workspace-heading"><div><span className="eyebrow">YOUR WORKSPACE</span><h1>Tasks</h1><p>Capture what matters. Choose a small step. Make room to focus.</p></div><button className="primary-button" type="button" aria-label="Capture a task" onClick={() => navClick("capture")}><ActionIcon name="add" size={16}/> Add task</button></header>}
     <main id="focus-main" className="focus-main" tabIndex={-1}>
       {focus.error && <p className="focus-error" role="alert">{focus.error}</p>}
       {reentryVisible && <aside className="focus-reentry" aria-label="Welcome back"><strong>Welcome back.</strong><p>Your tasks are still here. Start with what feels useful today.</p><button type="button" className="focus-secondary" onClick={() => void request("/focus/reentry/dismiss", { method: "POST" }).then(() => setReentryVisible(false))}>Continue</button></aside>}
@@ -125,7 +125,7 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
       {surface === "settings" && <section className="focus-card focus-settings-page"><button className="focus-text-button" onClick={() => navClick("today")}>Back to Today</button><span className="focus-eyebrow">PREFERENCES</span><h1>Make it comfortable.</h1><label>Theme<select value={theme} onChange={event => setThemeValue(event.target.value as Theme)}><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="focus-toggle"><input type="checkbox" checked={reducedMotion} onChange={event => setMotionValue(event.target.checked)} /> Reduce motion</label><label className="focus-toggle"><input type="checkbox" checked={hideTimerNumbers} onChange={event => setTimerNumbersValue(event.target.checked)} /> Hide timer numbers</label><label className="focus-toggle"><input type="checkbox" checked={soundEnabled} onChange={event => setSoundValue(event.target.checked)} /> Sound (off by default)</label><label className="focus-toggle"><input type="checkbox" checked={hapticsEnabled} onChange={event => setHapticsValue(event.target.checked)} /> Light haptics</label><p className="focus-quiet-message">Configure workspace reminders in Settings → Notifications & follow-up.</p><p className="focus-quiet-message">Orin supports focus and is not a medical treatment.</p></section>}
       {surface === "recovery" && <Recovery onBack={() => navClick("now")} onChanged={() => void focus.refresh()} />}
     </main>
-    {!embedded && !(surface === "now" && !focus.now?.task) && surface !== "capture" && <button type="button" className="focus-fab" aria-label="Capture a task" onClick={() => navClick("capture")}><Plus size={23} /><span>Add a task</span></button>}
+    {!embedded && !(surface === "now" && !focus.now?.task) && surface !== "capture" && <button type="button" className="focus-fab" aria-label="Capture a task" onClick={() => navClick("capture")}><ActionIcon name="add" size={23} /><span>Add a task</span></button>}
     <nav className="focus-bottom-nav" aria-label="Focus navigation">{nav.map(item => <button type="button" key={item.id} className={surface === item.id ? "active" : ""} aria-current={surface === item.id ? "page" : undefined} onClick={() => navClick(item.id)}>{item.label}</button>)}</nav>
   </div>;
 }
