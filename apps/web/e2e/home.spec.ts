@@ -569,6 +569,12 @@ test("home dashboard shows persisted tasks, projects, and work sessions", async 
   await expect(page.getByText("Already finished")).toHaveCount(0);
   await expect(page.getByText("Orin launch")).toBeVisible();
   await expect(page.getByText("Release planning")).toBeVisible();
+  const overview = page.getByLabel("Workspace overview");
+  await expect(overview.getByRole("button", { name: /1 Open tasks/ })).toBeVisible();
+  await expect(overview.getByRole("button", { name: /1 Active projects/ })).toBeVisible();
+  await expect(overview.getByRole("button", { name: /1 Saved sessions/ })).toBeVisible();
+  await overview.getByRole("button", { name: /1 Open tasks/ }).click();
+  await expect(page.getByRole("heading", { name: /Tasks/ }).first()).toBeVisible();
 });
 
 test("project workspace creates an outcome, updates a task, and reflects completion", async ({ page }) => {
