@@ -666,3 +666,17 @@ test("home uses a single-column reading layout on desktop and mobile", async ({ 
   const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
   expect(horizontalOverflow).toBe(false);
 });
+
+
+test("global search shortcut opens the assistant and focuses search", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("textbox", { name: "Search previous work" });
+  await expect(search).toBeVisible();
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("button", { name: "Search previous work" })).toHaveAttribute("aria-expanded", "true");
+  await page.keyboard.press("Escape");
+  await expect(search).not.toBeVisible();
+});
