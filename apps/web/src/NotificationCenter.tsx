@@ -36,6 +36,8 @@ export function NotificationCenter({
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const actionInFlight = useRef(false);
+  const centerRef = useRef<HTMLDivElement>(null);
   const refresh = (): Promise<void> => {
     const generation = ++inboxGeneration.current;
     return request<Reminder[]>("/notifications")
@@ -85,7 +87,8 @@ export function NotificationCenter({
     kind: "acknowledge" | "snooze",
     minutes = 15,
   ) => {
-    if (pendingActionId) return;
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
     setPendingActionId(item.id);
     setError("");
     try {
@@ -97,6 +100,7 @@ export function NotificationCenter({
     } catch {
       setError("Could not update this reminder. Try again.");
     } finally {
+      actionInFlight.current = false;
       setPendingActionId(null);
     }
   };
@@ -143,12 +147,27 @@ export function NotificationCenter({
       }
     }
   }, [items, policy.browser_alerts, policy.sound]);
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !centerRef.current?.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
   const urgent = policy.persistent
     ? items.find((i) => i.attention_ready && !i.read_at)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
-    <div className="notification-center">
+    <div ref={centerRef} className="notification-center">
       <button
         type="button"
         className="icon-button"
