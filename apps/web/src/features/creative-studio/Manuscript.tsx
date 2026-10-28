@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Plus, Layers, FileText, ArrowUp, ArrowDown } from "lucide-react";
+import { ActionIcon } from "../../ActionIcon";
 import type { Project } from "../../api";
 import {
   createCard,
@@ -126,7 +126,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
       )}
       {!projectId ? (
         <div className="studio-empty-state">
-          <Layers size={32} />
+          <ActionIcon name="layers" size={32} />
           <h3>Start with a project</h3>
           <p>Create a project, then return here to plan its manuscript.</p>
         </div>
@@ -134,7 +134,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
         <div className="manuscript-columns">
           <section>
             <header>
-              <Layers size={18} />
+              <ActionIcon name="layers" size={18} />
               <h3>Outline</h3>
               <small>{outline.length} sections</small>
             </header>
@@ -191,7 +191,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
                   className="primary-button"
                   disabled={busy || !title.trim()}
                 >
-                  <Plus size={16} /> Add
+                  <ActionIcon name="add" size={16} /> Add
                 </button>
               </div>
             </form>
@@ -243,7 +243,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
                         })
                       }
                     >
-                      <ArrowUp size={14} />
+                      <ActionIcon name="up" size={14} />
                     </button>
                     <button
                       className="icon-button"
@@ -261,7 +261,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
                         })
                       }
                     >
-                      <ArrowDown size={14} />
+                      <ActionIcon name="down" size={14} />
                     </button>
                   </div>
                 </li>
@@ -275,7 +275,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
           </section>
           <section>
             <header>
-              <FileText size={18} />
+              <ActionIcon name="document" size={18} />
               <h3>Working cards</h3>
               <small>{cards.length} cards</small>
             </header>
@@ -305,7 +305,7 @@ export function Manuscript({ projects }: { projects: Project[] }) {
                 className="secondary-button"
                 disabled={busy || !cardTitle.trim()}
               >
-                <Plus size={16} /> Add card
+                <ActionIcon name="add" size={16} /> Add card
               </button>
             </form>
             <div className="manuscript-cards">
