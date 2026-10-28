@@ -4,9 +4,6 @@
     "Segoe UI",
     ui-sans-serif,
     system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
     sans-serif;
   color: #202b29;
   background: #f7f8fa;
@@ -120,7 +117,7 @@
   color: var(--text);
 }
 .orin-shell .sidebar {
-  padding: 24px 16px 16px;
+  padding: 26px 14px 18px;
   background: var(--surface);
 }
 .brand {
@@ -144,14 +141,16 @@
   text-overflow: ellipsis;
 }
 .orin-shell .nav-link {
-  min-height: 43px;
-  padding-inline: 13px;
+  min-height: 46px;
+  padding-inline: 14px;
   font-size: 13px;
-  border-radius: 9px;
+  border-radius: 7px;
 }
 .orin-shell .nav-link.active {
   background: var(--hover);
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 650;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 .orin-shell .nav-icon {
   color: inherit;
@@ -162,6 +161,7 @@
   height: 64px;
   padding-inline: 32px;
   background: var(--surface);
+  border-bottom: 1px solid var(--line);
   z-index: 18;
 }
 .orin-shell .topbar-actions {
@@ -180,8 +180,10 @@
 }
 .orin-shell .greeting h1,
 .orin-shell .page-intro h1 {
-  font-size: clamp(28px, 3vw, 38px);
-  font-weight: 550;
+  font-size: clamp(29px, 3vw, 39px);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.16;
 }
 .orin-shell .greeting p,
 .orin-shell .page-intro p {
