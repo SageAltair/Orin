@@ -1034,3 +1034,19 @@
 .orin-shell :where(.home-record, .home-project-card, .settings-section) {
   overflow-wrap: anywhere;
 }
+
+/* Static interaction language: visible keyboard focus without hover-only effects. */
+@media (hover: hover) and (pointer: fine) {
+  .orin-shell :where(button, a, [role="button"]):hover {
+    transform: none;
+    animation: none;
+    transition: none;
+  }
+}
+.orin-shell :where(button, a, [role="button"]) {
+  transition: none;
+}
+.orin-shell :where(.nav-link, .icon-button, .primary-button, .secondary-button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
