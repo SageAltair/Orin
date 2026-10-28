@@ -1,7 +1,7 @@
 /* Shared visual language: calm surfaces, readable contrast, one control hierarchy. */
 :root {
   font-family:
-    Inter,
+    "Segoe UI",
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -60,10 +60,7 @@
   outline-offset: 3px;
 }
 .orin-shell button {
-  transition:
-    background 0.15s ease,
-    color 0.15s ease,
-    box-shadow 0.15s ease;
+  transition: none;
 }
 .orin-shell button:disabled {
   opacity: 0.5;
@@ -92,7 +89,7 @@
 }
 .orin-shell .primary-button:hover,
 .orin-shell .writing-new:hover {
-  box-shadow: 0 3px 12px #22483725;
+  box-shadow: none;
 }
 .orin-shell .secondary-button,
 .orin-shell .topbar-ask,
