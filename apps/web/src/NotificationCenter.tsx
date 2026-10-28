@@ -39,6 +39,7 @@ export function NotificationCenter({
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const actionInFlight = useRef(false);
   const centerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const refresh = (): Promise<void> => {
     const generation = ++inboxGeneration.current;
     return request<Reminder[]>("/notifications")
@@ -154,7 +155,11 @@ export function NotificationCenter({
       if (event.target instanceof Node && !centerRef.current?.contains(event.target)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -171,8 +176,10 @@ export function NotificationCenter({
   return (
     <div ref={centerRef} className="notification-center">
       <button
+        ref={triggerRef}
         type="button"
         className="icon-button"
+        aria-controls="orin-notification-panel"
         aria-label={unread ? `Reminders, ${unread} unread` : "Reminders"}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -254,7 +261,7 @@ export function NotificationCenter({
         </aside>
       )}
       {open && (
-        <section className="notification-panel" aria-label="Your reminders">
+        <section ref={panelRef} id="orin-notification-panel" className="notification-panel" aria-label="Your reminders">
           <header>
             <div>
               <strong>Reminders</strong>
