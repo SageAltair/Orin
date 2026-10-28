@@ -4,6 +4,7 @@ import { ApiError, request, type Task } from "./api";
 
 export function QuickCapture({ onClose, onSaved }: { onClose: () => void; onSaved: (task: Task) => void }) {
   const dialogRef = useRef<HTMLElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -14,7 +15,7 @@ export function QuickCapture({ onClose, onSaved }: { onClose: () => void; onSave
     const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
       'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
     ) ?? []).filter(element => element.getClientRects().length > 0);
-    focusable()[0]?.focus();
+    inputRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -55,7 +56,7 @@ export function QuickCapture({ onClose, onSaved }: { onClose: () => void; onSave
       <header><h2 id="quick-capture-title">{saved ? "Captured" : "Quick capture"}</h2><button type="button" aria-label="Close capture" onClick={onClose}><ActionIcon name="close" size={18} /></button></header>
       {saved ? <><p role="status">Saved to your Inbox. You can sort it out when you’re ready.</p><button type="button" className="primary-button" onClick={onClose}>Done</button></> : <form onSubmit={save}>
         <label htmlFor="quick-capture-text">What do you want to remember?</label>
-        <textarea id="quick-capture-text" rows={4} maxLength={4000} value={text} onChange={event => setText(event.target.value)} placeholder="A task, an idea, or something to come back to…" />
+        <textarea ref={inputRef} id="quick-capture-text" rows={4} maxLength={4000} value={text} onChange={event => setText(event.target.value)} placeholder="A task, an idea, or something to come back to…" />
         {error && <p role="alert" className="api-error">{error}</p>}
         <div><span>Save now. Organize later.</span><button type="submit" className="primary-button" disabled={busy || !text.trim()}>{busy ? "Saving…" : <><ActionIcon name="add" size={15} /> Capture</>}</button></div>
       </form>}
