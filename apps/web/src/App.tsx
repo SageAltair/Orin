@@ -685,6 +685,8 @@ function AuthScreen({
           className="auth-switch"
           onClick={() => {
             setIsRegister(!isRegister);
+            setPassword("");
+            setPasswordVisible(false);
             setError("");
           }}
         >
