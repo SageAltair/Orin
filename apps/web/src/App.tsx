@@ -1461,25 +1461,37 @@ export default function App() {
             </>
           ) : page === "home" ? (
             <>
-              <div className="greeting">
+              <div className="greeting home-introduction">
                 <span className="eyebrow">YOUR WORKSPACE</span>
-                <h1>
-                  What needs your attention, {user.display_name.split(" ")[0]}?
-                </h1>
-                <p>Your projects, open tasks, and recent work in one place.</p>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() => setKnowledgeCaptureOpen(true)}
-                >
-                  Capture a thought
+                <h1>What needs your attention, {user.display_name.split(" ")[0]}?</h1>
+                <p>Pick up meaningful work without losing your place.</p>
+                <div className="home-actions">
+                  <button type="button" className="primary-button home-ask" onClick={() => setAskOpen(true)}>
+                    <ActionIcon name="message" size={16} /> Ask Orin
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setCaptureOpen(true)}>
+                    <ActionIcon name="add" size={16} /> Capture task
+                  </button>
+                  <button type="button" className="text-action" onClick={() => setKnowledgeCaptureOpen(true)}>
+                    Capture a thought
+                  </button>
+                </div>
+              </div>
+              <div className="home-overview" aria-label="Workspace overview">
+                <button type="button" onClick={() => selectPage("tasks")}>
+                  <strong>{tasks.filter(task => !["done", "cancelled"].includes(task.status)).length}</strong>
+                  <span>Open tasks</span>
+                  <ActionIcon name="right" size={15} />
                 </button>
-                <button
-                  type="button"
-                  className="primary-button home-ask"
-                  onClick={() => setAskOpen(true)}
-                >
-                  <ActionIcon name="message" size={16} /> Ask Orin to plan or continue work
+                <button type="button" onClick={() => selectPage("projects")}>
+                  <strong>{activeProjects.length}</strong>
+                  <span>Active projects</span>
+                  <ActionIcon name="right" size={15} />
+                </button>
+                <button type="button" onClick={() => { setAskOpen(true); setHistoryOpen(true); }}>
+                  <strong>{conversations.length}</strong>
+                  <span>Saved sessions</span>
+                  <ActionIcon name="right" size={15} />
                 </button>
               </div>
               <div className="home-dashboard">
