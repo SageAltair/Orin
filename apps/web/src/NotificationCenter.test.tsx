@@ -7,6 +7,7 @@ describe("NotificationCenter", () => {
     const markup = renderToStaticMarkup(<NotificationCenter />);
     expect(markup).toContain('aria-label="Reminders"');
     expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-controls="orin-notification-panel"');
     expect(markup).toContain('class="notification-center"');
     expect(markup).toContain('aria-hidden="true"');
   });
