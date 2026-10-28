@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check" | "left" | "right" | "filters" | "edit" | "document" | "download" | "shield" | "book" | "idea" | "network" | "layers" | "insight" | "down" | "play" | "skip" | "reset";
+type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check" | "left" | "right" | "filters" | "edit" | "document" | "download" | "shield" | "book" | "idea" | "network" | "layers" | "insight" | "down" | "play" | "skip" | "reset" | "mic" | "back" | "chevron-down";
 type ActionIconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
   name: ActionName;
   size?: number;
@@ -10,6 +10,9 @@ type ActionIconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
 export function ActionIcon({ name, size = 18, ...props }: ActionIconProps) {
   const glyphs = {
     add: <path d="M12 5v14M5 12h14" />,
+    mic: <><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4m-4 0h8"/></>,
+    back: <><path d="m11 5-7 7 7 7M4 12h16"/></>,
+    "chevron-down": <path d="m5 9 7 7 7-7"/>,
     play: <path d="m8 5 11 7-11 7z"/>,
     skip: <><path d="m4 5 10 7-10 7zM19 5v14"/></>,
     reset: <><path d="M4 8V4m0 4h4"/><path d="M4.5 8A8.5 8.5 0 1 1 3.5 13"/></>,
