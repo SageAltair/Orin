@@ -1,6 +1,7 @@
 const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:8100");
 let accessToken: string | null = null;
-let refreshPromise: Promise<boolean> | null = null;
+type RefreshResult = "refreshed" | "rejected" | "unavailable";
+let refreshPromise: Promise<RefreshResult> | null = null;
 let activeWorkspaceId: string | null = null;
 
 export function setActiveWorkspace(id: string | null) { activeWorkspaceId = id; }
@@ -29,15 +30,18 @@ export interface Conversation { id: string; title: string; task_id: string | nul
 export interface SearchResult { result_id: string; kind: "conversation" | "task" | "project" | "attachment" | "memory" | "document"; document_id?: string | null; command_id: string | null; task_id: string | null; project_id: string | null; attachment_id?: string | null; conversation_id: string | null; text: string; excerpt: string; created_at: string; title: string | null }
 export interface Attachment { id: string; conversation_id: string | null; task_id: string | null; filename: string; media_type: string; size_bytes: number; created_at: string }
 
-async function refresh(): Promise<boolean> {
+async function refresh(): Promise<RefreshResult> {
   if (!refreshPromise) refreshPromise = fetch(`${baseUrl}/api/v1/auth/refresh`, {
     method: "POST",
     credentials: "include",
     signal: AbortSignal.timeout(8000),
   }).then(async response => {
-    if (!response.ok) { accessToken = null; return false; }
-    accessToken = (await response.json() as { access_token: string }).access_token; return true;
-  }).catch(() => { accessToken = null; return false; }).finally(() => { refreshPromise = null; });
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) { accessToken = null; return "rejected"; }
+      return "unavailable";
+    }
+    accessToken = (await response.json() as { access_token: string }).access_token; return "refreshed";
+  }).catch(() => "unavailable" as const).finally(() => { refreshPromise = null; });
   return refreshPromise;
 }
 
@@ -50,9 +54,12 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(120000), credentials: "include" }); }
   catch { throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0); }
   if (response.status === 401 && retry && path !== "/auth/login" && path !== "/auth/refresh") {
-    if (await refresh()) return request<T>(path, options, false);
-    accessToken = null;
-    window.dispatchEvent(new Event("orin:session-expired"));
+    const refreshResult = await refresh();
+    if (refreshResult === "refreshed") return request<T>(path, options, false);
+    if (refreshResult === "rejected") {
+      accessToken = null;
+      window.dispatchEvent(new Event("orin:session-expired"));
+    }
   }
   if (!response.ok) {
     let message = `Request failed (${response.status}).`;
@@ -69,7 +76,7 @@ export async function requestBlob(path: string): Promise<Blob> {
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);
     const response = await fetch(`${baseUrl}/api/v1${path}`, { headers, credentials: "include" });
-    if (response.status === 401 && retry && await refresh()) return fetchBlob(false);
+    if (response.status === 401 && retry && await refresh() === "refreshed") return fetchBlob(false);
     if (!response.ok) throw new ApiError(`Could not load file (${response.status}).`, response.status);
     return response.blob();
   };
@@ -85,5 +92,5 @@ export async function register(email: string, password: string, display_name: st
   await request<User>("/auth/register", { method: "POST", body: JSON.stringify({ email, password, display_name }) }, false);
   return login(email, password);
 }
-export async function restoreSession(): Promise<User | null> { return await refresh() ? request<User>("/auth/me") : null; }
+export async function restoreSession(): Promise<User | null> { return await refresh() === "refreshed" ? request<User>("/auth/me") : null; }
 export async function logout(): Promise<void> { try { await request<void>("/auth/logout", { method: "POST" }, false); } finally { accessToken = null; } }
