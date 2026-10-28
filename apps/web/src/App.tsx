@@ -707,6 +707,7 @@ export default function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  const searchRequestVersion = useRef(0);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -1144,29 +1145,30 @@ export default function App() {
   };
   useEffect(() => {
     const query = searchText.trim();
+    const version = ++searchRequestVersion.current;
     if (!searchOpen || query.length < 2) {
       setSearchResults([]);
       setSearchError("");
       setSearchLoading(false);
       return;
     }
-    let active = true;
+    setSearchResults([]);
     setSearchLoading(true);
     setSearchError("");
     const timer = window.setTimeout(() => {
       request<SearchResult[]>(`/search?q=${encodeURIComponent(query)}`)
         .then((results) => {
-          if (active) setSearchResults(results);
+          if (version === searchRequestVersion.current) setSearchResults(results);
         })
         .catch((error) => {
-          if (active) setSearchError(errorText(error));
+          if (version === searchRequestVersion.current) setSearchError(errorText(error));
         })
         .finally(() => {
-          if (active) setSearchLoading(false);
+          if (version === searchRequestVersion.current) setSearchLoading(false);
         });
     }, 250);
     return () => {
-      active = false;
+      searchRequestVersion.current++;
       window.clearTimeout(timer);
     };
   }, [searchText, searchOpen]);
@@ -1839,6 +1841,7 @@ export default function App() {
                   className="toolbar-icon"
                   aria-label="Search previous work"
                   title="Search previous work"
+                  aria-expanded={searchOpen}
                   onClick={(event) => {
                     event.currentTarget
                       .closest(".chat-drawer")
@@ -2016,6 +2019,12 @@ export default function App() {
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
                     placeholder="Search conversations, tasks, projects"
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.preventDefault();
+                        setSearchOpen(false);
+                      }
+                    }}
                   />
                   <button
                     type="button"
