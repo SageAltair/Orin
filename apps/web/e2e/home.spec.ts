@@ -618,3 +618,17 @@ test("quick capture saves an inbox task from the global workspace toolbar", asyn
   await expect(page.getByRole("status")).toContainText("Saved to your Inbox");
   await expect(page.getByText("Ask the ministry team about the venue", { exact: true })).toBeVisible();
 });
+
+
+test("home uses a single-column reading layout on desktop and mobile", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await signIn(page);
+  const dashboard = page.locator(".home-dashboard");
+  await expect(dashboard).toBeVisible();
+  await expect(dashboard).toHaveCSS("flex-direction", "column");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dashboard).toHaveCSS("flex-direction", "column");
+  const horizontalOverflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+  expect(horizontalOverflow).toBe(false);
+});
