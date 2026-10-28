@@ -22,17 +22,13 @@ import {
   ArrowUp,
   ArrowUpRight,
   Command,
-  Menu,
-  Moon,
-  Pin,
-  Plus,
-  Settings2,
+    Moon,
+      Settings2,
   Sun,
   LogOut,
   Copy,
   MessageCircle,
-  X,
-  Paperclip,
+    Paperclip,
   History,
   Search,
   ListPlus,
@@ -308,7 +304,7 @@ function PreferenceSettings({
                     aria-label={`Pin ${item.label}`}
                     disabled={!visible}
                   >
-                    <Pin size={15} />
+                    <ActionIcon name="pin" size={15} />
                   </button>
                   <input
                     aria-label={`Show ${item.label}`}
@@ -1337,7 +1333,7 @@ export default function App() {
               </span>
               {item.label}
               {preferences.pinnedCapabilities.includes(item.id) &&
-                item.id !== "home" && <Pin className="tiny-pin" size={11} />}
+                item.id !== "home" && <ActionIcon name="pin" className="tiny-pin" size={11} />}
             </button>
           ))}
         </nav>
@@ -1386,7 +1382,7 @@ export default function App() {
             aria-label="Open navigation"
             onClick={() => setMobileOpen(true)}
           >
-            <Menu size={19} />
+            <ActionIcon name="menu" size={19} />
           </button>
           <div className="breadcrumbs">
             <span>My workspace</span>
@@ -1400,7 +1396,7 @@ export default function App() {
               title="Quick capture (Ctrl or ? + Shift + Space)"
               onClick={() => setCaptureOpen(true)}
             >
-              <Plus size={15} />
+              <ActionIcon name="add" size={15} />
               Capture
             </button>
             <button
@@ -1551,7 +1547,7 @@ export default function App() {
                         className="text-action"
                         onClick={() => selectPage("tasks")}
                       >
-                        <Plus size={14} /> Add a task
+                        <ActionIcon name="add" size={14} /> Add a task
                       </button>
                     </div>
                   )}
@@ -1668,7 +1664,7 @@ export default function App() {
                         className="text-action"
                         onClick={() => selectPage("projects")}
                       >
-                        <Plus size={14} /> Create a project
+                        <ActionIcon name="add" size={14} /> Create a project
                       </button>
                     </div>
                   )}
@@ -1874,7 +1870,7 @@ export default function App() {
                   title="New work session"
                   onClick={startNewConversation}
                 >
-                  <Plus size={17} />
+                  <ActionIcon name="add" size={17} />
                 </button>
                 <details className="chat-more-actions">
                   <summary
@@ -1948,7 +1944,7 @@ export default function App() {
                   title="Close Ask Orin"
                   onClick={() => setAskOpen(false)}
                 >
-                  <X size={17} />
+                  <ActionIcon name="close" size={17} />
                 </button>
               </div>
             </header>
@@ -2030,7 +2026,7 @@ export default function App() {
                     aria-label="Close search"
                     onClick={() => setSearchOpen(false)}
                   >
-                    <X size={15} />
+                    <ActionIcon name="close" size={15} />
                   </button>
                 </div>
                 {searchText.trim().length < 2 ? (
