@@ -1,11 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowUpRight,
-  Plus,
-  Search,
-  ShieldCheck,
-  Sparkles,
-} from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import type { OpportunityRecord, RiskRecord } from "@orin/contracts";
 import { ApiError, request, type Project } from "./api";
 import { PlanningForm } from "./PlanningForm";
@@ -181,20 +175,20 @@ export function OpportunityWorkspace({
               : setRisk(blankRisk());
           }}
         >
-          <Plus size={16} />{" "}
+          <ActionIcon name="add" size={16} />{" "}
           {tab === "opportunities" ? "Capture opportunity" : "Add risk"}
         </button>
       </header>
       <div className="planning-summary">
         <span>
-          <Sparkles size={17} />
+          <ActionIcon name="insight" size={17} />
           <strong>
             {opportunities.filter((o) => o.stage === "pursuing").length}
           </strong>{" "}
           pursuing
         </span>
         <span>
-          <ShieldCheck size={17} />
+          <ActionIcon name="shield" size={17} />
           <strong>
             {
               risks.filter(
@@ -233,7 +227,7 @@ export function OpportunityWorkspace({
           ))}
         </div>
         <label className="planning-search">
-          <Search size={16} />
+          <ActionIcon name="search" size={16} />
           <input
             aria-label="Search opportunities and risks"
             value={query}
@@ -334,7 +328,7 @@ export function OpportunityWorkspace({
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Source <ArrowUpRight size={14} />
+                    Source <ActionIcon name="external" size={14} />
                   </a>
                 )}
                 <button
@@ -349,7 +343,7 @@ export function OpportunityWorkspace({
           ))}
           {!visible.length && (
             <div className="planning-empty">
-              <Sparkles size={28} />
+              <ActionIcon name="insight" size={28} />
               <h3>A little possibility goes a long way</h3>
               <p>
                 Capture a job, collaboration, idea, course, or business opening.
@@ -398,7 +392,7 @@ export function OpportunityWorkspace({
           ))}
           {!visibleRisks.length && (
             <div className="planning-empty">
-              <ShieldCheck size={28} />
+              <ActionIcon name="shield" size={28} />
               <h3>Plan for the downside, then move forward</h3>
               <p>
                 Capture a concern, its warning sign, and a practical response.
