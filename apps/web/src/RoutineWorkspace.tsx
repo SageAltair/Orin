@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from "react";
-import { Check, Plus, RotateCcw, Timer } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import type { RoutineRecord, RoutineOccurrence } from "@orin/contracts";
 import { ApiError, request } from "./api";
 import { PlanningForm } from "./PlanningForm";
@@ -148,7 +148,7 @@ export function RoutineWorkspace({
             setDraft({ ...blank(), timezone });
           }}
         >
-          <Plus size={16} /> New routine
+          <ActionIcon name="add" size={16} /> New routine
         </button>
       </header>
       {error && (
@@ -250,14 +250,14 @@ export function RoutineWorkspace({
                         });
                       }}
                     >
-                      <Timer size={15} /> Start timer
+                      <ActionIcon name="timer" size={15} /> Start timer
                     </button>
                     <button
                       className="secondary-button"
                       disabled={!allowed || busy === o.routine_id}
                       onClick={() => void checkin(o, "done")}
                     >
-                      <Check size={15} /> Done
+                      <ActionIcon name="check" size={15} /> Done
                     </button>
                     <button
                       className="text-action"
@@ -280,7 +280,7 @@ export function RoutineWorkspace({
                     disabled={busy === o.routine_id}
                     onClick={() => void checkin(o, "pending")}
                   >
-                    <RotateCcw size={14} /> Undo check-in
+                    <ActionIcon name="reset" size={14} /> Undo check-in
                   </button>
                 )}
               </div>
@@ -289,7 +289,7 @@ export function RoutineWorkspace({
         })}
         {!selected.length && (
           <div className="planning-empty">
-            <Timer size={28} />
+            <ActionIcon name="timer" size={28} />
             <h3>A little structure, a little breathing room</h3>
             <p>
               No routines scheduled for this day. Begin with one repeatable
