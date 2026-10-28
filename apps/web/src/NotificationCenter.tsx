@@ -35,6 +35,7 @@ export function NotificationCenter({
   const [error, setError] = useState("");
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
+  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const refresh = (): Promise<void> => {
     const generation = ++inboxGeneration.current;
     return request<Reminder[]>("/notifications")
@@ -62,14 +63,20 @@ export function NotificationCenter({
     };
     void preferences();
     window.addEventListener("orin-notification-preferences", preferences);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void preferences();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     const timer = window.setInterval(() => {
-      void preferences();
-      void refresh();
+      if (document.visibilityState === "visible") void preferences();
     }, 30000);
     return () => {
       inboxGeneration.current++;
       policyGeneration.current++;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("orin-notification-preferences", preferences);
     };
   }, []);
@@ -78,6 +85,9 @@ export function NotificationCenter({
     kind: "acknowledge" | "snooze",
     minutes = 15,
   ) => {
+    if (pendingActionId) return;
+    setPendingActionId(item.id);
+    setError("");
     try {
       await request(`/notifications/${item.id}/action`, {
         method: "POST",
@@ -86,6 +96,8 @@ export function NotificationCenter({
       await refresh();
     } catch {
       setError("Could not update this reminder. Try again.");
+    } finally {
+      setPendingActionId(null);
     }
   };
   useEffect(() => {
@@ -174,18 +186,21 @@ export function NotificationCenter({
             </button>
             <button
               className="text-action"
+              disabled={pendingActionId !== null}
               onClick={() => void action(urgent, "snooze", 15)}
             >
               Snooze 15 min
             </button>
             <button
               className="secondary-button"
+              disabled={pendingActionId !== null}
               onClick={() => void action(urgent, "acknowledge")}
             >
               Acknowledge
             </button>
             <button
               className="text-action"
+              disabled={pendingActionId !== null}
               onClick={() => void action(urgent, "snooze", 1440)}
             >
               Snooze 24 hours
@@ -271,12 +286,14 @@ export function NotificationCenter({
                 <>
                   <button
                     className="text-action"
+                    disabled={pendingActionId !== null}
                     onClick={() => void action(item, "snooze", 15)}
                   >
                     Snooze 15 min
                   </button>
                   <button
                     className="text-action"
+                    disabled={pendingActionId !== null}
                     onClick={() => void action(item, "snooze", 60)}
                   >
                     Snooze 1 hour
