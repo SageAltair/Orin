@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check";
+type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check" | "left" | "right" | "filters" | "edit" | "document" | "download" | "shield";
 type ActionIconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
   name: ActionName;
   size?: number;
@@ -10,6 +10,13 @@ type ActionIconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
 export function ActionIcon({ name, size = 18, ...props }: ActionIconProps) {
   const glyphs = {
     add: <path d="M12 5v14M5 12h14" />,
+    left: <path d="m15 5-7 7 7 7"/>,
+    right: <path d="m9 5 7 7-7 7"/>,
+    filters: <><path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2" fill="var(--surface, white)"/><circle cx="15" cy="12" r="2" fill="var(--surface, white)"/><circle cx="9" cy="18" r="2" fill="var(--surface, white)"/></>,
+    edit: <><path d="M5 19h14M6 15l9-9 3 3-9 9H6z"/><path d="m13.5 7.5 3 3"/></>,
+    document: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M9 12h6m-6 4h6"/></>,
+    download: <><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4"/></>,
+    shield: <><path d="M12 2.5 20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0v5l-2 3h16l-2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></>,
     check: <path d="m5 12 4.5 4.5L19 7"/>,
     up: <><path d="m6 12 6-6 6 6M12 6v13"/></>,
