@@ -999,3 +999,38 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Workspace refinement: restrained navigation and editorial content hierarchy. */
+@media (min-width: 761px) {
+  .orin-shell .sidebar {
+    border-right: 1px solid var(--line);
+  }
+  .orin-shell .main-content:not(:has(.writing-studio)) {
+    padding-top: clamp(36px, 4vw, 56px);
+    padding-bottom: 64px;
+  }
+}
+.orin-shell .nav-link.active .nav-icon {
+  color: var(--accent);
+}
+.orin-shell .breadcrumbs {
+  color: var(--muted);
+  letter-spacing: 0.005em;
+}
+.orin-shell .home-dashboard .home-section {
+  box-shadow: none;
+  border-radius: 10px;
+}
+.orin-shell .home-dashboard .section-title h2 {
+  font-weight: 650;
+  letter-spacing: -0.018em;
+}
+.orin-shell .home-record + .home-record {
+  border-top: 1px solid var(--line);
+}
+.orin-shell .settings-section {
+  box-shadow: none;
+}
+.orin-shell :where(.home-record, .home-project-card, .settings-section) {
+  overflow-wrap: anywhere;
+}
