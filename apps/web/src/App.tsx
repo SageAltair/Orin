@@ -1,4 +1,5 @@
 import { AccountPrivacy } from "./AccountPrivacy";
+import { NavigationIcon } from "./NavigationIcon";
 import {
   Compass,
   Home,
@@ -698,22 +699,6 @@ function AuthScreen({
       </form>
     </main>
   );
-}
-
-const navigationIcons: Record<CapabilityId, typeof Home> = {
-  home: Home,
-  opportunities: Compass,
-  calendar: CalendarDays,
-  projects: FolderOpen,
-  tasks: ListTodo,
-  activity: Activity,
-  memories: BookOpen,
-  focus: Timer,
-  settings: Settings2,
-};
-function NavigationIcon({ id }: { id: CapabilityId }) {
-  const Icon = navigationIcons[id];
-  return <Icon size={18} />;
 }
 
 export default function App() {
