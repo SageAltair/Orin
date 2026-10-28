@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { BookOpen, Lightbulb, Network, Layers } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import type { Project } from "./api";
 import { KnowledgeWorkspace } from "./KnowledgeWorkspace";
 import { IdeaInbox } from "./features/creative-studio/IdeaInbox";
