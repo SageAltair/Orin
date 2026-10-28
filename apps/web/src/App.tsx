@@ -633,7 +633,7 @@ function AuthScreen({
           <Command size={17} />
         </span>
         <h1>{isRegister ? "Create your Orin account" : "Welcome to Orin"}</h1>
-        <p>Sign in to your workspace to continue.</p>
+        <p>{isRegister ? "Create an account to get started with Orin." : "Sign in to your workspace to continue."}</p>
         {isRegister && (
           <label>
             Your name
