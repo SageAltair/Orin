@@ -32,6 +32,7 @@ export function NotificationCenter({
   );
   const [items, setItems] = useState<Reminder[]>([]);
   const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState<"unread" | "all">("unread");
   const [error, setError] = useState("");
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
@@ -166,6 +167,7 @@ export function NotificationCenter({
     ? items.find((i) => i.attention_ready && !i.read_at)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
+  const visibleItems = filter === "unread" ? items.filter((item) => !item.read_at) : items;
   return (
     <div ref={centerRef} className="notification-center">
       <button
@@ -271,6 +273,10 @@ export function NotificationCenter({
               {error} <button onClick={() => void refresh()}>Retry</button>
             </p>
           )}
+          <div className="notification-panel-filters" role="group" aria-label="Filter reminders">
+            <button type="button" aria-pressed={filter === "unread"} onClick={() => setFilter("unread")}>Unread ({unread})</button>
+            <button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>All ({items.length})</button>
+          </div>
           {items.length === 0 && !error && (
             <div className="notification-empty">
               <ActionIcon name="bell" size={24} />
@@ -280,7 +286,10 @@ export function NotificationCenter({
               </small>
             </div>
           )}
-          {items.map((item) => (
+          {items.length > 0 && visibleItems.length === 0 && !error && (
+            <p className="notification-empty" role="status">All reminders have been read. Select All to review earlier reminders.</p>
+          )}
+          {visibleItems.map((item) => (
             <article key={item.id} className={item.read_at ? "is-read" : ""}>
               <strong>{item.title}</strong>
               <p>{item.message}</p>
