@@ -628,7 +628,7 @@ function AuthScreen({
   };
   return (
     <main className="auth-screen">
-      <form className="auth-card" onSubmit={submit}>
+      <form className="auth-card" onSubmit={submit} aria-busy={busy}>
         <span className="brand-mark">
           <Command size={17} />
         </span>
