@@ -1,5 +1,6 @@
 import { AccountPrivacy } from "./AccountPrivacy";
 import { NavigationIcon } from "./NavigationIcon";
+import { ActionIcon } from "./ActionIcon";
 import { lazy, Suspense } from "react";
 const NotificationPreferencesPanel = lazy(() => import("./NotificationPreferences").then(m => ({default:m.NotificationPreferencesPanel})));
 const OpportunityWorkspace = lazy(() => import("./OpportunityWorkspace").then(m => ({default: m.OpportunityWorkspace})));
@@ -1346,7 +1347,7 @@ export default function App() {
             type="button"
             onClick={() => selectPage("settings")}
           >
-            <Settings2 size={17} />
+            <ActionIcon name="settings" size={18} />
             Preferences
           </button>
           <div className="profile">
