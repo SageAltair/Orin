@@ -1,4 +1,4 @@
-const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? window.location.origin;
+const baseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:8100");
 let accessToken: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let activeWorkspaceId: string | null = null;

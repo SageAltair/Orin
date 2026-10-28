@@ -604,6 +604,7 @@ function AuthScreen({
   onAuthenticated: (user: User) => void;
 }) {
   const [isRegister, setIsRegister] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -656,14 +657,19 @@ function AuthScreen({
         </label>
         <label>
           Password
-          <input
-            required
-            type="password"
-            minLength={isRegister ? 15 : 1}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={isRegister ? "new-password" : "current-password"}
-          />
+          <span className="auth-password-field">
+            <input
+              required
+              type={passwordVisible ? "text" : "password"}
+              minLength={isRegister ? 15 : 1}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={isRegister ? "new-password" : "current-password"}
+            />
+            <button type="button" className="auth-password-toggle" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-pressed={passwordVisible} onClick={() => setPasswordVisible(!passwordVisible)}>
+              {passwordVisible ? "Hide" : "Show"}
+            </button>
+          </span>
           {isRegister && <small>Use at least 15 characters.</small>}
         </label>
         {error && (
