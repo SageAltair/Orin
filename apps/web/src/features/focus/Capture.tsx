@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Mic, Plus } from "lucide-react";
+import { ActionIcon } from "../../ActionIcon";
 import type { CaptureSuggestion as CaptureSuggestionType, Energy } from "./types";
 
 type Recognition = { start: () => void; onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null; onerror: (() => void) | null };
@@ -52,7 +52,7 @@ export function Capture({ onSave, onSuggest, busy, onDone }: {
       <details className="focus-settings focus-capture-help">
         <summary>Need help with words or the first step?</summary>
         <p>Orin can offer an optional suggestion. You can edit it or ignore it.</p>
-        <div className="focus-action-row"><button type="button" className="focus-secondary" onClick={listen} aria-label="Capture by voice"><Mic size={18} /> Speak instead</button><button type="button" className="focus-secondary" onClick={() => void suggest()} disabled={suggesting || !title.trim()}>{suggesting ? "Thinking…" : "Suggest a first step"}</button></div>
+        <div className="focus-action-row"><button type="button" className="focus-secondary" onClick={listen} aria-label="Capture by voice"><ActionIcon name="mic" size={18} /> Speak instead</button><button type="button" className="focus-secondary" onClick={() => void suggest()} disabled={suggesting || !title.trim()}>{suggesting ? "Thinking…" : "Suggest a first step"}</button></div>
         {(firstStep || energy) && <div className="focus-capture-details">
           <label className="focus-field-label" htmlFor="capture-first-step">First step (optional)</label>
           <input id="capture-first-step" value={firstStep} onChange={event => setFirstStep(event.target.value)} maxLength={500} />
@@ -60,7 +60,7 @@ export function Capture({ onSave, onSuggest, busy, onDone }: {
           <select id="capture-energy" value={energy} onChange={event => setEnergy(event.target.value as Energy | "")}><option value="">Choose later</option><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>
         </div>}
       </details>
-      <div className="focus-action-row"><button type="submit" className="focus-primary" disabled={busy || !title.trim()}><Plus size={18} /> Save and continue</button></div>
+      <div className="focus-action-row"><button type="submit" className="focus-primary" disabled={busy || !title.trim()}><ActionIcon name="add" size={18} /> Save and continue</button></div>
     </form>
     {message && <p role="status" className="focus-quiet-message">{message}</p>}
   </section>;
