@@ -1,0 +1,24 @@
+name: Orin Codex Review (Manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: orin-codex-review
+  cancel-in-progress: false
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Run OpenAI Codex in read-only mode
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ':read-only'
+          prompt-file: .github/codex/readiness-review.md
+          output-file: codex-review.txt
