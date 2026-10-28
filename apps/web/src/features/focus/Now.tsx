@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, Check, Play, SkipForward } from "lucide-react";
+import { ActionIcon } from "../../ActionIcon";
 import type { NowState } from "./types";
 
 export function Now({ state, busy, onStart, onSmaller, onSuggestSmaller, onSwap, onCapture, onComplete, onLogDrift, onRecovery, checkInInterval, reducedMotion, hideNumbers }: {
@@ -40,7 +40,7 @@ export function Now({ state, busy, onStart, onSmaller, onSuggestSmaller, onSwap,
     <div className="focus-first-step"><span>Next small step</span><p>{task.first_step || "Choose one small way to begin."}</p></div>
     <div className="focus-timer" aria-label="Focus timer"><div className="focus-timer-track" role="progressbar" aria-label="Focus time remaining" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(remaining * 100)}><span style={{ width: `${remaining * 100}%`, transition: reducedMotion ? "none" : "width 1s ease" }} /></div>{!hideNumbers && <span className="focus-timer-label" role="status" aria-live="polite">{Math.ceil(state!.focus_session!.duration_minutes * remaining)} min left</span>}</div>
     {checkInInterval && elapsedMinutes >= checkInInterval && elapsedMinutes - checkInDismissedAt >= checkInInterval && <div className="focus-checkin" role="group" aria-label="Optional focus check-in"><p>Still feel okay to continue?</p><button type="button" className="focus-text-button" onClick={() => setCheckInDismissedAt(elapsedMinutes)}>Keep going</button><div className="focus-trigger-grid">{(["app", "thought", "emotion", "person", "tired", "other"] as const).map(trigger => <button key={trigger} type="button" onClick={() => { void onLogDrift(trigger); setCheckInDismissedAt(elapsedMinutes); }}>I drifted: {trigger}</button>)}</div><p>Choose any reason, then return to your step.</p></div>}
-    <div className="focus-action-row"><button type="button" className="focus-primary" onClick={onComplete} disabled={busy}><Check size={18} /> Done</button><button type="button" className="focus-secondary" onClick={onCapture}>Capture</button></div>
+    <div className="focus-action-row"><button type="button" className="focus-primary" onClick={onComplete} disabled={busy}><ActionIcon name="check" size={18} /> Done</button><button type="button" className="focus-secondary" onClick={onCapture}>Capture</button></div>
   </section>;
   return <section className="focus-card focus-now" aria-labelledby="now-heading">
     <span className="focus-eyebrow">ONE SMALL STEP</span><h1 id="now-heading">{task.title}</h1>
@@ -52,9 +52,9 @@ export function Now({ state, busy, onStart, onSmaller, onSuggestSmaller, onSwap,
       {!hideNumbers && <span className="focus-timer-label" role="status" aria-live="polite">{active ? `${Math.ceil((state!.focus_session!.duration_minutes * remaining))} min left` : `${task.estimated_minutes ?? 25} min, at your pace`}</span>}
     </div>
     <div className="focus-action-row focus-now-actions">
-      <button className="focus-primary" onClick={active ? onComplete : onStart} disabled={busy}>{active ? <Check size={18} /> : <Play size={18} />}{active ? "Done" : "Start"}</button>
-      {!active && <button className="focus-secondary" onClick={() => { setStep(task.first_step ?? ""); setSmallerOpen(value => !value); setMessage(""); }}><ArrowDown size={18} /> Smaller</button>}
-      <button className="focus-secondary" onClick={() => void swap()} disabled={busy}><SkipForward size={18} /> Not now</button>
+      <button className="focus-primary" onClick={active ? onComplete : onStart} disabled={busy}>{active ? <ActionIcon name="check" size={18} /> : <ActionIcon name="play" size={18} />}{active ? "Done" : "Start"}</button>
+      {!active && <button className="focus-secondary" onClick={() => { setStep(task.first_step ?? ""); setSmallerOpen(value => !value); setMessage(""); }}><ActionIcon name="down" size={18} /> Smaller</button>}
+      <button className="focus-secondary" onClick={() => void swap()} disabled={busy}><ActionIcon name="skip" size={18} /> Not now</button>
     </div>
     <p className="focus-guidance">Start when you’re ready. <strong>Smaller</strong> makes the first step easier; <strong>Not now</strong> finds another task.</p>
     <button type="button" className="focus-text-button" onClick={onRecovery}>Progress and task review</button>
