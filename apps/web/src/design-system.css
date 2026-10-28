@@ -1349,3 +1349,64 @@
   .orin-shell .calendar-event-chip { font-size: 9px; }
   .orin-shell .calendar-event-chip-label { max-width: 100%; }
 }
+
+/* Writing editor: quiet document canvas, restrained navigation, no card treatment. */
+.orin-shell .writing-workspace { --writing-accent: var(--accent); min-width: 0; }
+.orin-shell .writing-list { min-width: 0; }
+.orin-shell .writing-list-header { gap: 18px; padding: 26px 20px 18px; border-bottom: 1px solid var(--line); }
+.orin-shell .writing-brand h1 { font-size: 21px; font-weight: 650; letter-spacing: -0.03em; }
+.orin-shell .writing-brand p { line-height: 1.5; }
+.orin-shell .writing-new {
+  min-height: 44px;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border-radius: 7px;
+  box-shadow: none;
+}
+.orin-shell .writing-new kbd { color: var(--on-accent); opacity: 0.8; }
+.orin-shell .writing-search { min-height: 44px; border-radius: 7px; }
+.orin-shell .writing-document {
+  min-height: 68px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.orin-shell .writing-document:hover { background: transparent; }
+.orin-shell .writing-document.selected {
+  background: var(--hover);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.orin-shell .writing-document-copy strong { font-size: 13px; font-weight: 600; }
+.orin-shell .writing-editor { background: var(--surface); }
+.orin-shell .writing-toolbar-top {
+  min-height: 64px;
+  gap: 12px;
+  padding-inline: 26px;
+  background: var(--surface);
+}
+.orin-shell .writing-breadcrumb { min-width: 0; }
+.orin-shell .writing-quiet-action { min-width: 36px; min-height: 36px; }
+.orin-shell .writing-paper { width: min(calc(100% - 80px), 760px); margin-top: 40px; }
+.orin-shell .writing-title { font-size: clamp(28px, 3vw, 40px); font-weight: 650; }
+.orin-shell .writing-formatbar {
+  gap: 2px;
+  padding: 6px 0;
+  margin-bottom: 24px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.orin-shell .writing-formatbar button { min-height: 36px; min-width: 36px; }
+.orin-shell .writing-paper > textarea, .orin-shell .writing-preview {
+  font-size: 16px;
+  line-height: 1.85;
+  letter-spacing: 0.005em;
+}
+.orin-shell .writing-details { width: min(calc(100% - 80px), 760px); }
+@media (max-width: 700px) {
+  .orin-shell .writing-list-header { padding: 16px 14px; }
+  .orin-shell .writing-toolbar-top { padding-inline: 12px; gap: 8px; }
+  .orin-shell .writing-paper { width: calc(100% - 32px); margin-top: 24px; }
+  .orin-shell .writing-details { width: calc(100% - 32px); }
+}
