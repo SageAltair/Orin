@@ -47,6 +47,9 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   });
   await page.goto("http://localhost:5273");
   await page.getByRole("button", { name: "Writing", exact: true }).click();
+  const studioTabs = page.locator(".studio-tabs");
+  await expect(studioTabs).toBeVisible();
+  await expect(studioTabs.locator('button[aria-current="page"]')).toHaveCSS("border-bottom-width", "2px");
   await page.getByRole("button", { name: "Idea inbox", exact: true }).click();
   await page
     .locator("#studio-idea-input")
