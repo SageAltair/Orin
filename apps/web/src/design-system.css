@@ -958,3 +958,45 @@
   outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: 4px;
 }
+
+
+/* Mobile platform polish: touch, keyboard, safe areas and reduced motion. */
+@media (hover: none) and (pointer: coarse) {
+  .orin-shell :where(button, [role="button"], a, summary) {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .orin-shell :where(.nav-link, .icon-button, .theme-toggle, .mobile-menu, .pin-button) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .orin-shell :where(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+    font-size: max(16px, 1em);
+  }
+}
+.orin-shell :where(button, [role="button"]) {
+  -webkit-user-select: none;
+  user-select: none;
+}
+.orin-shell :where(.main-column, .main-content, .writing-workspace, .writing-list) {
+  min-width: 0;
+}
+.orin-shell :where(.markdown-body, .chat-answer, .home-record, .home-project-card) {
+  overflow-wrap: anywhere;
+}
+@supports (min-height: 100dvh) {
+  .orin-shell, .orin-shell .main-column { min-height: 100dvh; }
+}
+@media (max-width: 680px) {
+  .orin-shell .main-content {
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orin-shell *, .orin-shell *::before, .orin-shell *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
