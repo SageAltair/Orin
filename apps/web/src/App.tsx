@@ -24,9 +24,7 @@ import {
   Command,
   Moon,
   Sun,
-  Copy,
   History,
-  Search,
   ListPlus,
   MoreHorizontal,
 } from "lucide-react";
