@@ -726,8 +726,16 @@ export default function App() {
     [preferences],
   );
   const commandInputRef = useRef<HTMLTextAreaElement>(null);
+  const workspaceSearchRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const captureShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setAskOpen(true);
+        setHistoryOpen(false);
+        setSearchOpen(true);
+        return;
+      }
       if (
         (event.ctrlKey || event.metaKey) &&
         event.shiftKey &&
@@ -1172,6 +1180,9 @@ export default function App() {
       window.clearTimeout(timer);
     };
   }, [searchText, searchOpen]);
+  useEffect(() => {
+    if (searchOpen && askOpen) workspaceSearchRef.current?.focus();
+  }, [searchOpen, askOpen]);
   useLayoutEffect(() => {
     const input = commandInputRef.current;
     if (!input) return;
@@ -2015,6 +2026,7 @@ export default function App() {
                   <ActionIcon name="search" size={16} />
                   <input
                     id="workspace-search"
+                    ref={workspaceSearchRef}
                     autoFocus
                     value={searchText}
                     onChange={(e) => setSearchText(e.target.value)}
