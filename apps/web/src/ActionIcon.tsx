@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 
-type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check" | "left" | "right" | "filters" | "edit" | "document" | "download" | "shield" | "book" | "idea" | "network" | "layers" | "insight";
+type ActionName = "add" | "close" | "settings" | "menu" | "pin" | "logout" | "copy" | "search" | "message" | "attachment" | "up" | "external" | "command" | "moon" | "sun" | "history" | "list-add" | "more" | "bell" | "check" | "left" | "right" | "filters" | "edit" | "document" | "download" | "shield" | "book" | "idea" | "network" | "layers" | "insight" | "down";
 type ActionIconProps = Omit<SVGProps<SVGSVGElement>, "name"> & {
   name: ActionName;
   size?: number;
@@ -25,6 +25,7 @@ export function ActionIcon({ name, size = 18, ...props }: ActionIconProps) {
     bell: <><path d="M18 8a6 6 0 0 0-12 0v5l-2 3h16l-2-3z"/><path d="M10 19a2 2 0 0 0 4 0"/></>,
     check: <path d="m5 12 4.5 4.5L19 7"/>,
     up: <><path d="m6 12 6-6 6 6M12 6v13"/></>,
+    down: <><path d="m6 12 6 6 6-6M12 5v13"/></>,
     external: <><path d="M5 19 19 5M9 5h10v10"/></>,
     command: <><path d="M9 7V5a2 2 0 1 0-2 2h10a2 2 0 1 0-2-2v14a2 2 0 1 0 2-2H7a2 2 0 1 0 2 2z"/></>,
     moon: <path d="M19.5 15.5A8.5 8.5 0 0 1 8.5 4.5 8.5 8.5 0 1 0 19.5 15.5z"/>,
