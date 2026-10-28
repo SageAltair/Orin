@@ -21,3 +21,10 @@ Run `powershell -File scripts/agent-local-readiness.ps1` from the repository to 
 5. Do not use developer `.env` files or production databases in agent environments. Never reset local volumes or run migrations on a non-isolated database.
 6. Keep cloud jobs isolated and do not run a local and cloud worker on the same branch simultaneously.
 7. Require explicit opt-in to agent costs, provider credentials, GitHub permissions, and execution schedule before enabling code-writing automation.
+## OpenAI Codex (manual, read-only review)
+
+`.github/workflows/codex-review.yml` uses the official `openai/codex-action@v1` on a disposable Linux runner, with read-only repository permissions and the built-in `:read-only` Codex permission profile. It is manual-only (`workflow_dispatch`) and cannot write source code or push branches. It consumes paid OpenAI API usage when run.
+
+Before running it, create a separate, budget-limited OpenAI Platform API key and save it in GitHub repository Settings > Secrets and variables > Actions > New repository secret, named `OPENAI_API_KEY`. Never paste the key in a chat, commit it, or add it to a tracked `.env`. Once the workflow is on the default branch, launch it from GitHub Actions > Orin Codex Review (Manual) > Run workflow. The action's output is visible in the run logs. Verify results before extending permissions. ChatGPT subscription access and API billing are separate.
+
+This workflow deliberately does not run on a schedule or make changes. A future code-writing workflow must be separately authorized and use isolated branches, limited task scope, tests, draft pull requests and explicit spending limits.
