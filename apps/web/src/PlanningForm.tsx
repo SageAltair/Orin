@@ -5,7 +5,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { X } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import { ApiError } from "./api";
 export function PlanningForm({
   title,
@@ -72,7 +72,7 @@ export function PlanningForm({
             disabled={busy}
             onClick={onClose}
           >
-            <X size={18} />
+            <ActionIcon name="close" size={18} />
           </button>
         </header>
         {error && (
