@@ -40,6 +40,7 @@ export function NotificationCenter({
   const actionInFlight = useRef(false);
   const centerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   const refresh = (): Promise<void> => {
     const generation = ++inboxGeneration.current;
     return request<Reminder[]>("/notifications")
@@ -86,7 +87,7 @@ export function NotificationCenter({
   }, []);
   const action = async (
     item: Reminder,
-    kind: "acknowledge" | "snooze",
+    kind: "acknowledge" | "snooze" | "read",
     minutes = 15,
   ) => {
     if (actionInFlight.current) return;
@@ -94,13 +95,17 @@ export function NotificationCenter({
     setPendingActionId(item.id);
     setError("");
     try {
-      await request(`/notifications/${item.id}/action`, {
-        method: "POST",
-        body: JSON.stringify({ action: kind, minutes }),
-      });
+      if (kind === "read") {
+        await request(`/notifications/${item.id}/read`, { method: "PATCH" });
+      } else {
+        await request(`/notifications/${item.id}/action`, {
+          method: "POST",
+          body: JSON.stringify({ action: kind, minutes }),
+        });
+      }
       await refresh();
     } catch {
-      setError("Could not update this reminder. Try again.");
+      setError(kind === "read" ? "This reminder could not be marked read." : "Could not update this reminder. Try again.");
     } finally {
       actionInFlight.current = false;
       setPendingActionId(null);
@@ -339,16 +344,8 @@ export function NotificationCenter({
                 <button
                   className="text-action"
                   aria-label={`Mark ${item.title} read`}
-                  onClick={async () => {
-                    try {
-                      await request(`/notifications/${item.id}/read`, {
-                        method: "PATCH",
-                      });
-                      await refresh();
-                    } catch {
-                      setError("This reminder could not be marked read.");
-                    }
-                  }}
+                  disabled={pendingActionId !== null}
+                  onClick={() => void action(item, "read")}
                 >
                   <ActionIcon name="check" size={14} /> Mark read
                 </button>
