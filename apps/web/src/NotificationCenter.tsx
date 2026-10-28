@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Bell, Check, X } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import {
   defaultNotificationPolicy,
   playReminderSound,
@@ -144,7 +144,7 @@ export function NotificationCenter({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <Bell size={18} />
+        <ActionIcon name="bell" size={18} />
         {unread > 0 && <span className="notification-dot" />}
       </button>
       {urgent && (
@@ -229,7 +229,7 @@ export function NotificationCenter({
               aria-label="Close reminders"
               onClick={() => setOpen(false)}
             >
-              <X size={16} />
+              <ActionIcon name="close" size={16} />
             </button>
           </header>
           {error && (
@@ -239,7 +239,7 @@ export function NotificationCenter({
           )}
           {items.length === 0 && !error && (
             <div className="notification-empty">
-              <Bell size={24} />
+              <ActionIcon name="bell" size={24} />
               <p>No reminders yet.</p>
               <small>
                 Calendar reminders arrive here, including while you're away.
@@ -298,7 +298,7 @@ export function NotificationCenter({
                     }
                   }}
                 >
-                  <Check size={14} /> Mark read
+                  <ActionIcon name="check" size={14} /> Mark read
                 </button>
               )}
             </article>
