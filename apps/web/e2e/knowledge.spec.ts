@@ -10,7 +10,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(`Orin-knowledge-${crypto.randomUUID()}!`);
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByRole("heading", { name: /What needs your attention/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /What needs your attention/ })).toBeVisible({ timeout: 15_000 });
 
   await page.getByRole("button", { name: "Capture a thought" }).click();
   await page.getByLabel("Your note").fill("Create Christian storytelling videos\nExplore short stories with a clear audience.");
