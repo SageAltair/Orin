@@ -24,10 +24,7 @@ import {
   Command,
   Moon,
   Sun,
-  LogOut,
   Copy,
-  MessageCircle,
-  Paperclip,
   History,
   Search,
   ListPlus,
@@ -154,7 +151,7 @@ export function MarkdownResponse({ value }: { value: string }) {
           className="copy-button"
           onClick={() => copy(value)}
         >
-          <Copy size={14} />
+          <ActionIcon name="copy" size={14} />
           {status === "Copied" ? "Copied" : "Copy response"}
         </button>
         {status && status !== "Copied" && <span role="status">{status}</span>}
@@ -197,7 +194,7 @@ export function MarkdownResponse({ value }: { value: string }) {
                     onClick={() => copy(String(children).replace(/\n$/, ""))}
                     aria-label="Copy code"
                   >
-                    <Copy size={13} />
+                    <ActionIcon name="copy" size={13} />
                   </button>
                   <code className={className} {...props}>
                     {children}
@@ -1360,7 +1357,7 @@ export default function App() {
                 logout().finally(() => setUser(null));
               }}
             >
-              <LogOut size={15} />
+              <ActionIcon name="logout" size={15} />
             </button>
           </div>
         </div>
@@ -1403,7 +1400,7 @@ export default function App() {
               className="topbar-ask"
               onClick={() => setAskOpen(true)}
             >
-              <MessageCircle size={15} />
+              <ActionIcon name="message" size={15} />
               Ask Orin
             </button>
             <NotificationCenter onOpen={(category,id) => {if(category === "tasks" && id) openTask(id); else if(category === "projects" && id) openProject(id); else setPage(category === "calendar" || category === "routines" ? "calendar" : category === "opportunities" || category === "risks" ? "opportunities" : category === "writing" ? "memories" : "settings");}} />
@@ -1494,7 +1491,7 @@ export default function App() {
                   className="primary-button home-ask"
                   onClick={() => setAskOpen(true)}
                 >
-                  <MessageCircle size={16} /> Ask Orin to plan or continue work
+                  <ActionIcon name="message" size={16} /> Ask Orin to plan or continue work
                 </button>
               </div>
               <div className="home-dashboard">
@@ -1600,7 +1597,7 @@ export default function App() {
                         className="text-action"
                         onClick={() => setAskOpen(true)}
                       >
-                        <MessageCircle size={14} /> Start with Ask Orin
+                        <ActionIcon name="message" size={14} /> Start with Ask Orin
                       </button>
                     </div>
                   )}
@@ -1763,7 +1760,7 @@ export default function App() {
         onClick={() => setAskOpen(true)}
         aria-label="Ask Orin"
       >
-        <MessageCircle size={17} />
+        <ActionIcon name="message" size={17} />
         <span>Ask Orin</span>
       </button>
       {knowledgeCaptureOpen && (
@@ -1851,7 +1848,7 @@ export default function App() {
                     setHistoryOpen(false);
                   }}
                 >
-                  <Search size={17} />
+                  <ActionIcon name="search" size={17} />
                 </button>
                 <button
                   type="button"
@@ -2012,7 +2009,7 @@ export default function App() {
                   Search previous work
                 </label>
                 <div className="search-input-row">
-                  <Search size={16} />
+                  <ActionIcon name="search" size={16} />
                   <input
                     id="workspace-search"
                     autoFocus
@@ -2322,7 +2319,7 @@ export default function App() {
                 htmlFor="attachment-input"
                 title="Add attachment"
               >
-                <Paperclip size={17} />
+                <ActionIcon name="attachment" size={17} />
                 <span className="sr-only">Add attachment</span>
               </label>
               <label className="sr-only" htmlFor="ask-input">
