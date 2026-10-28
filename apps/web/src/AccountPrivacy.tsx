@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Download, ShieldCheck } from "lucide-react";
+import { ActionIcon } from "./ActionIcon";
 import { ApiError, request, requestBlob } from "./api";
 
 export function AccountPrivacy({ userId }: { userId: string }) {
@@ -57,7 +57,7 @@ export function AccountPrivacy({ userId }: { userId: string }) {
           <span className="eyebrow">PRIVACY</span>
           <h2>Your work belongs to you.</h2>
         </div>
-        <ShieldCheck size={20} />
+        <ActionIcon name="shield" size={20} />
       </div>
       <p>
         Export your notes, projects, tasks, histories and attachments. Password
@@ -74,7 +74,7 @@ export function AccountPrivacy({ userId }: { userId: string }) {
         disabled={busy}
         onClick={() => void download()}
       >
-        <Download size={15} />{" "}
+        <ActionIcon name="download" size={15} />{" "}
         {busy && !deleting ? "Preparing export…" : "Export my account"}
       </button>
       <details className="account-danger">
