@@ -918,3 +918,82 @@ test("Writing provides collapsible navigation, note pane controls, and full scre
   await expect(page.locator(".sidebar .nav-link-label").first()).toBeHidden();
   await expect(page.locator(".sidebar .workspace-item-label").first()).toBeHidden();
 });
+test("switching projects ignores stale responses and keeps unsaved objective edits", async ({ page }) => {
+  await mockApi(page);
+  await page.goto("/");
+  await page.getByLabel("Email").fill("morgan@example.com");
+  await page.locator('input[type="password"]').fill("a-secure-test-password");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("navigation").getByRole("button", { name: "Projects" }).click();
+
+  await page.getByPlaceholder("Create a project").fill("Project Alpha");
+  await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByRole("heading", { name: "Project Alpha" })).toBeVisible();
+  await page.getByPlaceholder("Add a task to this project").fill("Alpha task");
+  await page.getByRole("button", { name: "Add task" }).click();
+  await expect(page.getByRole("button", { name: "Alpha task" })).toBeVisible();
+
+  await page.getByPlaceholder("Create a project").fill("Project Beta");
+  await page.getByRole("button", { name: "Add project" }).click();
+  await expect(page.getByRole("heading", { name: "Project Beta" })).toBeVisible();
+  await page.getByPlaceholder("Add a task to this project").fill("Beta task");
+  await page.getByRole("button", { name: "Add task" }).click();
+  await expect(page.getByRole("button", { name: /^Beta task\b/ })).toBeVisible();
+
+  const objective = page.getByRole("textbox", { name: "Objective", exact: true });
+  await objective.fill("A draft that is not yet saved");
+  await page.getByPlaceholder("Add a task to this project").fill("Another Beta task");
+  await page.getByRole("button", { name: "Add task" }).click();
+  await expect(page.getByRole("button", { name: "Another Beta task" })).toBeVisible();
+  await expect(objective).toHaveValue("A draft that is not yet saved");
+
+  let unblockAlpha!: () => void;
+  const alphaGate = new Promise<void>(resolve => { unblockAlpha = resolve; });
+  let alphaStarted!: () => void;
+  const alphaRequest = new Promise<void>(resolve => { alphaStarted = resolve; });
+  await page.route("**/api/v1/projects/project-1/context", async route => {
+    alphaStarted();
+    await alphaGate;
+    await route.fallback();
+  });
+
+  const projectPicker = page.getByRole("combobox", { name: "Select project" });
+  await projectPicker.selectOption("project-1");
+  await alphaRequest;
+  await projectPicker.selectOption("project-2");
+  await expect(page.getByRole("button", { name: /^Beta task\b/ })).toBeVisible();
+  const oldResponse = page.waitForResponse(response => response.url().includes("/projects/project-1/context"));
+  unblockAlpha();
+  await oldResponse;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByRole("heading", { name: "Project Beta" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Beta task\b/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Alpha task" })).toHaveCount(0);
+
+  // Switching projects closes task details from the previous project.
+  await page.getByRole("button", { name: /^Beta task\b/ }).click();
+  await expect(page.getByRole("dialog", { name: "Task details" })).toBeVisible();
+  await projectPicker.selectOption("project-1");
+  await expect(page.getByRole("dialog", { name: "Task details" })).toHaveCount(0);
+  // A delayed task update must not replace the next project's progress or task list.
+  await expect(page.getByRole("button", { name: "Alpha task" })).toBeVisible();
+  let unblockPatch!: () => void;
+  const patchGate = new Promise<void>(resolve => { unblockPatch = resolve; });
+  let patchStarted!: () => void;
+  const patchRequest = new Promise<void>(resolve => { patchStarted = resolve; });
+  await page.route("**/api/v1/tasks/task-1", async route => {
+    patchStarted();
+    await patchGate;
+    await route.fallback();
+  });
+  await page.getByRole("combobox", { name: "Status for Alpha task" }).selectOption("done");
+  await patchRequest;
+  await projectPicker.selectOption("project-2");
+  await expect(page.getByText("0 of 2 tasks complete (0%)")).toBeVisible();
+  const patchCompleted = page.waitForResponse(response => response.url().includes("/tasks/task-1") && response.request().method() === "PATCH");
+  unblockPatch();
+  await patchCompleted;
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  await expect(page.getByText("0 of 2 tasks complete (0%)")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Beta task\b/ })).toBeVisible();
+});

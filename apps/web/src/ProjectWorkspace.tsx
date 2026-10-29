@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createProjectLoadGate } from "./projectLoadGate";
 import { ApiError, request, type Milestone, type Task } from "./api";
 import "./ProjectWorkspace.css";
 
@@ -75,6 +76,9 @@ function TaskPlanningFields({ task, onSave }: { task: Task; onSave: (changes: Ta
 
 export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { projects: Project[]; onChanged: (project: Project) => void; initialProjectId?: string | null }) {
   const [selected, setSelected] = useState(""); const [context, setContext] = useState<Context | null>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const projectLoadGate = useRef(createProjectLoadGate());
   const [objective, setObjective] = useState(""); const [status, setStatus] = useState("active");
   const [projectPriority, setProjectPriority] = useState<Project["priority"]>("normal"); const [projectTargetDate, setProjectTargetDate] = useState("");
   const [name, setName] = useState(""); const [projectObjectiveDraft, setProjectObjectiveDraft] = useState(""); const [memoryTitle, setMemoryTitle] = useState(""); const [memoryContent, setMemoryContent] = useState(""); const [memoryType, setMemoryType] = useState("project");
@@ -88,8 +92,42 @@ export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { pr
   const project = projects.find(item => item.id === selected);
   const visibleTasks = sortProjectTasks(filterProjectTasks(tasks, taskSearch, taskFilter), taskSort);
   const taskStatuses: Array<{ value: Task["status"]; label: string }> = [{ value: "todo", label: "To do" }, { value: "in_progress", label: "In progress" }, { value: "blocked", label: "Blocked" }, { value: "done", label: "Done" }, { value: "cancelled", label: "Cancelled" }];
-  const refresh = async (id: string) => { setBusy(true); setError(""); try { const [data, memories, sessions, projectTasks, projectMilestones] = await Promise.all([request<Context>(`/projects/${id}/context`), request<Memory[]>(`/memories?project_id=${id}`), request<Focus[]>("/focus-sessions"), request<Task[]>(`/tasks?project_id=${id}&limit=100`), request<Milestone[]>(`/projects/${id}/milestones`)]); setContext({ ...data, knowledge: memories }); setTasks(projectTasks); setMilestones(projectMilestones); setFocus(sessions.find(item => item.status === "active" || item.status === "paused") ?? null); const current = projects.find(item => item.id === id); setObjective(current?.objective ?? ""); setStatus(current?.status ?? "active"); setFocusObjective(current?.objective ?? ""); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
-  useEffect(() => { if (selected) void refresh(selected); }, [selected]);
+  const refresh = async (id: string) => {
+    if (selectedRef.current !== id) return;
+    const ticket = projectLoadGate.current.begin();
+    setBusy(true);
+    setError("");
+    try {
+      const [data, memories, sessions, projectTasks, projectMilestones] = await Promise.all([
+        request<Context>(`/projects/${id}/context`),
+        request<Memory[]>(`/memories?project_id=${id}`),
+        request<Focus[]>("/focus-sessions"),
+        request<Task[]>(`/tasks?project_id=${id}&limit=100`),
+        request<Milestone[]>(`/projects/${id}/milestones`),
+      ]);
+      if (!projectLoadGate.current.isCurrent(ticket) || selectedRef.current !== id) return;
+      setContext({ ...data, knowledge: memories });
+      setTasks(projectTasks);
+      setMilestones(projectMilestones);
+      setFocus(sessions.find(item => item.status === "active" || item.status === "paused") ?? null);
+    } catch (cause) {
+      if (projectLoadGate.current.isCurrent(ticket) && selectedRef.current === id) setError(errorText(cause));
+    } finally {
+      if (projectLoadGate.current.isCurrent(ticket) && selectedRef.current === id) setBusy(false);
+    }
+  };
+  useEffect(() => {
+    projectLoadGate.current.invalidate();
+    setContext(null);
+    setTasks([]);
+    setMilestones([]);
+    setSelectedTask(null);
+    setDependencies([]);
+    setFocus(null);
+    if (selected) void refresh(selected);
+    else setBusy(false);
+    return () => { projectLoadGate.current.invalidate(); };
+  }, [selected]);
   useEffect(() => {
     if (!selectedTask) { setDependencies([]); setDependencyChoice(""); return; }
     let active = true;
@@ -101,11 +139,39 @@ export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { pr
   useEffect(() => { if (initialProjectId && projects.some(item => item.id === initialProjectId)) setSelected(initialProjectId); }, [initialProjectId, projects]);
   const createProject = async (event: FormEvent) => { event.preventDefault(); if (!name.trim()) return; setBusy(true); setError(""); try { const created = await request<Project>("/projects", { method: "POST", body: JSON.stringify({ name: name.trim(), objective: projectObjectiveDraft.trim() || null }) }); onChanged(created); setName(""); setProjectObjectiveDraft(""); setSelected(created.id); setMessage("Project created."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
   useEffect(() => { setProjectName(project?.name ?? ""); setProjectDescription(project?.description ?? ""); setProjectPriority(project?.priority ?? "normal"); setProjectTargetDate(project?.target_date ?? ""); }, [project?.id, project?.name, project?.description, project?.priority, project?.target_date]);
+  useEffect(() => { setObjective(project?.objective ?? ""); setStatus(project?.status ?? "active"); setFocusObjective(project?.objective ?? ""); }, [project?.id, project?.objective, project?.status]);
   const saveProject = async () => { if (!project) return; setBusy(true); setError(""); try { const updated = await request<Project>(`/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ name: projectName.trim(), description: projectDescription.trim() || null, objective, status, priority: projectPriority, target_date: projectTargetDate || null }) }); onChanged(updated); await refresh(updated.id); setMessage("Project updated."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
   const createTask = async (event: FormEvent) => { event.preventDefault(); if (!project || !taskTitle.trim()) return; setBusy(true); setError(""); try { await request<Task>("/tasks", { method: "POST", body: JSON.stringify({ title: taskTitle.trim(), project_id: project.id }) }); setTaskTitle(""); await refresh(project.id); setMessage("Task added."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
   const createMilestone = async (event: FormEvent) => { event.preventDefault(); if (!project || !milestoneTitle.trim()) return; setBusy(true); setError(""); try { await request<Milestone>(`/projects/${project.id}/milestones`, { method: "POST", body: JSON.stringify({ title: milestoneTitle.trim(), description: milestoneDescription.trim() || null, completion_criteria: milestoneCriteria.trim() || null, target_date: milestoneDate || null }) }); setMilestoneTitle(""); setMilestoneDate(""); setMilestoneDescription(""); setMilestoneCriteria(""); await refresh(project.id); setMessage("Milestone added."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
-  const updateMilestone = async (milestone: Milestone, changes: Partial<Milestone>) => { try { const updated = await request<Milestone>(`/milestones/${milestone.id}`, { method: "PATCH", body: JSON.stringify(changes) }); setMilestones(current => current.map(item => item.id === updated.id ? updated : item)); setMessage("Milestone updated."); } catch (cause) { setError(errorText(cause)); } };
-  const updateTask = async (task: Task, changes: Partial<Task>) => { if (!project) return; setError(""); try { const updated = await request<Task>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(changes) }); const moved = "project_id" in changes && updated.project_id !== project.id; setTasks(current => moved ? current.filter(item => item.id !== updated.id) : current.map(item => item.id === updated.id ? updated : item)); setSelectedTask(current => current?.id === updated.id ? (moved ? null : updated) : current); const freshContext = await request<Context>(`/projects/${project.id}/context`); setContext(current => current ? { ...freshContext, knowledge: current.knowledge } : current); if (moved) setMessage("Task moved to another project."); } catch (cause) { setError(errorText(cause)); } };
+  const updateMilestone = async (milestone: Milestone, changes: Partial<Milestone>) => {
+    try {
+      const updated = await request<Milestone>(`/milestones/${milestone.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+      if (selectedRef.current !== milestone.project_id) return;
+      setMilestones(current => current.map(item => item.id === updated.id ? updated : item));
+      setMessage("Milestone updated.");
+    } catch (cause) {
+      if (selectedRef.current === milestone.project_id) setError(errorText(cause));
+    }
+  };
+  const updateTask = async (task: Task, changes: Partial<Task>) => {
+    if (!project) return;
+    const projectId = project.id;
+    setError("");
+    try {
+      const updated = await request<Task>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+      // The user may have switched projects while the task update was in flight.
+      if (selectedRef.current !== projectId) return;
+      const moved = "project_id" in changes && updated.project_id !== projectId;
+      setTasks(current => moved ? current.filter(item => item.id !== updated.id) : current.map(item => item.id === updated.id ? updated : item));
+      setSelectedTask(current => current?.id === updated.id ? (moved ? null : updated) : current);
+      const freshContext = await request<Context>(`/projects/${projectId}/context`);
+      if (selectedRef.current !== projectId) return;
+      setContext(current => current ? { ...freshContext, knowledge: current.knowledge } : current);
+      if (moved) setMessage("Task moved to another project.");
+    } catch (cause) {
+      if (selectedRef.current === projectId) setError(errorText(cause));
+    }
+  };
   const addDependency = async (event: FormEvent) => { event.preventDefault(); if (!selectedTask || !dependencyChoice) return; setError(""); try { const prerequisite = await request<Task>(`/tasks/${selectedTask.id}/dependencies`, { method: "POST", body: JSON.stringify({ depends_on_task_id: dependencyChoice }) }); setDependencies(current => current.some(item => item.id === prerequisite.id) ? current : [...current, prerequisite]); setDependencyChoice(""); } catch (cause) { setError(errorText(cause)); } };
   const removeDependency = async (prerequisite: Task) => { if (!selectedTask) return; setError(""); try { await request<void>(`/tasks/${selectedTask.id}/dependencies/${prerequisite.id}`, { method: "DELETE" }); setDependencies(current => current.filter(item => item.id !== prerequisite.id)); } catch (cause) { setError(errorText(cause)); } };
   const saveMemory = async (event: FormEvent) => { event.preventDefault(); if (!project || !memoryTitle.trim() || !memoryContent.trim()) return; setBusy(true); setError(""); try { await request<Memory>("/memories", { method: "POST", body: JSON.stringify({ project_id: project.id, memory_type: memoryType, title: memoryTitle.trim(), content: memoryContent.trim(), source: "user" }) }); setMemoryTitle(""); setMemoryContent(""); await refresh(project.id); setMessage("Project knowledge saved."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
