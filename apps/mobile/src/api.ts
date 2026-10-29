@@ -225,8 +225,11 @@ export async function request<T>(
 
 export const login = async (email: string, password: string) => {
   const revision = beginAuthTransition();
+  // An unsuccessful account switch must not silently restore the old cookie
+  // on the next launch. Only a verified explicit login clears this marker.
+  await SecureStore.setItemAsync(LOGOUT_PENDING_KEY, "1");
   // A new account must never inherit the previous account's token or workspace.
-  await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
+  await Promise.all([persistToken(null, revision), setActiveWorkspace(null, revision)]);
   const result = await request<{ access_token: string }>(
     "/auth/login",
     {
@@ -250,8 +253,9 @@ export const register = async (
   displayName: string,
 ) => {
   const revision = beginAuthTransition();
+  await SecureStore.setItemAsync(LOGOUT_PENDING_KEY, "1");
   // Registration is also an account switch: never attach a prior identity.
-  await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
+  await Promise.all([persistToken(null, revision), setActiveWorkspace(null, revision)]);
   await request<User>(
     "/auth/register",
     {
@@ -311,7 +315,7 @@ export const logout = async () => {
   } finally {
     // An older logout must not clear credentials from a newer explicit login.
     if (revision === authRevision) {
-      await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
+      await Promise.all([persistToken(null, revision), setActiveWorkspace(null, revision)]);
       if (revoked) await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
     }
   }
