@@ -27,17 +27,10 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], baseURL: "http://127.0.0.1:4174" },
     },
   ],
-  webServer: [
-    ...(process.env.ORIN_LIVE_E2E === "true"
-      ? [
-          {
-            command: "npm run dev -- --host 127.0.0.1 --port 5273 --strictPort",
-            url: "http://127.0.0.1:5273",
-            reuseExistingServer: !process.env.CI,
-            timeout: 30000,
-          },
-        ]
-      : []),
+  // Live isolated suites already use their own Docker web/API. Do not start
+  // unrelated local Vite servers, particularly the canonical application.
+  webServer: process.env.ORIN_ISOLATED_E2E === "true" &&
+    (process.env.ORIN_LIVE_E2E === "true" || process.env.ORIN_WORKER_E2E === "true") ? [] : [
     {
       command: "npm run dev -- --host 127.0.0.1 --port 4173 --strictPort",
       url: "http://127.0.0.1:4173",

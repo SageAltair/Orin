@@ -3,11 +3,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { ISOLATED_API_URL, ISOLATED_WEB_URL, isolatedLiveEnabled, requireIsolatedApi } from "./isolated-runtime";
 
 test.use({ trace: "off" });
 
 test("real API approval releases a signed job to a live worker and reports its result", async ({ page }) => {
-  test.skip(process.env.ORIN_WORKER_E2E !== "true", "set ORIN_WORKER_E2E=true with an isolated API running to execute a real worker flow");
+  test.skip(!isolatedLiveEnabled("ORIN_WORKER_E2E"), "Requires ORIN_ISOLATED_E2E=true and ORIN_WORKER_E2E=true with disposable stack");
+  await requireIsolatedApi(page.request);
   test.setTimeout(120_000);
   const root = await mkdtemp(join(tmpdir(), "orin-worker-e2e-"));
   let worker: ChildProcess | undefined;
@@ -15,7 +17,7 @@ test("real API approval releases a signed job to a live worker and reports its r
   const email = `orin-worker-e2e-${Date.now()}@example.com`;
   const password = "Public-Docker-Worker-Test-Password-2026!";
   try {
-    await page.goto("http://localhost:5273");
+    await page.goto(ISOLATED_WEB_URL);
     await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
     await page.getByLabel("Your name").fill("Worker integration test");
     await page.getByLabel("Email").fill(email);
@@ -37,7 +39,7 @@ test("real API approval releases a signed job to a live worker and reports its r
       env: {
         ...process.env,
         PYTHONPATH: join(process.cwd(), "..", "..", "apps", "worker", "src"),
-        ORIN_API_URL: `http://localhost:${process.env.API_PORT ?? "8100"}`,
+        ORIN_API_URL: ISOLATED_API_URL,
         ORIN_DEVICE_ID: deviceId!,
         ORIN_WORKER_TOKEN: token,
         ORIN_ALLOWED_ROOTS: root,

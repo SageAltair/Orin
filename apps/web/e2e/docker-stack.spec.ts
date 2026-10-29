@@ -1,9 +1,17 @@
 import { expect, test } from "@playwright/test";
 import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { ISOLATED_WEB_URL, requireIsolatedApi } from "./isolated-runtime";
 
 test("Docker web, authentication, manual tasks, and live AI command flow", async ({ page }) => {
-  test.skip(process.env.ORIN_DOCKER_E2E !== "true", "set ORIN_DOCKER_E2E=true to exercise the running Docker stack and configured AI provider");
+  test.skip(
+    process.env.ORIN_DOCKER_E2E !== "true" ||
+      process.env.ORIN_ISOLATED_E2E !== "true" ||
+      process.env.ORIN_ALLOW_SOURCE_HMR_PROBE !== "true" ||
+      process.env.ORIN_ALLOW_LIVE_AI_E2E !== "true",
+    "Requires disposable stack plus explicit source-HMR and live-AI authorization",
+  );
+  await requireIsolatedApi(page.request);
   test.setTimeout(180_000);
 
   const email = `orin-docker-e2e-${Date.now()}@example.com`;
@@ -14,7 +22,7 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
       try { commandResults.push(await response.json() as { intent?: string; status: string; result: unknown }); } catch { /* response may be an error */ }
     }
   });
-  await page.goto("http://localhost:5273");
+  await page.goto(ISOLATED_WEB_URL);
   const indexPath = resolve(process.cwd(), "index.html");
   const originalIndex = await readFile(indexPath, "utf8");
   try {

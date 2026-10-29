@@ -1,10 +1,14 @@
 import { expect, test } from "@playwright/test";
-test.beforeEach(() => { test.skip(process.env.ORIN_LIVE_E2E !== "true", "Set ORIN_LIVE_E2E=true with an isolated API running to verify live writing workflows"); });
+import { ISOLATED_WEB_URL, isolatedLiveEnabled, requireIsolatedApi } from "./isolated-runtime";
+test.beforeEach(async ({ request }) => {
+  test.skip(!isolatedLiveEnabled("ORIN_LIVE_E2E"), "Requires ORIN_ISOLATED_E2E=true and ORIN_LIVE_E2E=true with disposable stack");
+  await requireIsolatedApi(request);
+});
 
 test("personal knowledge capture, editing, links, search, and reload persistence", async ({ page }) => {
   test.setTimeout(120_000);
   const email = `orin-knowledge-${Date.now()}@example.com`;
-  await page.goto("http://localhost:5273");
+  await page.goto(ISOLATED_WEB_URL);
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Knowledge workflow test");
   await page.getByLabel("Email").fill(email);
@@ -134,7 +138,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
 
 test("Writing adapts its navigation and editor across desktop, tablet, and narrow phone viewports", async ({ page }) => {
   test.setTimeout(60_000);
-  await page.goto("http://localhost:5273");
+  await page.goto(ISOLATED_WEB_URL);
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Writing responsive check");
   await page.getByLabel("Email").fill(`orin-writing-layout-${Date.now()}@example.com`);
