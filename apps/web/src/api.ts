@@ -86,6 +86,8 @@ export async function requestBlob(path: string): Promise<Blob> {
 export async function login(email: string, password: string): Promise<User> {
   const result = await request<{ access_token: string }>("/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }, false);
   accessToken = result.access_token;
+  // Never reuse a previous account's workspace scope after signing in.
+  activeWorkspaceId = null;
   return request<User>("/auth/me");
 }
 export async function register(email: string, password: string, display_name: string): Promise<User> {
@@ -93,4 +95,13 @@ export async function register(email: string, password: string, display_name: st
   return login(email, password);
 }
 export async function restoreSession(): Promise<User | null> { return await refresh() === "refreshed" ? request<User>("/auth/me") : null; }
-export async function logout(): Promise<void> { try { await request<void>("/auth/logout", { method: "POST" }, false); } finally { accessToken = null; } }
+export async function logout(): Promise<void> {
+  try {
+    // An expired access token may still have a valid refresh cookie. Refresh
+    // once so the server can revoke the session instead of silently leaving it active.
+    await request<void>("/auth/logout", { method: "POST" });
+  } finally {
+    accessToken = null;
+    activeWorkspaceId = null;
+  }
+}
