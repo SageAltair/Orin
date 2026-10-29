@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { getLocalReminderEnabled, reconcileLocalReminderAccount, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
+import { getLocalReminderEnabled, reconcileLocalReminderAccount, reminderOwnerForSession, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
 import type { NotificationPolicy, Reminder, Task } from "./types";
 
 vi.mock("react-native", () => ({ Platform: { OS: "android", Version: 35 } }));
@@ -59,6 +59,11 @@ beforeEach(() => {
   });
 });
 describe("native reminder account isolation and consent", () => {
+  it("preserves opted-in schedules on offline unauthenticated boot but reconciles authenticated sessions", () => {
+    expect(reminderOwnerForSession(true, "alice")).toBeUndefined();
+    expect(reminderOwnerForSession(false, null)).toBeUndefined();
+    expect(reminderOwnerForSession(false, "alice")).toBe("alice");
+  });
   it("does not request permission or schedule before explicit opt in", async () => {
     await syncLocalReminders("alice", [reminder], policy);
     expect(Notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
