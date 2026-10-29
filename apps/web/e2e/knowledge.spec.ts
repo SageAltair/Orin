@@ -75,7 +75,8 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
   await expect(page.locator(".writing-details")).toHaveAttribute("open", "");
 
-  await page.locator(".writing-tools > summary").click();
+  await page.getByRole("button", { name: "Writing tools" }).click();
+  await expect(page.locator(".writing-tools-popup")).toHaveAttribute("open", "");
   await page.getByRole("button", { name: "Weekly report" }).click();
   await expect(page.locator(".writing-tool-result").filter({ hasText: "Weekly report" })).toBeVisible();
 

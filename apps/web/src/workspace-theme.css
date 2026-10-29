@@ -507,7 +507,9 @@
 .orin-shell .writing-document-icon{display:none}
 .orin-shell .writing-document-copy strong{font-family:Georgia,"Times New Roman",serif;font-size:14px!important;font-weight:600!important}
 .orin-shell .writing-document-copy>span{font-size:12px!important;-webkit-line-clamp:1!important}
-.orin-shell .writing-tools-popup{display:none!important}
+.orin-shell .writing-tools-popup{display:none}
+.orin-shell .writing-tools-popup[open]{display:block}
+.orin-shell .writing-tools-popup>summary{display:block;padding-bottom:8px;border-bottom:1px solid var(--line);font-weight:600}
 .orin-shell .writing-list-resizer{grid-column:auto}
 .orin-shell:has(.writing-studio) .writing-editor{min-width:0;overflow:auto;background:var(--bg)}
 .orin-shell:has(.writing-studio) .writing-toolbar-top{position:sticky;top:0;z-index:10;display:flex;min-height:58px;gap:10px;padding:0 22px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--surface) 96%,transparent);backdrop-filter:blur(12px)}
@@ -700,3 +702,9 @@
 .writing-export-page>.writing-export-title{margin:0 0 1.05em;font:700 46px/1.08 Georgia,"Times New Roman",serif;letter-spacing:-.035em;color:inherit}
 .writing-export-staging{position:fixed!important;z-index:-1!important;top:0!important;left:-20000px!important;visibility:visible!important;pointer-events:none!important}
 @media(max-width:760px){.orin-shell:has(.writing-studio) .writing-formatbar select[aria-label="Font family"]{width:122px;max-width:122px}.orin-shell .writing-manuscript-stats span+span:before{margin-right:10px}.orin-shell .writing-export-options{grid-template-columns:1fr}}
+
+/* Preserve global navigation on narrow Writing screens; desktop keeps the focused editor chrome. */
+@media(max-width:760px){
+  .orin-shell:has(.writing-studio)>.main-column>.topbar{display:flex;height:54px;padding-inline:12px}
+  .orin-shell:has(.writing-studio) .main-content{height:calc(100dvh - 54px)}
+}

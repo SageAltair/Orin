@@ -210,6 +210,7 @@ export function KnowledgeWorkspace({
   const [fullScreen, setFullScreen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 1480);
   const [inspectorTab, setInspectorTab] = useState<"review" | "design" | "details">("review");
   const [liveReview, setLiveReview] = useState(() => typeof window === "undefined" || window.localStorage.getItem("orin.writing-live-review.v1") !== "false");
@@ -1297,7 +1298,7 @@ export function KnowledgeWorkspace({
             </p>
           )}
         </nav>}
-        <details id="writing-tools-popover" className="writing-tools writing-tools-popup">
+        <details id="writing-tools-popover" className="writing-tools writing-tools-popup" open={toolsOpen} onToggle={event => setToolsOpen(event.currentTarget.open)}>
           <summary>
             Writing tools{" "}
             <span>
@@ -1615,6 +1616,7 @@ export function KnowledgeWorkspace({
                     : "✓ " + (message || "Saved")}
               </span>
               <button className="writing-quiet-action" type="button" aria-pressed={focusMode} onClick={() => setFocusMode((value) => !value)}>{focusMode ? "Exit focus" : "Focus"}</button>
+              <button className="writing-inspector-toggle" type="button" aria-label="Writing tools" title="Writing tools" aria-expanded={toolsOpen} aria-controls="writing-tools-popover" onClick={() => setToolsOpen(value => !value)}><BookOpen size={17}/></button>
               <button className="writing-inspector-toggle" type="button" aria-label={inspectorOpen ? "Close inspector" : "Open inspector"} aria-pressed={inspectorOpen} onClick={() => setInspectorOpen(value => !value)}><FileSliders size={17}/></button>
               <details className="writing-more-menu"><summary role="button" aria-label="Manage document"><MoreVertical size={19}/></summary><div className="writing-document-menu">
                 <button type="button" onClick={event => { (event.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open"); setInspectorTab("details"); setInspectorOpen(true); }}><FileSliders size={15}/>Details</button>
