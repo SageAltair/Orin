@@ -1,0 +1,27 @@
+import { useEffect, useState, type FormEvent } from "react";
+import { Bot, Play, Workflow } from "lucide-react";
+import { request, type Project } from "./api";
+
+type Coordination = { objective: string; project: { id: string; name: string } | null; specialists: Array<{ specialty: string; name: string; mandate: string; observations: string[] }>; unknowns: string[]; execution_boundary: string };
+type Automation = { id: string; title: string; objective: string; cadence: string; enabled: boolean; next_run_at: string | null; last_status: string };
+
+export function SpecialistAutomation({ projects }: { projects: Project[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const [objective, setObjective] = useState(""); const [projectId, setProjectId] = useState("");
+  const [specialties, setSpecialties] = useState(["planning", "risk"]); const [result, setResult] = useState<Coordination | null>(null);
+  const [automations, setAutomations] = useState<Automation[]>([]); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
+  const refresh = () => request<Automation[]>("/intelligence/automations").then(rows => setAutomations(Array.isArray(rows) ? rows : [])).catch(() => setAutomations([]));
+  useEffect(() => { void refresh(); }, []);
+  const coordinate = async (event: FormEvent) => { event.preventDefault(); setBusy(true); setMessage(""); try { setResult(await request<Coordination>("/intelligence/specialists/coordinate", { method: "POST", body: JSON.stringify({ objective: objective.trim(), project_id: projectId || null, specialties }) })); } catch { setMessage("The specialist review could not be prepared."); } finally { setBusy(false); } };
+  const weeklyReview = async () => { setBusy(true); try { await request("/intelligence/automations", { method: "POST", body: JSON.stringify({ title: "Weekly workspace review", objective: "Review recent activity without changing workspace data", cadence: "weekly", plan: { title: "Weekly workspace review", steps: [{ id: "activity", action: "get_activity", inputs: {} }] } }) }); await refresh(); setMessage("Weekly review saved disabled. Enable it when ready."); } catch { setMessage("The automation could not be saved."); } finally { setBusy(false); } };
+  const toggle = async (item: Automation) => { await request(`/intelligence/automations/${item.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !item.enabled }) }); await refresh(); };
+  const run = async (item: Automation) => { setBusy(true); try { await request(`/intelligence/automations/${item.id}/run`, { method: "POST" }); await refresh(); setMessage(`${item.title} finished. Review its action-plan history for verified outcomes.`); } catch { setMessage("The automation run could not be completed."); } finally { setBusy(false); } };
+  return <section className="specialist-automation" aria-label="Specialists and automation"><div className="section-heading"><div><span className="eyebrow">COORDINATED INTELLIGENCE</span><h2>Specialists and automation</h2><p>One Orin experience coordinates focused perspectives over the same authorized evidence.</p></div><button type="button" className="secondary-button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? "Close coordinator" : "Open coordinator"}</button></div>
+    {expanded && <>
+    <form className="specialist-form" onSubmit={coordinate}><label>Objective<input required minLength={3} value={objective} onChange={event => setObjective(event.target.value)} placeholder="Plan a safe product launch" /></label><label>Project<select value={projectId} onChange={event => setProjectId(event.target.value)}><option value="">General workspace</option>{projects.map(project => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><fieldset><legend>Perspectives</legend>{["planning", "research", "writing", "development", "risk"].map(item => <label key={item}><input type="checkbox" checked={specialties.includes(item)} onChange={event => setSpecialties(current => event.target.checked ? [...current, item] : current.filter(value => value !== item))} />{item}</label>)}</fieldset><button className="primary-button" disabled={busy || specialties.length === 0}><Bot size={15} /> Coordinate</button></form>
+    {message && <p role="status">{message}</p>}{result && <div className="specialist-results">{result.specialists.map(item => <article key={item.specialty}><strong>{item.name}</strong><small>{item.mandate}</small>{item.observations.map(row => <p key={row}>{row}</p>)}</article>)}<p><strong>Unknown:</strong> {result.unknowns.join(" ")}</p><small>{result.execution_boundary}</small></div>}
+    <div className="automation-heading"><div><Workflow size={17} /><strong>Reusable automations</strong></div><button className="secondary-button" onClick={() => void weeklyReview()} disabled={busy}>Add weekly review</button></div>
+    {automations.length ? <div className="automation-list">{automations.map(item => <article key={item.id}><div><strong>{item.title}</strong><small>{item.cadence} · {item.last_status}{item.next_run_at ? ` · next ${new Date(item.next_run_at).toLocaleString()}` : ""}</small></div><button className="secondary-button" onClick={() => void toggle(item)}>{item.enabled ? "Disable" : "Enable"}</button><button className="secondary-button" onClick={() => void run(item)} disabled={busy}><Play size={14} /> Run now</button></article>)}</div> : <p className="inline-empty">No reusable automations yet.</p>}
+    </>}
+  </section>;
+}

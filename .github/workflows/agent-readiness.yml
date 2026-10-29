@@ -1,0 +1,39 @@
+name: Orin Agent Readiness
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * *'
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+concurrency:
+  group: orin-agent-readiness
+  cancel-in-progress: false
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check workspace and generate readiness summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          git diff --cached --exit-code
+          echo '## Orin autonomous development readiness' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Revision: \`$(git rev-parse --short HEAD)\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Mode: read-only; no coding agent configured' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Repository writes, merges and deployments: disabled' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Open pull requests' >> "$GITHUB_STEP_SUMMARY"
+          gh pr list --repo "$GITHUB_REPOSITORY" --limit 10 --json number,title,url --jq '.[] | "- #\(.number) \(.title): \(.url)"' >> "$GITHUB_STEP_SUMMARY" || true
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Open issues' >> "$GITHUB_STEP_SUMMARY"
+          gh issue list --repo "$GITHUB_REPOSITORY" --limit 10 --json number,title,url --jq '.[] | "- #\(.number) \(.title): \(.url)"' >> "$GITHUB_STEP_SUMMARY" || true

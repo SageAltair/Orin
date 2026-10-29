@@ -1,0 +1,1102 @@
+/* Shared visual language: calm surfaces, readable contrast, one control hierarchy. */
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  color: #202b29;
+  background: #f7f8fa;
+}
+.orin-shell {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --text: #202b29;
+  --muted: #697774;
+  --soft: #53635f;
+  --line: #e2e8e5;
+  --hover: #eef3f0;
+  --accent: #315b4b;
+  --accent-fill: #315b4b;
+  --on-accent: #ffffff;
+  --radius: 12px;
+  --shadow: 0 8px 32px #172b2110;
+}
+.orin-shell.theme-dark {
+  --bg: #141b1a;
+  --surface: #1d2724;
+  --text: #ecf2ef;
+  --muted: #a0b2aa;
+  --soft: #bfcdc6;
+  --line: #34413a;
+  --hover: #2a3730;
+  --accent: #a8d1bb;
+  --accent-fill: #a8d1bb;
+  --on-accent: #14281d;
+  --shadow: 0 8px 32px #00000026;
+}
+@media (prefers-color-scheme: dark) {
+  .orin-shell.theme-system {
+    --bg: #141b1a;
+    --surface: #1d2724;
+    --text: #ecf2ef;
+    --muted: #a0b2aa;
+    --soft: #bfcdc6;
+    --line: #34413a;
+    --hover: #2a3730;
+    --accent: #a8d1bb;
+    --accent-fill: #a8d1bb;
+    --on-accent: #14281d;
+  }
+}
+.orin-shell :where(button, input, textarea, select, summary, a) {
+  -webkit-tap-highlight-color: transparent;
+}
+.orin-shell :where(button, a, input, textarea, select, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.orin-shell button {
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.orin-shell button:disabled {
+  opacity: 0.5;
+}
+.orin-shell
+  :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--line);
+  border-radius: 8px;
+}
+.orin-shell :where(input, textarea)::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.orin-shell .primary-button,
+.orin-shell .writing-new,
+.orin-shell .ask-fab {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  min-height: 38px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.orin-shell .primary-button:hover,
+.orin-shell .writing-new:hover {
+  box-shadow: 0 3px 12px #22483725;
+}
+.orin-shell .secondary-button,
+.orin-shell .topbar-ask,
+.orin-shell .topbar-capture {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 9px;
+  min-height: 36px;
+  padding-inline: 12px;
+  font-size: 12px;
+}
+.orin-shell .secondary-button:hover {
+  background: var(--hover);
+}
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--soft);
+  background: transparent;
+}
+.icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.orin-shell .sidebar {
+  padding: 24px 16px 16px;
+  background: var(--surface);
+}
+.brand {
+  letter-spacing: -0.045em;
+  font-size: 24px;
+}
+.orin-shell .brand-mark {
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  border-radius: 10px;
+}
+.orin-shell .workspace-switch {
+  margin-bottom: 26px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+.workspace-switch small {
+  max-width: 155px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.orin-shell .nav-link {
+  min-height: 43px;
+  padding-inline: 13px;
+  font-size: 13px;
+  border-radius: 9px;
+}
+.orin-shell .nav-link.active {
+  background: var(--hover);
+  color: var(--accent);
+}
+.orin-shell .nav-icon {
+  color: inherit;
+}
+.orin-shell .topbar {
+  position: sticky;
+  top: 0;
+  height: 64px;
+  padding-inline: 32px;
+  background: var(--surface);
+  z-index: 18;
+}
+.orin-shell .topbar-actions {
+  gap: 10px;
+}
+.orin-shell .breadcrumbs {
+  font-size: 12px;
+}
+.orin-shell .main-content {
+  width: min(100% - 64px, 1100px);
+  min-height: calc(100vh - 64px);
+  padding-top: 40px;
+}
+.orin-shell .greeting {
+  margin-bottom: 32px;
+}
+.orin-shell .greeting h1,
+.orin-shell .page-intro h1 {
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 550;
+}
+.orin-shell .greeting p,
+.orin-shell .page-intro p {
+  font-size: 14px;
+  line-height: 1.65;
+}
+.orin-shell .home-dashboard {
+  gap: 24px;
+}
+.orin-shell .home-dashboard .home-section {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.orin-shell .home-dashboard .section-title h2 {
+  font-size: 18px;
+}
+.orin-shell .home-record {
+  padding: 15px 0;
+}
+.orin-shell .home-record strong,
+.orin-shell .home-project-card strong {
+  font-size: 13px;
+}
+.orin-shell .home-record small,
+.orin-shell .home-project-card small,
+.orin-shell .quiet-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+.orin-shell .home-project-card {
+  padding: 18px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+.orin-shell .home-project-card p {
+  font-size: 12px;
+}
+.orin-shell .eyebrow {
+  font-size: 10px;
+  font-weight: 650;
+}
+.orin-shell .text-action {
+  font-size: 12px;
+  color: var(--soft);
+}
+.orin-shell .settings-section {
+  background: var(--surface);
+  padding: 24px;
+  margin: 0 0 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.orin-shell .settings-section h2 {
+  font-size: 19px;
+}
+.orin-shell .settings-section p {
+  color: var(--soft);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.orin-shell .preference-controls label,
+.orin-shell .create-form label {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.orin-shell .data-row {
+  padding-block: 15px;
+}
+.orin-shell .api-error {
+  background: color-mix(in srgb, #b83b3b 7%, var(--surface));
+  border: 1px solid color-mix(in srgb, #b83b3b 24%, var(--line));
+  border-radius: 9px;
+  padding: 12px 14px;
+  color: #ac3333;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.theme-dark .api-error {
+  color: #ffb6b6;
+}
+.orin-shell .calendar-workspace {
+  border-radius: var(--radius);
+}
+.orin-shell .calendar-dialog,
+.orin-shell .quick-capture {
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+}
+.orin-shell .ask-panel {
+  border-radius: 16px;
+  border-color: var(--line);
+  box-shadow: 0 24px 80px #12291c30;
+}
+.orin-shell .chat-composer {
+  border-color: var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.orin-shell .chat-composer button[type="submit"] {
+  color: var(--on-accent);
+  background: var(--accent-fill);
+  border-radius: 9px;
+}
+.orin-shell .chat-user-message {
+  border-radius: 12px;
+  background: var(--hover);
+}
+.orin-shell .markdown-body {
+  font-size: 14px;
+  line-height: 1.8;
+}
+.orin-shell .focus-embedded {
+  --focus-bg: var(--bg);
+  --focus-surface: var(--surface);
+  --focus-raised: var(--hover);
+  --focus-text: var(--text);
+  --focus-secondary: var(--soft);
+  --focus-line: var(--line);
+  --focus-accent: var(--accent);
+  --focus-accent-quiet: var(--hover);
+}
+.auth-screen {
+  background: #f4f7f5;
+}
+.auth-card {
+  width: min(100%, 420px);
+  padding: 36px;
+  border-radius: 18px;
+  box-shadow: 0 16px 64px #1833270d;
+}
+.auth-card h1 {
+  font-size: 27px;
+  letter-spacing: -0.035em;
+}
+.auth-card label {
+  color: #52665d;
+  font-size: 12px;
+}
+.auth-card > p,
+.auth-card label small {
+  color: #697a71;
+}
+.auth-card .primary-button {
+  min-height: 43px;
+  font-size: 13px;
+  border-radius: 9px;
+  background: #315b4b;
+}
+
+/* One writing workspace, with progressively revealed studio tools. */
+.orin-shell:has(.writing-studio) .main-content {
+  width: min(100% - 64px, 1360px);
+  height: auto;
+  margin: auto;
+  padding: 30px 0 24px;
+}
+.writing-studio-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.writing-studio-heading h1 {
+  margin: 6px 0;
+  font-size: 32px;
+  font-weight: 550;
+  letter-spacing: -0.04em;
+}
+.writing-studio-heading p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.studio-private {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--soft);
+}
+.studio-private span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.studio-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 16px;
+}
+.studio-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--soft);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+}
+.studio-tabs button:hover {
+  background: var(--hover);
+}
+.studio-tabs button[aria-current="page"] {
+  color: var(--accent);
+  border-color: var(--line);
+  background: var(--surface);
+  box-shadow: 0 2px 8px #172b2105;
+}
+.studio-surface {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: clip;
+  background: var(--surface);
+}
+.orin-shell:has(.writing-studio) .writing-workspace {
+  height: calc(100dvh - 270px);
+  min-height: 510px;
+  border: 0;
+  border-radius: 0;
+}
+.orin-shell:has(.writing-studio) .writing-list {
+  background: var(--surface);
+}
+.orin-shell:has(.writing-studio) .writing-brand h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.orin-shell:has(.writing-studio) .writing-brand > span {
+  color: var(--accent);
+}
+.orin-shell:has(.writing-studio) .writing-paper {
+  max-width: 820px;
+  padding-top: 36px;
+}
+.orin-shell:has(.writing-studio) .writing-title {
+  background: transparent;
+  border-radius: 0;
+  font-size: clamp(25px, 3vw, 36px);
+  font-weight: 550;
+  letter-spacing: -0.035em;
+}
+.orin-shell:has(.writing-studio) .writing-paper > textarea {
+  background: transparent;
+  font-size: 16px;
+  line-height: 1.9;
+  border-radius: 0;
+}
+.orin-shell:has(.writing-studio) .writing-preview {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 18px;
+  line-height: 1.85;
+}
+.orin-shell:has(.writing-studio) .writing-save-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.orin-shell:has(.writing-studio) .writing-formatbar button {
+  border-radius: 6px;
+  min-height: 30px;
+  color: var(--soft);
+}
+.orin-shell:has(.writing-studio) .writing-formatbar button:hover {
+  color: var(--accent);
+  background: var(--hover);
+}
+.orin-shell:has(.writing-studio) .writing-tools > summary {
+  font-size: 12px;
+}
+.orin-shell:has(.writing-studio) .writing-focus-mode .writing-paper {
+  width: min(100% - 64px, 800px);
+}
+.studio-canvas,
+.studio-inbox,
+.manuscript-workspace {
+  padding: 28px;
+}
+.studio-section-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.studio-section-heading h2,
+.studio-inbox-header h2,
+.studio-canvas-header h2 {
+  font-size: 24px;
+  letter-spacing: -0.03em;
+  font-weight: 550;
+  margin: 8px 0;
+}
+.studio-section-heading p,
+.studio-canvas-header p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.studio-section-heading label,
+.studio-inline-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--soft);
+  font-size: 12px;
+}
+.studio-section-heading select,
+.studio-inline-form input,
+.studio-inline-form select,
+.studio-inline-form textarea {
+  min-height: 38px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  width: 100%;
+}
+.manuscript-columns {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 28px;
+}
+.manuscript-columns > section {
+  min-width: 0;
+}
+.manuscript-columns > section > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--accent);
+}
+.manuscript-columns h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 550;
+}
+.manuscript-columns header small {
+  color: var(--muted);
+  margin-left: auto;
+  font-size: 11px;
+}
+.studio-inline-form {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  background: var(--bg);
+  border-radius: 10px;
+  border: 1px solid var(--line);
+}
+.studio-form-row {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+}
+.studio-form-row label {
+  flex: 1;
+  min-width: 0;
+}
+.manuscript-outline {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0;
+  display: grid;
+}
+.manuscript-outline li {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.manuscript-outline li > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.manuscript-outline strong {
+  font-size: 13px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.manuscript-outline small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+.manuscript-number {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--hover);
+  font-size: 11px;
+}
+.manuscript-outline .outline-child {
+  padding-left: 24px;
+}
+.manuscript-item-actions select,
+.manuscript-cards select {
+  border: 1px solid var(--line);
+  padding: 5px;
+  font-size: 11px;
+}
+.manuscript-item-actions .icon-button {
+  width: 26px;
+  height: 28px;
+}
+.manuscript-cards {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.manuscript-cards article {
+  padding: 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.manuscript-cards strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+.manuscript-cards p {
+  color: var(--soft);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.manuscript-cards label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 14px;
+}
+.studio-empty-state {
+  display: grid;
+  justify-items: center;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.studio-empty-state h3 {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 500;
+}
+.studio-empty-state p {
+  font-size: 13px;
+}
+.notification-center {
+  position: relative;
+}
+.notification-dot {
+  width: 6px;
+  height: 6px;
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+.notification-panel {
+  position: absolute;
+  top: 46px;
+  right: 0;
+  width: min(360px, calc(100vw - 24px));
+  max-height: 480px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+.notification-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.notification-panel header strong {
+  font-size: 14px;
+}
+.notification-panel small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+.notification-panel article {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.notification-panel article strong {
+  font-size: 13px;
+  font-weight: 550;
+}
+.notification-panel article p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--soft);
+}
+.notification-panel article.is-read {
+  opacity: 0.7;
+}
+.notification-empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 13px;
+}
+.notification-empty svg {
+  margin: auto;
+}
+
+/* Reference dashboard sidebar: compact navigation followed by user workspaces. */
+.orin-shell .sidebar:has(.sidebar-workspaces) {
+  width: 220px;
+  padding: 18px 14px 14px;
+}
+.orin-shell:has(.sidebar-workspaces) .main-column {
+  width: calc(100% - 220px);
+  margin-left: 220px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .brand {
+  margin: 0 0 20px 5px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .navigation {
+  gap: 2px;
+  margin-top: 7px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .nav-link {
+  min-height: 34px;
+  padding-inline: 9px;
+  font-size: 12px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .sidebar-workspaces {
+  margin-top: 18px;
+}
+.orin-shell .sidebar:has(.sidebar-workspaces) .sidebar-bottom {
+  padding-top: 10px;
+}
+
+@media (max-width: 1000px) {
+  .manuscript-columns {
+    grid-template-columns: 1fr;
+  }
+  .studio-section-heading {
+    align-items: start;
+  }
+}
+@media (max-width: 760px) {
+  .orin-shell .topbar {
+    padding-inline: 16px;
+    height: 58px;
+  }
+  .orin-shell .main-content,
+  .orin-shell:has(.writing-studio) .main-content {
+    width: calc(100% - 32px);
+    padding-top: 24px;
+  }
+  .orin-shell .main-column {
+    width: 100%;
+    margin-left: 0;
+  }
+  .orin-shell .sidebar {
+    width: 248px;
+  }
+  .orin-shell:has(.sidebar-workspaces) .main-column {
+    width: 100%;
+    margin-left: 0;
+  }
+  .orin-shell .breadcrumbs {
+    gap: 7px;
+  }
+  .orin-shell .status-indicator {
+    display: none;
+  }
+  .orin-shell .topbar-actions {
+    gap: 4px;
+  }
+  .orin-shell .topbar-capture,
+  .orin-shell .topbar-ask {
+    min-height: 33px;
+    font-size: 11px;
+    padding-inline: 8px;
+  }
+  .writing-studio-heading {
+    align-items: start;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .writing-studio-heading h1 {
+    font-size: 28px;
+  }
+  .studio-private {
+    display: none;
+  }
+  .studio-tabs {
+    gap: 3px;
+  }
+  .studio-tabs button {
+    padding: 9px 10px;
+    gap: 5px;
+    font-size: 11px;
+  }
+  .orin-shell:has(.writing-studio) .writing-workspace {
+    min-height: 540px;
+    height: calc(100dvh - 253px);
+  }
+  .studio-canvas,
+  .studio-inbox,
+  .manuscript-workspace {
+    padding: 20px;
+  }
+  .studio-section-heading {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .studio-section-heading label {
+    width: 100%;
+  }
+  .studio-form-row {
+    flex-wrap: wrap;
+  }
+  .orin-shell .home-dashboard .home-section {
+    padding: 18px;
+  }
+  .orin-shell .settings-section {
+    padding: 20px;
+  }
+}
+@media (max-width: 430px) {
+  .orin-shell .breadcrumbs > span:first-child,
+  .orin-shell .breadcrumbs > span:nth-child(2) {
+    display: none;
+  }
+  .orin-shell .topbar-ask {
+    font-size: 0;
+    padding-inline: 10px;
+  }
+  .orin-shell .topbar-capture {
+    font-size: 0;
+    padding-inline: 10px;
+  }
+  .orin-shell .topbar-capture svg,
+  .orin-shell .topbar-ask svg {
+    width: 17px;
+    height: 17px;
+  }
+  .studio-tabs button {
+    padding: 9px 7px;
+    font-size: 10px;
+  }
+  .studio-tabs button svg {
+    width: 14px;
+  }
+  .manuscript-outline li {
+    align-items: start;
+    flex-direction: column;
+  }
+  .manuscript-item-actions {
+    align-self: end;
+  }
+  .notification-panel {
+    position: fixed;
+    top: 64px;
+    right: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .orin-shell *,
+  .orin-shell *::before,
+  .orin-shell *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.account-danger {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.account-danger summary {
+  color: var(--soft);
+  font-size: 12px;
+  cursor: pointer;
+}
+.danger-button {
+  border: 1px solid #a73636;
+  color: #fff;
+  background: #a73636;
+  padding: 10px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+}
+
+/* The writing canvas owns its scrolling, including on short landscape screens. */
+.orin-shell:has(.writing-studio) .main-content {
+  height: calc(100dvh - 64px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.writing-studio {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.writing-studio-heading,
+.studio-tabs {
+  flex: 0 0 auto;
+}
+.studio-surface {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.studio-surface:has(.writing-workspace) {
+  overflow: hidden;
+}
+.orin-shell:has(.writing-studio) .writing-workspace {
+  height: 100%;
+  min-height: 0;
+}
+@media (max-width: 760px) {
+  .orin-shell:has(.writing-studio) .main-content {
+    height: calc(100dvh - 58px);
+    padding-block: 16px;
+  }
+  .writing-studio-heading {
+    margin-bottom: 12px;
+  }
+  .writing-studio-heading p {
+    font-size: 12px;
+  }
+}
+@media (max-height: 500px) {
+  .writing-studio-heading {
+    margin-bottom: 8px;
+  }
+  .writing-studio-heading .eyebrow,
+  .writing-studio-heading p,
+  .studio-private {
+    display: none;
+  }
+  .writing-studio-heading h1 {
+    margin: 0;
+    font-size: 24px;
+  }
+  .studio-tabs {
+    margin-bottom: 8px;
+  }
+  .orin-shell:has(.writing-studio) .main-content {
+    padding-block: 12px;
+  }
+}
+
+.writing-new {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.writing-brand {
+  gap: 10px;
+}
+.writing-brand > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.writing-welcome > svg {
+  color: var(--accent);
+  margin: 0 auto 18px;
+  width: 30px;
+  height: 30px;
+}
+
+.writing-workspace {
+  --writing-accent: var(--accent);
+}
+.orin-shell:has(.writing-studio) .writing-paper > textarea:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 4px;
+}
+
+/* Feature pages begin with their working surface and use the available canvas. */
+.orin-shell .main-content:is(.page-tasks, .page-projects, .page-calendar, .page-activity, .page-opportunities, .page-focus) {
+  width: calc(100% - 40px);
+  max-width: 1440px;
+  padding-top: 20px;
+}
+.orin-shell .page-projects .project-create-form { margin-bottom: 14px; }
+.orin-shell .page-projects .project-list-controls { margin-bottom: 18px; }
+.orin-shell:has(.main-content:not(.page-home)) .ask-fab {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+}
+.orin-shell:has(.main-content:not(.page-home)) .ask-fab span { display: none; }
+
+/* Writing is the primary canvas: navigation stays compact and content owns the viewport. */
+.orin-shell:has(.writing-studio) .main-content {
+  width: 100%;
+  max-width: none;
+  height: calc(100dvh - 64px);
+  margin: 0;
+  padding: 10px 12px 12px;
+}
+.writing-studio .studio-tabs {
+  gap: 2px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.writing-studio .studio-tabs button {
+  min-height: 36px;
+  padding: 7px 11px;
+  border-radius: 7px 7px 0 0;
+}
+.writing-studio .studio-surface { border-radius: 10px; }
+
+/* Desktop sidebar can collapse to an accessible icon rail. */
+.sidebar-collapse-button {
+  position: absolute;
+  top: 20px;
+  right: 12px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+}
+.sidebar-collapse-button:hover { color: var(--text); background: var(--hover); }
+@media (min-width: 761px) {
+  .orin-shell.sidebar-collapsed .sidebar,
+  .orin-shell.sidebar-collapsed .sidebar:has(.sidebar-workspaces) {
+    width: 68px;
+    padding: 18px 8px 12px;
+  }
+  .orin-shell.sidebar-collapsed .main-column,
+  .orin-shell.sidebar-collapsed:has(.sidebar-workspaces) .main-column {
+    width: calc(100% - 68px);
+    margin-left: 68px;
+  }
+  .orin-shell.sidebar-collapsed .brand { justify-content: center; margin: 0 0 20px; }
+  .orin-shell.sidebar-collapsed .brand > span:last-child,
+  .orin-shell.sidebar-collapsed .sidebar > .nav-label,
+  .orin-shell.sidebar-collapsed .sidebar-workspaces > .nav-label,
+  .orin-shell.sidebar-collapsed .workspace-item > span:nth-child(2),
+  .orin-shell.sidebar-collapsed .workspace-status,
+  .orin-shell.sidebar-collapsed .workspace-check,
+  .orin-shell.sidebar-collapsed .new-workspace-button > span,
+  .orin-shell.sidebar-collapsed .profile > span:nth-child(2),
+  .orin-shell.sidebar-collapsed .tiny-pin { display: none; }
+  .orin-shell.sidebar-collapsed .sidebar-collapse-button { position: static; margin: 0 auto 10px; }
+  .orin-shell.sidebar-collapsed .navigation,
+  .orin-shell.sidebar-collapsed .sidebar-workspaces { margin-top: 6px; }
+  .orin-shell.sidebar-collapsed .nav-link,
+  .orin-shell.sidebar-collapsed .workspace-item,
+  .orin-shell.sidebar-collapsed .new-workspace-button {
+    justify-content: center;
+    overflow: hidden;
+    padding-inline: 0;
+    gap: 0;
+    font-size: 0;
+  }
+  .orin-shell.sidebar-collapsed .nav-icon { width: auto; }
+  .orin-shell.sidebar-collapsed .sidebar-bottom { display: grid; justify-items: center; }
+  .orin-shell.sidebar-collapsed .profile {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    padding-inline: 0;
+  }
+  .orin-shell.sidebar-collapsed .logout-button { margin-left: 0; }
+}
+@media (max-width: 760px) {
+  .sidebar-collapse-button { display: none; }
+  .orin-shell:has(.writing-studio) .main-content {
+    width: 100%;
+    height: calc(100dvh - 58px);
+    padding: 8px;
+  }
+  .orin-shell .main-content:is(.page-tasks, .page-projects, .page-calendar, .page-activity, .page-opportunities, .page-focus) {
+    width: calc(100% - 24px);
+    padding-top: 12px;
+  }
+  .writing-studio .studio-tabs { flex-wrap: nowrap; overflow-x: auto; }
+  .writing-studio .studio-tabs button { flex: 0 0 auto; }
+}

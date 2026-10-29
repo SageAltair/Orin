@@ -1,0 +1,84 @@
+.notification-category-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.notification-preferences label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 15px 0;
+}
+.notification-preferences input[type="checkbox"] {
+  width: auto;
+  flex-shrink: 0;
+}
+.notification-preferences p {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.notification-followup {
+  position: fixed;
+  z-index: 12;
+  top: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(620px, calc(100vw - 32px));
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--shadow);
+  box-sizing: border-box;
+}
+.notification-followup p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.notification-followup small {
+  color: var(--muted);
+}
+.notification-followup > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.notification-panel article .text-action {
+  margin: 6px 8px 0 0;
+}
+.notification-preferences .planning-form-grid label {
+  flex-direction: column;
+  align-items: stretch;
+}
+@media (max-width: 600px) {
+  .notification-category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .notification-followup {
+    top: 64px;
+    padding: 14px;
+  }
+}
+.notification-preferences .planning-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.notification-preferences input:not([type="checkbox"]) {
+  min-width: 0;
+}
+.notification-preferences label:has(input:not([type="checkbox"])) {
+  flex-direction: column;
+  align-items: stretch;
+}
+@media (max-width: 600px) {
+  .notification-preferences .planning-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

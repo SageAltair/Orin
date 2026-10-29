@@ -1,0 +1,875 @@
+import uuid
+import sqlite3
+import json
+from pathlib import Path
+from collections.abc import Generator
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from orin_api.auth import get_current_user
+from orin_api.ai import AIIntent, AIProviderError
+from orin_api.config import Settings, get_settings
+from orin_api.domain_router import AIInterpreter
+from orin_api.database import Base, get_session
+from orin_api.main import app
+from orin_api.models import Command, User
+
+
+@pytest.fixture
+def client() -> Generator[TestClient, None, None]:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_foreign_keys(connection: sqlite3.Connection, _: object) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    test_sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with test_sessions.begin() as session:
+        user = User(email="morgan@example.test", password_hash="test-hash", display_name="Morgan")
+        session.add(user)
+        session.flush()
+
+    def override_session() -> Generator[Session, None, None]:
+        with test_sessions() as session:
+            yield session
+
+    app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    try:
+        with TestClient(app) as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_preferences_and_capabilities_use_relational_assignments(client: TestClient) -> None:
+    test_client = client
+    assert all(item["granted"] for item in test_client.get("/api/v1/capabilities").json())
+    response = test_client.get("/api/v1/users/me/preferences")
+    assert response.status_code == 200
+    assert response.json()["visible_capabilities"] == ["activity", "calendar", "focus", "home", "memories", "opportunities", "orin", "projects", "tasks"]
+    assert response.json()["hidden_capabilities"] == ["settings"]
+
+
+    updated = test_client.put(
+        "/api/v1/users/me/preferences",
+        json={
+            "density": "compact",
+            "theme": "system",
+            "locale": "en-GB",
+            "visible_capabilities": ["home", "projects"],
+            "pinned_capabilities": ["home"],
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["visible_capabilities"] == ["home", "projects"]
+    assert updated.json()["pinned_capabilities"] == ["home"]
+    project_capability = next(
+        item for item in test_client.get("/api/v1/capabilities").json()
+        if item["code"] == "projects"
+    )
+    assert project_capability["visible"] is True
+
+
+def test_activity_filter_and_detail_are_user_scoped(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Activity project"}).json()
+    rows = client.get("/api/v1/activity", params={"project_id": project["id"]})
+    assert rows.status_code == 200
+    assert len(rows.json()) == 1
+    event = rows.json()[0]
+    assert event["activity_type"] == "project_created"
+    assert event["severity"] == "info"
+    assert event["metadata"] == {}
+    assert client.get(f"/api/v1/activity/{event['id']}").json()["id"] == event["id"]
+    assert client.get(f"/api/v1/activity/{uuid.uuid4()}").status_code == 404
+    assert client.get("/api/v1/activity", params={"since": "2026-01-02T00:00:00Z", "until": "2026-01-01T00:00:00Z"}).status_code == 422
+
+
+def test_project_milestones_link_to_project_tasks_and_are_user_scoped(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Milestone project"}).json()
+    assert project["priority"] == "normal"
+    updated_project = client.patch(f"/api/v1/projects/{project['id']}", json={
+        "priority": "high", "target_date": "2026-12-31", "name": "Milestone project revised",
+    })
+    assert updated_project.status_code == 200
+    assert updated_project.json()["priority"] == "high"
+    assert updated_project.json()["target_date"] == "2026-12-31"
+    milestone_response = client.post(f"/api/v1/projects/{project['id']}/milestones", json={
+        "title": "First release", "target_date": "2026-12-01", "completion_criteria": "Release is available to users",
+    })
+    assert milestone_response.status_code == 201
+    milestone = milestone_response.json()
+    assert milestone["project_id"] == project["id"]
+    assert milestone["status"] == "pending"
+
+    task = client.post("/api/v1/tasks", json={
+        "title": "Prepare release notes", "project_id": project["id"], "milestone_id": milestone["id"],
+    })
+    assert task.status_code == 201
+    assert task.json()["milestone_id"] == milestone["id"]
+
+    completed = client.patch(f"/api/v1/milestones/{milestone['id']}", json={"status": "completed"})
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "completed"
+
+    other_project = client.post("/api/v1/projects", json={"name": "Another project"}).json()
+    other_milestone = client.post(f"/api/v1/projects/{other_project['id']}/milestones", json={"title": "Other checkpoint"}).json()
+    mismatch = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"milestone_id": other_milestone["id"]})
+    assert mismatch.status_code == 422
+
+    assert client.delete(f"/api/v1/milestones/{milestone['id']}").status_code == 204
+    remaining_task = client.get("/api/v1/tasks", params={"project_id": project["id"]}).json()[0]
+    assert remaining_task["milestone_id"] is None
+    assert client.get(f"/api/v1/projects/{uuid.uuid4()}/milestones").status_code == 404
+
+
+def test_task_dependencies_are_idempotent_scoped_and_reject_cycles(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Dependency project"}).json()
+    tasks = [client.post("/api/v1/tasks", json={"title": title, "project_id": project["id"]}).json() for title in ["A", "B", "C"]]
+    task_a, task_b, task_c = tasks
+
+    added = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_b["id"]})
+    assert added.status_code == 201
+    assert added.json()["id"] == task_b["id"]
+    duplicate = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_b["id"]})
+    assert duplicate.status_code == 201
+    assert client.get(f"/api/v1/tasks/{task_a['id']}/dependencies").json()[0]["id"] == task_b["id"]
+    assert client.post(f"/api/v1/tasks/{task_b['id']}/dependencies", json={"depends_on_task_id": task_c["id"]}).status_code == 201
+
+    cycle = client.post(f"/api/v1/tasks/{task_c['id']}/dependencies", json={"depends_on_task_id": task_a["id"]})
+    assert cycle.status_code == 422
+    self_dependency = client.post(f"/api/v1/tasks/{task_a['id']}/dependencies", json={"depends_on_task_id": task_a["id"]})
+    assert self_dependency.status_code == 422
+
+    assert client.delete(f"/api/v1/tasks/{task_a['id']}/dependencies/{task_b['id']}").status_code == 204
+    assert client.get(f"/api/v1/tasks/{task_a['id']}/dependencies").json() == []
+
+
+def test_task_verification_criteria_are_persisted(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Verification project"}).json()
+    created = client.post("/api/v1/tasks", json={
+        "title": "Prepare draft", "project_id": project["id"], "first_step": "Open the document",
+        "estimated_minutes": 20, "verification_criteria": "Draft contains all required sections",
+    })
+    assert created.status_code == 201
+    assert created.json()["verification_criteria"] == "Draft contains all required sections"
+    updated = client.patch(f"/api/v1/tasks/{created.json()['id']}", json={"verification_criteria": "Reviewed and ready to share"})
+    assert updated.status_code == 200
+    assert updated.json()["verification_criteria"] == "Reviewed and ready to share"
+
+
+def test_command_history_returns_only_owned_persisted_requests(client: TestClient) -> None:
+    session_factory = app.dependency_overrides[get_session]
+    # The test fixture's session override shares the same in-memory database.
+    with next(session_factory()) as session:
+        owner = session.query(User).filter_by(email="morgan@example.test").one()
+        other = User(email="other@example.test", password_hash="test-hash", display_name="Other")
+        session.add(other)
+        session.flush()
+        session.add_all([
+            Command(user_id=owner.id, text="My request", response_message="My answer"),
+            Command(user_id=other.id, text="Private request", response_message="Private answer"),
+        ])
+        session.commit()
+    response = client.get("/api/v1/commands")
+    assert response.status_code == 200
+    assert [item["text"] for item in response.json()] == ["My request"]
+    assert response.json()[0]["message"] == "My answer"
+
+
+def test_project_task_activity_flow_and_user_scoping(client: TestClient) -> None:
+    test_client = client
+    invalid_project = test_client.post("/api/v1/projects", json={"name": "   "})
+    assert invalid_project.status_code == 422
+
+    project_response = test_client.post(
+        "/api/v1/projects",
+        json={"name": "Website refresh", "description": "A focused update"},
+    )
+    assert project_response.status_code == 201
+    project = project_response.json()
+
+    task_response = test_client.post(
+        "/api/v1/tasks",
+        json={"title": "Review the first draft", "project_id": project["id"], "priority": "high"},
+    )
+    assert task_response.status_code == 201
+    task = task_response.json()
+
+    task_update = test_client.patch(
+        f"/api/v1/tasks/{task['id']}",
+        json={"status": "in_progress"},
+    )
+    assert task_update.status_code == 200
+    assert task_update.json()["status"] == "in_progress"
+    assert len(test_client.get("/api/v1/projects?user_id=" + str(uuid.uuid4())).json()) == 1
+    assert len(test_client.get("/api/v1/tasks?status=in_progress").json()) == 1
+
+    events = test_client.get("/api/v1/activity")
+    assert events.status_code == 200
+    assert {event["activity_type"] for event in events.json()} == {"task_updated", "task_created", "project_created"}
+
+
+def test_workspaces_scope_projects_tasks_and_routines(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office_response = client.post("/api/v1/workspaces", json={"name": "Client office", "color": "#2da6b5"})
+    assert office_response.status_code == 201
+    office = office_response.json()
+    headers = {"X-Orin-Workspace-Id": office["id"]}
+
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Client launch"}).json()
+    task = client.post("/api/v1/tasks", headers=headers, json={"title": "Prepare launch", "project_id": project["id"]}).json()
+    routine = client.post("/api/v1/calendar/routines", headers=headers, json={
+        "title": "Daily client review", "start_date": "2026-10-19", "weekdays": [0], "timezone": "UTC",
+    })
+
+    assert project["workspace_id"] == office["id"]
+    assert task["workspace_id"] == office["id"]
+    assert routine.status_code == 201
+    assert [row["name"] for row in client.get("/api/v1/projects", headers=headers).json()] == ["Client launch"]
+    assert client.get("/api/v1/projects", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=headers).json()] == ["Prepare launch"]
+    assert [row["title"] for row in client.get("/api/v1/calendar/routines", headers=headers).json()] == ["Daily client review"]
+    assert client.get("/api/v1/calendar/routines", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+
+
+def test_preference_rejects_pinning_a_hidden_capability(client: TestClient) -> None:
+    test_client = client
+    response = test_client.put(
+        "/api/v1/users/me/preferences",
+        json={
+            "visible_capabilities": ["home"],
+            "pinned_capabilities": ["home", "tasks"],
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_command_pipeline_uses_validated_proposal_and_records_activity(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"CREATE_TASK","confidence":0.9,"parameters":{"title":"Call John"}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Remind me to call John"})
+    assert response.status_code == 200
+    assert response.json()["intent"] == "CREATE_TASK"
+    assert response.json()["result"]["title"] == "Call John"
+    assert client.get("/api/v1/tasks").json()[0]["title"] == "Call John"
+    timeline = client.get("/api/v1/activity", params={"command_id": response.json()["command_id"]}).json()
+    assert {item["activity_type"] for item in timeline} >= {
+        "command_received", "intent_interpreted", "plan_created", "policy_decision", "command_completed"}
+
+
+def test_ask_orin_uses_timezone_calendar_context_and_shared_task_scheduler(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    due = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    task = client.post("/api/v1/tasks", json={
+        "title": "Prepare weekly report", "estimated_minutes": 45, "due_at": due,
+    }).json()
+    task_day = (datetime.now(timezone.utc) + timedelta(days=1)).date()
+    start = datetime.combine(task_day, datetime.min.time(), timezone.utc).replace(hour=10, minute=0)
+    captured: list[dict[str, object]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured.append(json.loads(context or "{}"))
+            proposal = {"intent": "SCHEDULE_TASK", "confidence": 0.95, "parameters": {
+                "task_reference": "Prepare weekly report", "start_at": start.isoformat(),
+                "end_at": (start + timedelta(minutes=45)).isoformat(),
+                "estimated_minutes": 45, "timezone": "UTC",
+            }}
+            return AIIntent.model_validate_json(json.dumps(proposal))
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Schedule Prepare weekly report tomorrow morning"})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "completed"
+    assert captured[0]["calendar"]["timezone"] == "UTC"
+    assert any(item["title"] == task["title"] for item in captured[0]["calendar"]["open_tasks"])
+    listed = client.get("/api/v1/calendar/schedule", params={
+        "start": task_day.isoformat(), "end": task_day.isoformat(), "timezone": "UTC",
+    }).json()
+    assert len(listed) == 1 and listed[0]["task_id"] == task["id"]
+    unchanged = client.get("/api/v1/tasks").json()[0]
+    assert unchanged["status"] == "todo" and unchanged["due_at"] == task["due_at"]
+
+
+def test_follow_up_clarifying_that_user_means_orin_receives_product_context(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    captured: list[tuple[str, dict[str, object]]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured.append((command, json.loads(context or "{}")))
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"I understand you mean Orin itself. I can review its available implementation evidence."}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    first = client.post("/api/v1/commands", json={"text": "Act as a designer. Look at this system and audit it."})
+    assert first.status_code == 200
+    follow_up = client.post("/api/v1/commands", json={
+        "text": "I mean this Orin system application I'm using here with you.",
+        "conversation_id": first.json()["conversation_id"],
+    })
+    assert follow_up.status_code == 200
+    assert "current_application" in captured[1][1]
+    assert "I understand you mean Orin itself" in follow_up.json()["message"]
+
+
+def test_commitment_is_persisted_verified_and_retrievable_in_a_new_conversation(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import orin_api.domain_router as domain_router
+
+    commitment = {
+        "intent": "SAVE_MEMORY", "confidence": 0.99,
+        "parameters": {
+            "memory_type": "commitment", "memory_title": "Fix Orin's duplicate AI responses",
+            "memory_content": "Commitment: I will spend my next focused development session fixing Orin's duplicate AI responses. The task is complete only when the root cause is identified, a regression test passes, and the relevant chat flow is verified.\nDescription: Investigate and fix the root cause of duplicate AI responses in Orin.",
+            "memory_timing": "Next focused development session", "memory_status": "not_started",
+            "memory_acceptance_criteria": [
+                "Identify and document the root cause of duplicate AI responses.",
+                "Add a regression test that reproduces the relevant failure and passes after the fix.",
+                "Verify the relevant chat flow and confirm duplicate responses no longer occur.",
+            ],
+            "memory_completion_rule": "Do not mark complete until all three acceptance criteria have been verified.",
+        },
+    }
+    captured_contexts: list[dict[str, object]] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            if command.startswith("For this test, record"):
+                return AIIntent.model_validate_json(json.dumps(commitment))
+            assert context
+            captured_contexts.append(json.loads(context))
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.99,"parameters":{"response":"Retrieved saved commitment."}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    unrelated = client.post("/api/v1/memories", json={"memory_type": "decision", "title": "Unrelated note",
+        "content": "Preserve this existing note", "source": "test"})
+    assert unrelated.status_code == 201
+    unrelated_id = unrelated.json()["id"]
+    exact_request = ("For this test, record the following commitment if you have persistent memory or a supported task system: "
+        "I will spend my next focused development session fixing Orin's duplicate AI responses. The task is complete only "
+        "when the root cause is identified, a regression test passes, and the relevant chat flow is verified. Tell me exactly "
+        "where you stored this information and how I can retrieve it later.")
+    saved = client.post("/api/v1/commands", json={"text": exact_request})
+    assert saved.status_code == 200, saved.text
+    result = saved.json()
+    assert result["status"] == "completed"
+    assert result["result"]["entity_type"] == "memory"
+    assert "verified" in result["message"].lower()
+    assert result["result"]["id"] in result["message"]
+    assert "Search previous work" in result["message"]
+    assert "Action completed." not in result["message"]
+
+    later = client.post("/api/v1/commands", json={"text":
+        "Show me my commitment about fixing Orin's duplicate AI responses, including its acceptance criteria and current status."})
+    assert later.status_code == 200, later.text
+    assert later.json()["status"] == "completed"
+    assert captured_contexts
+    remembered = captured_contexts[-1]["workspace"]["memories_and_commitments"]
+    assert len(remembered) == 1
+    assert remembered[0]["id"] == result["result"]["id"]
+    assert remembered[0]["metadata"]["status"] == "not_started"
+    assert len(remembered[0]["metadata"]["acceptance_criteria"]) == 3
+    assert "I will spend my next focused development session" in remembered[0]["content"]
+    assert client.get("/api/v1/memories", params={"search": "duplicate AI responses"}).json()[0]["id"] == result["result"]["id"]
+
+    repeated = client.post("/api/v1/commands", json={"text": exact_request})
+    assert repeated.status_code == 200
+    memories = client.get("/api/v1/memories", params={"search": "duplicate AI responses"}).json()
+    assert len(memories) == 1
+    assert client.get("/api/v1/memories", params={"search": "Unrelated note"}).json()[0]["id"] == unrelated_id
+
+
+def test_command_reports_unverified_when_action_claims_success_without_a_saved_record(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from dataclasses import replace
+    import orin_api.domain_router as domain_router
+    from orin_api.execution import ActionRegistry, ExecutionEngine
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"SAVE_MEMORY","confidence":0.99,"parameters":'
+                '{"memory_type":"commitment","memory_title":"Unwritten commitment",'
+                '"memory_content":"details","memory_timing":"next session",'
+                '"memory_status":"not_started","memory_acceptance_criteria":["verify it"],'
+                '"memory_completion_rule":"Only complete after verification"}}')
+
+    missing_id = str(uuid.uuid4())
+    definitions = [replace(item, handler=lambda _context, _inputs: {
+        "id": missing_id, "title": "Unwritten commitment", "type": "commitment",
+        "content": "details", "metadata": {}, "entity_type": "memory",
+    }) if item.name == "save_memory" else item for item in domain_router.ACTION_REGISTRY.all()]
+    monkeypatch.setattr(domain_router, "EXECUTION_ENGINE", ExecutionEngine(ActionRegistry(definitions)))
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Remember this commitment"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "unverified"
+    assert payload["execution"]["success"] is False
+    assert "could not verify" in payload["message"].lower()
+    assert "Action completed" not in payload["message"]
+
+
+def test_greeting_command_returns_safe_conversation_without_creating_work(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            assert command == "hey"
+            return AIIntent.model_validate_json(
+                '{"intent":"RESPOND","confidence":0.9,"parameters":{"response":"Hey! What can I help you with?"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "hey"})
+    assert response.status_code == 200
+    assert response.json()["intent"] == "RESPOND"
+    assert response.json()["result"] == {"response": "Hey! What can I help you with?"}
+    assert client.get("/api/v1/tasks").json() == []
+    event_types = {row["activity_type"] for row in client.get("/api/v1/activity", params={"command_id": response.json()["command_id"]}).json()}
+    assert event_types == {"command_received", "intent_interpreted", "command_completed"}
+
+
+def test_original_planning_request_uses_general_reasoning_and_existing_workspace_records(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+    import orin_api.domain_router as domain_router
+
+    client.post("/api/v1/projects", json={"name": "The Small Voice", "description": "Storytelling platform"})
+    client.post("/api/v1/projects", json={"name": "Orin", "description": "Personal operating system"})
+    captured: dict[str, str] = {}
+
+    class PlanningProvider:
+        def structured_output(self, **kwargs: object) -> str:
+            captured["system"] = str(kwargs["system"])
+            captured["user"] = str(kwargs["user"])
+            return json.dumps({"intent": "RESPOND", "confidence": 0.96, "parameters": {
+                "response": "## Overview\n\nStart with a provisional sequence.\n\n| Project | Desired outcome | Next action | Dependencies | Priority |\n|---|---|---|---|---|\n| The Small Voice | A clearer platform | Identify its largest unresolved issue | None known | 2 |\n| Orin | A useful release | Define the smallest release | None known | 3 |\n\nWhat fixed ministry commitments and weekly hours should I protect?"
+            }})
+
+    monkeypatch.setattr(domain_router, "create_provider", lambda settings: PlanningProvider())
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    prompt = "I need to improve The Small Voice, finish Orin, learn AI automation, create Christian storytelling videos, find income opportunities, and stay consistent with my ministry responsibilities. I feel like there are too many things competing for my attention. Organize these into projects, desired outcomes, next actions, dependencies, and a realistic priority order. Do not invent deadlines. Identify what information you still need from me."
+    response = client.post("/api/v1/commands", json={"text": prompt})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["status"] == "completed"
+    assert result["intent"] == "RESPOND"
+    answer = result["result"]["response"]
+    assert "| Project | Desired outcome |" in answer
+    assert "What fixed ministry commitments" in answer
+    assert "not supported" not in answer.lower()
+    assert "The Small Voice" in captured["user"] and "Orin" in captured["user"]
+    assert "Otherwise use UNSUPPORTED" not in captured["system"]
+    assert client.get("/api/v1/projects").json() and client.get("/api/v1/tasks").json() == []
+
+
+def test_genuine_unsupported_operation_explains_limitation_and_alternative(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json('{"intent":"UNSUPPORTED","confidence":0.95,"parameters":{"response":"Orin has no travel booking integration. I can help compare options and prepare an itinerary for you to book."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    result = client.post("/api/v1/commands", json={"text": "Book my flights"})
+    assert result.status_code == 200
+    assert result.json()["status"] == "unsupported"
+    assert "no travel booking integration" in result.json()["result"]["response"]
+    assert "prepare an itinerary" in result.json()["message"]
+
+
+def test_work_session_preserves_objective_pending_question_and_short_answer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    contexts: list[str] = []
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            contexts.append(context or "")
+            response = "How much time can you allocate to ministry work and other projects?" if len(contexts) == 1 else "I will use those as allocations, not assume they are today's availability."
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":' + json.dumps(response) + '}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    first = client.post("/api/v1/commands", json={"text": "Organize The Small Voice, Orin, AI automation, videos, income, and ministry."})
+    assert first.status_code == 200
+    conversation_id = first.json()["conversation_id"]
+    second = client.post("/api/v1/commands", json={"text": "3 hours in ministry related work, and 4 on other projects.", "conversation_id": conversation_id})
+    assert second.status_code == 200
+    assert second.json()["conversation_id"] == conversation_id
+    renamed = client.patch(f"/api/v1/conversations/{conversation_id}", json={"title": "Ministry planning session"})
+    assert renamed.status_code == 200
+    title_results = client.get("/api/v1/search", params={"q": "PLANNING session"}).json()
+    assert any(item["conversation_id"] == conversation_id and item["command_id"] is None
+               for item in title_results)
+    assert "Organize The Small Voice" in contexts[1]
+    assert "How much time can you allocate" in contexts[1]
+    assert '"status": "pending"' in contexts[1]
+    history = client.get(f"/api/v1/commands?conversation_id={conversation_id}").json()
+    assert len(history) == 2
+    assert history[-1]["text"].startswith("Organize The Small Voice")
+    results = client.get("/api/v1/search?q=ministry%20related").json()
+    assert len(results) == 1
+    assert results[0]["conversation_id"] == conversation_id
+
+
+def test_attachments_are_private_bounded_and_available_as_model_context(client: TestClient,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import orin_api.domain_router as domain_router
+    captured: dict[str, str] = {}
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            captured["context"] = context or ""
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"I reviewed the provided notes."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    settings = Settings(_env_file=None, ai_provider="openai", ai_model="test", openai_api_key="fake",
+        attachment_storage_path=str(tmp_path))
+    app.dependency_overrides[get_settings] = lambda: settings
+    uploaded = client.post("/api/v1/attachments", files=[("files", ("notes.md", b"First line\nSecond line", "text/markdown"))])
+    assert uploaded.status_code == 201, uploaded.text
+    file = uploaded.json()[0]
+    project = client.post("/api/v1/projects", json={"name": "Content project"}).json()
+    task = client.post("/api/v1/tasks", json={"title": "Review the notes", "project_id": project["id"]}).json()
+    result = client.post("/api/v1/commands", json={"text": "Summarize the attached notes.",
+        "attachment_ids": [file["id"]], "project_id": project["id"], "task_id": task["id"]})
+    assert result.status_code == 200, result.text
+    assert "First line\\nSecond line" in captured["context"]
+    conversation_id = result.json()["conversation_id"]
+    assert client.get(f"/api/v1/attachments?conversation_id={conversation_id}").json()[0]["filename"] == "notes.md"
+    assert client.get(f"/api/v1/attachments/{file['id']}/content").content == b"First line\nSecond line"
+    assert client.delete(f"/api/v1/attachments/{file['id']}").status_code == 409
+    assert client.post("/api/v1/attachments", files=[("files", ("script.exe", b"bad", "application/octet-stream"))]).status_code == 415
+
+    session_factory = app.dependency_overrides[get_session]
+    with next(session_factory()) as session:
+        stranger = User(email="stranger@example.test", password_hash="test-hash", display_name="Stranger")
+        session.add(stranger)
+        session.commit()
+    app.dependency_overrides[get_current_user] = lambda: stranger
+    assert client.get(f"/api/v1/attachments/{file['id']}/content").status_code == 404
+    assert client.get(f"/api/v1/attachments?conversation_id={conversation_id}").status_code == 404
+
+
+def test_workspace_search_returns_matching_task_and_project_records(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={"name": "Story archive", "objective": "Organize public stories"}).json()
+    task = client.post("/api/v1/tasks", json={"title": "Review story archive export", "project_id": project["id"]}).json()
+    task_results = client.get("/api/v1/search", params={"q": "archive export"}).json()
+    project_results = client.get("/api/v1/search", params={"q": "public stories"}).json()
+    assert any(item["kind"] == "task" and item["task_id"] == task["id"] for item in task_results)
+    assert any(item["kind"] == "project" and item["project_id"] == project["id"] for item in project_results)
+
+
+def test_long_work_session_builds_a_structured_continuity_summary(client: TestClient,
+    monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    contexts: list[str] = []
+
+    class SummaryProvider:
+        def generate(self, **kwargs: object) -> str:
+            return "Decision: use image and video content. Constraint: keep the time allocation as stated."
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            self.provider = SummaryProvider()
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            contexts.append(context or "")
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.95,"parameters":{"response":"Continuing the active objective."}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Plan a content workflow."})
+    conversation_id = response.json()["conversation_id"]
+    for index in range(13):
+        response = client.post("/api/v1/commands", json={"text": f"Follow-up detail {index}.", "conversation_id": conversation_id})
+        assert response.status_code == 200
+    conversations = client.get("/api/v1/conversations").json()
+    assert conversations[0]["summary"].startswith("Decision: use image and video")
+    response = client.post("/api/v1/commands", json={"text": "Continue.", "conversation_id": conversation_id})
+    assert response.status_code == 200
+    assert "structured_summary" in contexts[-1]
+    assert "keep the time allocation as stated" in contexts[-1]
+
+
+def test_command_idempotency_replays_cached_result_and_rejects_key_reuse(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    calls = 0
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            nonlocal calls
+            calls += 1
+            return AIIntent.model_validate_json('{"intent":"RESPOND","confidence":0.9,"parameters":{"response":"Hello"}}')
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    headers = {"Idempotency-Key": "mobile-request-001"}
+    first = client.post("/api/v1/commands", json={"text": "hello"}, headers=headers)
+    replay = client.post("/api/v1/commands", json={"text": "hello"}, headers=headers)
+    assert first.status_code == replay.status_code == 200
+    assert first.json() == replay.json()
+    assert calls == 1
+    assert client.get(f"/api/v1/commands/{first.json()['command_id']}").json() == first.json()
+    assert client.get(f"/api/v1/commands/{uuid.uuid4()}").status_code == 404
+    assert client.post("/api/v1/commands", json={"text": "different"}, headers=headers).status_code == 409
+
+
+def test_command_pipeline_never_interprets_without_ai_configuration(client: TestClient) -> None:
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="", ai_model="")
+    response = client.post("/api/v1/commands", json={"text": "create a task"})
+    assert response.status_code == 503
+    events = client.get("/api/v1/activity").json()
+    failure = next(row for row in events if row["activity_type"] == "command_failed")
+    command = client.get(f"/api/v1/commands/{failure['command_id']}").json()
+    assert command["status"] == "failed"
+
+
+def test_command_submission_has_a_shared_per_user_rate_limit(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep all requests in one fixed window; wall-clock boundary crossings make this
+    # integration test nondeterministic when the rest of the suite runs slowly.
+    import orin_api.rate_limit as rate_limit
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz: timezone | None = None) -> datetime:
+            instant = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
+            return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+    monkeypatch.setattr(rate_limit, "datetime", FixedDateTime)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="", ai_model="")
+    for _ in range(20):
+        assert client.post("/api/v1/commands", json={"text": "hello"}).status_code == 503
+    limited = client.post("/api/v1/commands", json={"text": "hello"})
+    assert limited.status_code == 429
+    assert 1 <= int(limited.headers["retry-after"]) <= 60
+
+
+def test_command_pipeline_returns_provider_availability_message(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+
+    class FailedInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            raise AIProviderError("The AI provider is temporarily unavailable. Please retry shortly.", category="provider_unavailable")
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FailedInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(
+        ai_provider="openai", ai_model="test", openai_api_key="fake"
+    )
+    response = client.post("/api/v1/commands", json={"text": "How are you?"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "The AI provider is temporarily unavailable. Please retry shortly."
+    events = client.get("/api/v1/activity").json()
+    assert {row["activity_type"] for row in events} == {"command_received", "command_failed"}
+    failure = next(row for row in events if row["activity_type"] == "command_failed")
+    assert client.get(f"/api/v1/commands/{failure['command_id']}").json()["status"] == "failed"
+
+
+def test_command_completion_resolves_only_the_users_exact_task_name(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.models import Task
+
+    task_response = client.post("/api/v1/tasks", json={"title": "Website"})
+    assert task_response.status_code == 201
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json(
+                '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_reference":"Website"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "Mark the website task as complete"})
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "done"
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "done"
+    activities = client.get("/api/v1/activity").json()
+    activity = next(item for item in activities if item["summary"] == "Completed task: Website")
+    assert activity["intent"] == "COMPLETE_TASK"
+    assert activity["result_status"] == "succeeded"
+    assert activity["command_id"] == response.json()["command_id"]
+
+
+def test_command_rejects_task_id_owned_by_another_user(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import orin_api.domain_router as domain_router
+    from orin_api.database import get_session
+    from orin_api.models import Task, User
+
+    session_override = app.dependency_overrides[get_session]
+    with next(session_override()) as session:
+        other = User(email="other@example.test", password_hash="test-hash", display_name="Other")
+        session.add(other)
+        session.flush()
+        foreign_task = Task(owner_id=other.id, title="Private task")
+        session.add(foreign_task)
+        session.commit()
+        task_id = foreign_task.id
+
+    class FakeInterpreter:
+        def __init__(self, provider: object, model: str):
+            pass
+
+        def interpret(self, command: str, *, context: str | None = None) -> AIIntent:
+            return AIIntent.model_validate_json(
+                '{"intent":"COMPLETE_TASK","confidence":0.9,"parameters":{"task_id":"' + str(task_id) + '"}}'
+            )
+
+    monkeypatch.setattr(domain_router, "AIInterpreter", FakeInterpreter)
+    app.dependency_overrides[get_settings] = lambda: Settings(ai_provider="openai", ai_model="test", openai_api_key="fake")
+    response = client.post("/api/v1/commands", json={"text": "complete private task"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "denied"
+    assert response.json()["execution"]["status"] == "denied"
+    assert client.get("/api/v1/tasks").json() == []
+
+
+def test_task_project_reassignment_preserves_workspace_boundary(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+    personal_project = client.post("/api/v1/projects", json={"name": "Personal work"}).json()
+    another_personal_project = client.post("/api/v1/projects", json={"name": "Personal follow-up"}).json()
+    office_project = client.post("/api/v1/projects", headers=office_headers, json={"name": "Office work"}).json()
+    personal_task = client.post("/api/v1/tasks", json={"title": "Prepare notes", "project_id": personal_project["id"]}).json()
+    office_task = client.post("/api/v1/tasks", headers=office_headers, json={"title": "Review client", "project_id": office_project["id"]}).json()
+
+    for task, foreign_project in ((personal_task, office_project), (office_task, personal_project)):
+        rejected = client.patch(f"/api/v1/tasks/{task['id']}", json={"project_id": foreign_project["id"]})
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["detail"] == "Project belongs to another workspace"
+
+    assert client.patch(
+        f"/api/v1/tasks/{personal_task['id']}", json={"project_id": another_personal_project["id"]}
+    ).status_code == 200
+    assert {row["id"]: row["project_id"] for row in client.get("/api/v1/tasks").json()} == {
+        personal_task["id"]: another_personal_project["id"]
+    }
+    assert {row["id"]: row["project_id"] for row in client.get("/api/v1/tasks", headers=office_headers).json()} == {
+        office_task["id"]: office_project["id"]
+    }
+    assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json()[0]["id"] == personal_task["id"]
+
+
+def test_task_dependencies_cannot_cross_workspaces(client: TestClient) -> None:
+    client.get("/api/v1/workspaces")
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+    personal_task = client.post("/api/v1/tasks", json={"title": "Personal task"}).json()
+    personal_prerequisite = client.post("/api/v1/tasks", json={"title": "Personal prerequisite"}).json()
+    office_task = client.post("/api/v1/tasks", headers=office_headers, json={"title": "Office task"}).json()
+
+    for task, foreign_task in ((personal_task, office_task), (office_task, personal_task)):
+        response = client.post(
+            f"/api/v1/tasks/{task['id']}/dependencies",
+            json={"depends_on_task_id": foreign_task["id"]},
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "Tasks belong to different workspaces"
+        assert client.get(f"/api/v1/tasks/{task['id']}/dependencies").json() == []
+
+    allowed = client.post(
+        f"/api/v1/tasks/{personal_task['id']}/dependencies",
+        json={"depends_on_task_id": personal_prerequisite["id"]},
+    )
+    assert allowed.status_code == 201, allowed.text
+    assert [row["id"] for row in client.get(f"/api/v1/tasks/{personal_task['id']}/dependencies").json()] == [personal_prerequisite["id"]]
+
+
+def test_focus_capture_respects_selected_workspace(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+
+    captured = client.post("/api/v1/focus/capture", headers=office_headers, json={"title": "Office inbox"})
+    assert captured.status_code == 201, captured.text
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]
+    assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+
+    default_capture = client.post("/api/v1/focus/capture", json={"title": "Personal inbox"})
+    assert default_capture.status_code == 201, default_capture.text
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json()] == ["Personal inbox"]
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]
+
+    unknown_workspace = client.post(
+        "/api/v1/focus/capture",
+        headers={"X-Orin-Workspace-Id": str(uuid.uuid4())},
+        json={"title": "Must not be created"},
+    )
+    assert unknown_workspace.status_code == 404
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]

@@ -1,0 +1,211 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { createProjectLoadGate } from "./projectLoadGate";
+import { ApiError, request, type Milestone, type Task } from "./api";
+import "./ProjectWorkspace.css";
+
+const errorText = (error: unknown) => error instanceof ApiError ? error.message : "Could not complete that request. Please try again.";
+export function filterProjectTasks(tasks: Task[], query: string, view: string): Task[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  return tasks.filter(task => task.title.toLocaleLowerCase().includes(normalizedQuery)).filter(task =>
+    view === "all" || (view === "open" ? !["done", "cancelled"].includes(task.status) : view === "done" ? task.status === "done" : task.status === "blocked"),
+  );
+}
+export function sortProjectTasks(tasks: Task[], sort: string): Task[] {
+  const priority: Record<Task["priority"], number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+  return [...tasks].sort((left, right) => {
+    if (sort === "title") return left.title.localeCompare(right.title);
+    if (sort === "priority") return priority[left.priority] - priority[right.priority] || left.title.localeCompare(right.title);
+    if (sort === "recent") return right.updated_at.localeCompare(left.updated_at);
+    if (!left.due_at) return right.due_at ? 1 : left.title.localeCompare(right.title);
+    if (!right.due_at) return -1;
+    return left.due_at.localeCompare(right.due_at);
+  });
+}
+export function taskDueDateValue(dueAt: string | null): string {
+  if (!dueAt) return "";
+  const local = new Date(dueAt);
+  return `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+}
+export function taskDueDateBoundary(date: string): string | null {
+  if (!date) return null;
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year, month - 1, day, 23, 59, 0, 0).toISOString();
+}
+
+type Project = { id: string; name: string; description: string | null; objective?: string | null; status: string; priority: "low" | "normal" | "high" | "urgent"; target_date: string | null; created_at: string; updated_at: string };
+type Memory = { id: string; type: string; title: string; content: string; source: string; archived: boolean };
+type Context = { progress: { completed_tasks: number; total_tasks: number; percentage: number | null }; tasks: Array<{ id: string; title: string; status: string }>; blockers: Array<{ id: string; title: string }>; activity: Array<{ id: string; summary: string; created_at: string }>; knowledge: Memory[]; next_actions: Array<{ id: string; title: string }> };
+type Focus = { id: string; project_id: string; objective: string; duration_minutes: number; ends_at: string; status: string };
+
+type TaskPlanningChanges = Pick<Task, "first_step" | "estimated_minutes" | "verification_criteria">;
+type ReturnPoint = { id: string; created_at: string; kind: "return_point"; accomplished: string | null; stopped_at: string | null; next_action: string | null; references: string | null; blocker: string | null };
+
+function TaskReturnPoints({ task, onError }: { task: Task; onError: (message: string) => void }) {
+  const [history, setHistory] = useState<ReturnPoint[]>([]);
+  const [accomplished, setAccomplished] = useState(""); const [stoppedAt, setStoppedAt] = useState("");
+  const [nextAction, setNextAction] = useState(""); const [references, setReferences] = useState(""); const [blocker, setBlocker] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { let active = true; void request<ReturnPoint[]>(`/tasks/${task.id}/return-points`).then(items => { if (active) setHistory(items); }).catch(cause => onError(errorText(cause))); return () => { active = false; }; }, [task.id]);
+  const save = async (event: FormEvent) => {
+    event.preventDefault(); if (busy || ![accomplished, stoppedAt, nextAction, references, blocker].some(value => value.trim())) return;
+    setBusy(true);
+    try {
+      const saved = await request<ReturnPoint>(`/tasks/${task.id}/return-points`, { method: "POST", body: JSON.stringify({ accomplished: accomplished.trim() || null, stopped_at: stoppedAt.trim() || null, next_action: nextAction.trim() || null, references: references.trim() || null, blocker: blocker.trim() || null, idempotency_key: crypto.randomUUID() }) });
+      setHistory(items => [saved, ...items.filter(item => item.id !== saved.id)]);
+      setAccomplished(""); setStoppedAt(""); setNextAction(""); setReferences(""); setBlocker("");
+    } catch (cause) { onError(errorText(cause)); }
+    finally { setBusy(false); }
+  };
+  return <section className="task-return-points"><h4>Return point</h4><p className="quiet-note">Leave a note for the next time you pick this up.</p>
+    {history[0] && <section className="latest-return-point"><strong>Last return point ? {new Date(history[0].created_at).toLocaleString()}</strong>{history[0].next_action && <p><b>Next:</b> {history[0].next_action}</p>}{history[0].blocker && <p><b>Blocker:</b> {history[0].blocker}</p>}<details><summary>Full note</summary><dl>{([ ["Done", history[0].accomplished], ["Stopped at", history[0].stopped_at], ["Next action", history[0].next_action], ["References", history[0].references], ["Blocker", history[0].blocker] ] as const).filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl></details></section>}
+    <form onSubmit={save}><label>What did you accomplish?<textarea value={accomplished} onChange={event => setAccomplished(event.target.value)} maxLength={4000} /></label><label>Where did you stop?<textarea value={stoppedAt} onChange={event => setStoppedAt(event.target.value)} maxLength={4000} /></label><label>Next concrete action<input value={nextAction} onChange={event => setNextAction(event.target.value)} maxLength={2000} /></label><label>References or files<input value={references} onChange={event => setReferences(event.target.value)} maxLength={4000} /></label><label>Blocker or open question<input value={blocker} onChange={event => setBlocker(event.target.value)} maxLength={2000} /></label><button className="secondary-button" type="submit" disabled={busy || ![accomplished, stoppedAt, nextAction, references, blocker].some(value => value.trim())}>{busy ? "Saving…" : "Save return point"}</button></form>
+  </section>;
+}
+
+function TaskPlanningFields({ task, onSave }: { task: Task; onSave: (changes: TaskPlanningChanges) => void }) {
+  const [firstStep, setFirstStep] = useState(task.first_step ?? "");
+  const [estimate, setEstimate] = useState(task.estimated_minutes?.toString() ?? "");
+  const [criteria, setCriteria] = useState(task.verification_criteria ?? "");
+  useEffect(() => {
+    setFirstStep(task.first_step ?? "");
+    setEstimate(task.estimated_minutes?.toString() ?? "");
+    setCriteria(task.verification_criteria ?? "");
+  }, [task.id, task.first_step, task.estimated_minutes, task.verification_criteria]);
+  return <section className="task-planning-fields"><h4>Planning details</h4><label>First step<textarea value={firstStep} maxLength={2000} onChange={event => setFirstStep(event.target.value)} onBlur={() => { if (firstStep !== (task.first_step ?? "")) onSave({ first_step: firstStep || null }); }} placeholder="What is the smallest useful action?" /></label><label>Estimate in minutes<input type="number" min={1} max={1440} value={estimate} onChange={event => setEstimate(event.target.value)} onBlur={() => { const parsed = estimate ? Number(estimate) : null; if (parsed !== (task.estimated_minutes ?? null) && (parsed === null || (Number.isInteger(parsed) && parsed >= 1 && parsed <= 1440))) onSave({ estimated_minutes: parsed }); }} placeholder="Optional" /></label><label>Definition of done<textarea value={criteria} maxLength={4000} onChange={event => setCriteria(event.target.value)} onBlur={() => { if (criteria !== (task.verification_criteria ?? "")) onSave({ verification_criteria: criteria || null }); }} placeholder="What evidence confirms this task is complete?" /></label></section>;
+}
+
+export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { projects: Project[]; onChanged: (project: Project) => void; initialProjectId?: string | null }) {
+  const [selected, setSelected] = useState(""); const [context, setContext] = useState<Context | null>(null);
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const projectLoadGate = useRef(createProjectLoadGate());
+  const [objective, setObjective] = useState(""); const [status, setStatus] = useState("active");
+  const [projectPriority, setProjectPriority] = useState<Project["priority"]>("normal"); const [projectTargetDate, setProjectTargetDate] = useState("");
+  const [name, setName] = useState(""); const [projectObjectiveDraft, setProjectObjectiveDraft] = useState(""); const [memoryTitle, setMemoryTitle] = useState(""); const [memoryContent, setMemoryContent] = useState(""); const [memoryType, setMemoryType] = useState("project");
+  const [focus, setFocus] = useState<Focus | null>(null); const [duration, setDuration] = useState(60); const [focusObjective, setFocusObjective] = useState("");
+  const [tasks, setTasks] = useState<Task[]>([]); const [taskTitle, setTaskTitle] = useState(""); const [taskSearch, setTaskSearch] = useState(""); const [taskFilter, setTaskFilter] = useState("open"); const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [dependencies, setDependencies] = useState<Task[]>([]); const [dependencyChoice, setDependencyChoice] = useState("");
+  const [taskView, setTaskView] = useState<"list" | "board">("list"); const [taskSort, setTaskSort] = useState("due");
+  const [milestones, setMilestones] = useState<Milestone[]>([]); const [milestoneTitle, setMilestoneTitle] = useState(""); const [milestoneDate, setMilestoneDate] = useState(""); const [milestoneDescription, setMilestoneDescription] = useState(""); const [milestoneCriteria, setMilestoneCriteria] = useState("");
+  const [projectSearch, setProjectSearch] = useState(""); const [projectName, setProjectName] = useState(""); const [projectDescription, setProjectDescription] = useState("");
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [message, setMessage] = useState("");
+  const project = projects.find(item => item.id === selected);
+  const visibleTasks = sortProjectTasks(filterProjectTasks(tasks, taskSearch, taskFilter), taskSort);
+  const taskStatuses: Array<{ value: Task["status"]; label: string }> = [{ value: "todo", label: "To do" }, { value: "in_progress", label: "In progress" }, { value: "blocked", label: "Blocked" }, { value: "done", label: "Done" }, { value: "cancelled", label: "Cancelled" }];
+  const refresh = async (id: string) => {
+    if (selectedRef.current !== id) return;
+    const ticket = projectLoadGate.current.begin();
+    setBusy(true);
+    setError("");
+    try {
+      const [data, memories, sessions, projectTasks, projectMilestones] = await Promise.all([
+        request<Context>(`/projects/${id}/context`),
+        request<Memory[]>(`/memories?project_id=${id}`),
+        request<Focus[]>("/focus-sessions"),
+        request<Task[]>(`/tasks?project_id=${id}&limit=100`),
+        request<Milestone[]>(`/projects/${id}/milestones`),
+      ]);
+      if (!projectLoadGate.current.isCurrent(ticket) || selectedRef.current !== id) return;
+      setContext({ ...data, knowledge: memories });
+      setTasks(projectTasks);
+      setMilestones(projectMilestones);
+      setFocus(sessions.find(item => item.status === "active" || item.status === "paused") ?? null);
+    } catch (cause) {
+      if (projectLoadGate.current.isCurrent(ticket) && selectedRef.current === id) setError(errorText(cause));
+    } finally {
+      if (projectLoadGate.current.isCurrent(ticket) && selectedRef.current === id) setBusy(false);
+    }
+  };
+  useEffect(() => {
+    projectLoadGate.current.invalidate();
+    setContext(null);
+    setTasks([]);
+    setMilestones([]);
+    setSelectedTask(null);
+    setDependencies([]);
+    setFocus(null);
+    if (selected) void refresh(selected);
+    else setBusy(false);
+    return () => { projectLoadGate.current.invalidate(); };
+  }, [selected]);
+  useEffect(() => {
+    if (!selectedTask) { setDependencies([]); setDependencyChoice(""); return; }
+    let active = true;
+    setDependencies([]);
+    setDependencyChoice("");
+    void request<Task[]>(`/tasks/${selectedTask.id}/dependencies`).then(items => { if (active) setDependencies(items); }).catch(cause => { if (active) setError(errorText(cause)); });
+    return () => { active = false; };
+  }, [selectedTask?.id]);
+  useEffect(() => { if (initialProjectId && projects.some(item => item.id === initialProjectId)) setSelected(initialProjectId); }, [initialProjectId, projects]);
+  const createProject = async (event: FormEvent) => { event.preventDefault(); if (!name.trim()) return; setBusy(true); setError(""); try { const created = await request<Project>("/projects", { method: "POST", body: JSON.stringify({ name: name.trim(), objective: projectObjectiveDraft.trim() || null }) }); onChanged(created); setName(""); setProjectObjectiveDraft(""); setSelected(created.id); setMessage("Project created."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  useEffect(() => { setProjectName(project?.name ?? ""); setProjectDescription(project?.description ?? ""); setProjectPriority(project?.priority ?? "normal"); setProjectTargetDate(project?.target_date ?? ""); }, [project?.id, project?.name, project?.description, project?.priority, project?.target_date]);
+  useEffect(() => { setObjective(project?.objective ?? ""); setStatus(project?.status ?? "active"); setFocusObjective(project?.objective ?? ""); }, [project?.id, project?.objective, project?.status]);
+  const saveProject = async () => { if (!project) return; setBusy(true); setError(""); try { const updated = await request<Project>(`/projects/${project.id}`, { method: "PATCH", body: JSON.stringify({ name: projectName.trim(), description: projectDescription.trim() || null, objective, status, priority: projectPriority, target_date: projectTargetDate || null }) }); onChanged(updated); await refresh(updated.id); setMessage("Project updated."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  const createTask = async (event: FormEvent) => { event.preventDefault(); if (!project || !taskTitle.trim()) return; setBusy(true); setError(""); try { await request<Task>("/tasks", { method: "POST", body: JSON.stringify({ title: taskTitle.trim(), project_id: project.id }) }); setTaskTitle(""); await refresh(project.id); setMessage("Task added."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  const createMilestone = async (event: FormEvent) => { event.preventDefault(); if (!project || !milestoneTitle.trim()) return; setBusy(true); setError(""); try { await request<Milestone>(`/projects/${project.id}/milestones`, { method: "POST", body: JSON.stringify({ title: milestoneTitle.trim(), description: milestoneDescription.trim() || null, completion_criteria: milestoneCriteria.trim() || null, target_date: milestoneDate || null }) }); setMilestoneTitle(""); setMilestoneDate(""); setMilestoneDescription(""); setMilestoneCriteria(""); await refresh(project.id); setMessage("Milestone added."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  const updateMilestone = async (milestone: Milestone, changes: Partial<Milestone>) => {
+    try {
+      const updated = await request<Milestone>(`/milestones/${milestone.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+      if (selectedRef.current !== milestone.project_id) return;
+      setMilestones(current => current.map(item => item.id === updated.id ? updated : item));
+      setMessage("Milestone updated.");
+    } catch (cause) {
+      if (selectedRef.current === milestone.project_id) setError(errorText(cause));
+    }
+  };
+  const updateTask = async (task: Task, changes: Partial<Task>) => {
+    if (!project) return;
+    const projectId = project.id;
+    setError("");
+    try {
+      const updated = await request<Task>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify(changes) });
+      // The user may have switched projects while the task update was in flight.
+      if (selectedRef.current !== projectId) return;
+      const moved = "project_id" in changes && updated.project_id !== projectId;
+      setTasks(current => moved ? current.filter(item => item.id !== updated.id) : current.map(item => item.id === updated.id ? updated : item));
+      setSelectedTask(current => current?.id === updated.id ? (moved ? null : updated) : current);
+      const freshContext = await request<Context>(`/projects/${projectId}/context`);
+      if (selectedRef.current !== projectId) return;
+      setContext(current => current ? { ...freshContext, knowledge: current.knowledge } : current);
+      if (moved) setMessage("Task moved to another project.");
+    } catch (cause) {
+      if (selectedRef.current === projectId) setError(errorText(cause));
+    }
+  };
+  const addDependency = async (event: FormEvent) => { event.preventDefault(); if (!selectedTask || !dependencyChoice) return; setError(""); try { const prerequisite = await request<Task>(`/tasks/${selectedTask.id}/dependencies`, { method: "POST", body: JSON.stringify({ depends_on_task_id: dependencyChoice }) }); setDependencies(current => current.some(item => item.id === prerequisite.id) ? current : [...current, prerequisite]); setDependencyChoice(""); } catch (cause) { setError(errorText(cause)); } };
+  const removeDependency = async (prerequisite: Task) => { if (!selectedTask) return; setError(""); try { await request<void>(`/tasks/${selectedTask.id}/dependencies/${prerequisite.id}`, { method: "DELETE" }); setDependencies(current => current.filter(item => item.id !== prerequisite.id)); } catch (cause) { setError(errorText(cause)); } };
+  const saveMemory = async (event: FormEvent) => { event.preventDefault(); if (!project || !memoryTitle.trim() || !memoryContent.trim()) return; setBusy(true); setError(""); try { await request<Memory>("/memories", { method: "POST", body: JSON.stringify({ project_id: project.id, memory_type: memoryType, title: memoryTitle.trim(), content: memoryContent.trim(), source: "user" }) }); setMemoryTitle(""); setMemoryContent(""); await refresh(project.id); setMessage("Project knowledge saved."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  const changeMemory = async (memory: Memory, action: "archive" | "delete") => { if (!project) return; setError(""); try { if (action === "delete") await request(`/memories/${memory.id}`, { method: "DELETE" }); else await request(`/memories/${memory.id}`, { method: "PATCH", body: JSON.stringify({ archived: true }) }); await refresh(project.id); } catch (cause) { setError(errorText(cause)); } };
+  const startFocus = async () => { if (!project) return; setBusy(true); setError(""); try { const result = await request<Focus>("/focus-sessions", { method: "POST", body: JSON.stringify({ project_id: project.id, objective: focusObjective.trim() || project.objective || `Work on ${project.name}`, duration_minutes: duration }) }); setFocus(result); window.dispatchEvent(new Event("orin:focus-updated")); setMessage("Focus session started."); } catch (cause) { setError(errorText(cause)); } finally { setBusy(false); } };
+  const focusAction = async (action: "pause" | "resume" | "complete" | "cancel") => { if (!focus) return; try { const result = await request<Focus>(`/focus-sessions/${focus.id}`, { method: "PATCH", body: JSON.stringify({ action }) }); setFocus(["complete", "cancel"].includes(action) ? null : result); window.dispatchEvent(new Event("orin:focus-updated")); setMessage(`Focus ${action}d.`); } catch (cause) { setError(errorText(cause)); } };
+
+  return <section className="project-workspace" aria-label="Project intelligence">
+    <form className="create-form project-create-form" onSubmit={createProject}><label className="sr-only" htmlFor="project-create">Project name</label><input id="project-create" value={name} onChange={event => setName(event.target.value)} placeholder="Create a project" maxLength={160} /><button className="primary-button" disabled={busy || !name.trim()}>Add project</button><details className="project-create-outcome"><summary>Add the intended outcome</summary><label htmlFor="project-create-objective">What would success look like?<textarea id="project-create-objective" value={projectObjectiveDraft} maxLength={2000} onChange={event => setProjectObjectiveDraft(event.target.value)} placeholder="A sentence is enough to start." /></label></details></form>
+    {projects.length > 0 && <div className="project-list-controls"><label>Find a project<input type="search" value={projectSearch} onChange={event => setProjectSearch(event.target.value)} placeholder="Search projects" /></label><label className="project-picker">Project<select aria-label="Select project" value={selected} onChange={event => setSelected(event.target.value)}><option value="">Choose a project</option>{projects.filter(item => item.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase())).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
+    {error && <p className="api-error" role="alert">{error}</p>}{message && <p className="success-message" role="status">{message}</p>}
+    {busy && <p className="loading-state" role="status">Loading project context…</p>}
+    {!projects.length && <p className="inline-empty">No projects yet. Create a project to begin collecting its tasks, activity, decisions, and context.</p>}
+    {project && !busy && <>
+      <header className="project-heading"><span className="eyebrow">PROJECT</span><h2 className="project-title"><label><span className="sr-only">Project name</span><input aria-label="Project name" value={projectName} maxLength={160} onChange={event => setProjectName(event.target.value)} /></label></h2><label className="project-description"><span className="sr-only">Project description</span><input aria-label="Project description" value={projectDescription} maxLength={2000} onChange={event => setProjectDescription(event.target.value)} placeholder="Add a short description" /></label><div className="project-heading-meta"><span className={`project-state state-${status}`}>{status.replaceAll("_", " ")}</span><span>{projectPriority} priority</span>{projectTargetDate && <span>Target {new Date(`${projectTargetDate}T12:00:00`).toLocaleDateString()}</span>}</div></header>
+      <section className="home-section project-outcome"><div><span className="eyebrow">INTENDED OUTCOME</span><label className="sr-only" htmlFor="project-objective">Objective</label><textarea id="project-objective" aria-label="Objective" value={objective} maxLength={2000} onChange={event => setObjective(event.target.value)} placeholder="What would success look like for this project?" /></div><div className="project-header-fields"><label>Status<select value={status} onChange={event => setStatus(event.target.value)}>{["planning", "active", "blocked", "paused", "completed", "archived"].map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Priority<select value={projectPriority} onChange={event => setProjectPriority(event.target.value as Project["priority"])}>{["low", "normal", "high", "urgent"].map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Target date<input type="date" value={projectTargetDate} onChange={event => setProjectTargetDate(event.target.value)} /></label><button className="secondary-button" disabled={busy || !projectName.trim()} onClick={() => void saveProject()}>Save project</button></div></section>
+      {context && <section className="project-signal-row" aria-label="Project status summary"><div><span className="eyebrow">PROGRESS</span><strong>{context.progress.total_tasks ? `${context.progress.completed_tasks} of ${context.progress.total_tasks} tasks complete` : "No tasks yet"}</strong>{context.progress.percentage !== null && <progress max="100" value={context.progress.percentage} aria-label="Project task completion" />}</div><div><span className="eyebrow">NEXT ACTION</span><strong>{context.next_actions[0]?.title ?? "Choose a next action"}</strong></div><div><span className="eyebrow">BLOCKED</span><strong>{context.blockers.length ? `${context.blockers.length} ${context.blockers.length === 1 ? "task" : "tasks"}` : "Nothing blocked"}</strong></div></section>}
+      {context && <>
+        <section className="home-section project-tasks"><div className="section-title"><h3>Tasks</h3><span className="quiet-note">{tasks.filter(task => task.status === "done").length} of {tasks.length} complete</span></div>
+          <form className="create-form" onSubmit={createTask}><label className="sr-only" htmlFor="project-task-create">New task title</label><input id="project-task-create" value={taskTitle} onChange={event => setTaskTitle(event.target.value)} placeholder="Add a task to this project" maxLength={240} /><button className="primary-button" disabled={busy || !taskTitle.trim()}>Add task</button></form>
+          <div className="project-task-tools"><label>Find tasks<input type="search" value={taskSearch} onChange={event => setTaskSearch(event.target.value)} placeholder="Search this project" /></label><label>Show<select value={taskFilter} onChange={event => setTaskFilter(event.target.value)}><option value="open">Open tasks</option><option value="all">All tasks</option><option value="done">Completed</option><option value="blocked">Blocked</option></select></label><label>Sort by<select value={taskSort} onChange={event => setTaskSort(event.target.value)}><option value="due">Due date</option><option value="priority">Importance</option><option value="title">Title</option><option value="recent">Recently updated</option></select></label><div className="project-view-toggle" role="group" aria-label="Task view"><button type="button" aria-pressed={taskView === "list"} onClick={() => setTaskView("list")}>List</button><button type="button" aria-pressed={taskView === "board"} onClick={() => setTaskView("board")}>Board</button></div></div>
+          {visibleTasks.length ? taskView === "list" ? <div className="data-list">{visibleTasks.map(task => <article className="data-row project-task-row" key={task.id}><button type="button" className="task-open-button" onClick={() => setSelectedTask(task)}><strong>{task.title}</strong><small>{task.due_at ? `Due ${new Date(task.due_at).toLocaleDateString()}` : "No due date"} · {task.priority} priority{task.milestone_id ? ` · ${milestones.find(item => item.id === task.milestone_id)?.title ?? "Milestone"}` : ""}</small></button><label className="sr-only" htmlFor={`task-status-${task.id}`}>Status for {task.title}</label><select id={`task-status-${task.id}`} aria-label={`Status for ${task.title}`} value={task.status} onChange={event => void updateTask(task, { status: event.target.value as Task["status"] })}>{taskStatuses.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></article>)}</div> : <div className="project-task-board">{taskStatuses.map(statusItem => { const columnTasks = visibleTasks.filter(task => task.status === statusItem.value); return <section className="project-task-column" key={statusItem.value} aria-label={`${statusItem.label} tasks`}><h4>{statusItem.label}<span>{columnTasks.length}</span></h4>{columnTasks.length ? columnTasks.map(task => <article className="project-task-card" key={task.id}><button type="button" className="task-open-button" onClick={() => setSelectedTask(task)}><strong>{task.title}</strong><small>{task.priority} priority{task.due_at ? ` · Due ${new Date(task.due_at).toLocaleDateString()}` : ""}</small></button><label className="sr-only" htmlFor={`board-task-status-${task.id}`}>Status for {task.title}</label><select id={`board-task-status-${task.id}`} aria-label={`Status for ${task.title}`} value={task.status} onChange={event => void updateTask(task, { status: event.target.value as Task["status"] })}>{taskStatuses.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></article>) : <p className="inline-empty">No tasks</p>}</section>; })}</div> : <p className="inline-empty">{taskSearch ? "No tasks match your search." : taskFilter === "open" ? "No open tasks. Add a small next action to move this project forward." : "No tasks in this view."}</p>}
+        </section>
+        <section className="home-section"><div className="section-title"><h3>Milestones</h3><span className="quiet-note">Project checkpoints</span></div><form className="create-form project-milestone-form" onSubmit={createMilestone}><label className="sr-only" htmlFor="milestone-title">Milestone title</label><input id="milestone-title" value={milestoneTitle} onChange={event => setMilestoneTitle(event.target.value)} placeholder="Add a milestone" maxLength={180} /><label className="sr-only" htmlFor="milestone-date">Target date</label><input id="milestone-date" type="date" aria-label="Milestone target date" value={milestoneDate} onChange={event => setMilestoneDate(event.target.value)} /><button className="secondary-button" disabled={busy || !milestoneTitle.trim()}>Add milestone</button><details className="project-milestone-more"><summary>Add description or completion criteria</summary><label>Description<textarea value={milestoneDescription} maxLength={3000} onChange={event => setMilestoneDescription(event.target.value)} placeholder="What does this checkpoint include?" /></label><label>Completion criteria<textarea value={milestoneCriteria} maxLength={3000} onChange={event => setMilestoneCriteria(event.target.value)} placeholder="How will you know this milestone is complete?" /></label></details></form>{milestones.length ? <div className="data-list">{milestones.map(item => <article className="project-milestone-row" key={item.id}><div className="data-main"><strong>{item.title}</strong><small>{item.target_date ? `Target ${new Date(`${item.target_date}T12:00:00`).toLocaleDateString()}` : "No target date"}{item.status === "completed" ? " · Completed" : " · Upcoming"}</small>{item.description && <p>{item.description}</p>}</div><button className="secondary-button" onClick={() => void updateMilestone(item, { status: item.status === "completed" ? "pending" : "completed" })}>{item.status === "completed" ? "Reopen" : "Complete"}<span className="sr-only"> milestone {item.title}</span></button><details className="project-milestone-edit"><summary>Edit details</summary><label>Description<textarea defaultValue={item.description ?? ""} maxLength={3000} onBlur={event => { if (event.target.value !== (item.description ?? "")) void updateMilestone(item, { description: event.target.value || null }); }} /></label><label>Completion criteria<textarea defaultValue={item.completion_criteria ?? ""} maxLength={3000} onBlur={event => { if (event.target.value !== (item.completion_criteria ?? "")) void updateMilestone(item, { completion_criteria: event.target.value || null }); }} /></label><label>Target date<input type="date" defaultValue={item.target_date ?? ""} onBlur={event => { if (event.target.value !== (item.target_date ?? "")) void updateMilestone(item, { target_date: event.target.value || null }); }} /></label><small>{item.completion_criteria ? `Done when: ${item.completion_criteria}` : "No completion criteria set."}</small></details></article>)}</div> : <p className="inline-empty">No milestones yet. Add a meaningful checkpoint if this project needs one.</p>}</section>
+        {selectedTask && <aside className="project-task-panel" role="dialog" aria-modal="true" aria-labelledby="project-task-title"><div className="section-title"><h3 id="project-task-title">Task details</h3><button type="button" className="text-button" onClick={() => setSelectedTask(null)}>Close</button></div><label>Title<input value={selectedTask.title} maxLength={240} onChange={event => setSelectedTask({ ...selectedTask, title: event.target.value })} onBlur={() => { const current = tasks.find(item => item.id === selectedTask.id); if (current && current.title !== selectedTask.title) void updateTask(selectedTask, { title: selectedTask.title }); }} /></label><label>Description<textarea value={selectedTask.description ?? ""} onChange={event => setSelectedTask({ ...selectedTask, description: event.target.value })} onBlur={() => { const current = tasks.find(item => item.id === selectedTask.id); if (current && current.description !== selectedTask.description) void updateTask(selectedTask, { description: selectedTask.description }); }} placeholder="Add useful context" /></label><label>Project<select aria-label="Task project" value={selectedTask.project_id ?? ""} onChange={event => void updateTask(selectedTask, { project_id: event.target.value || null, milestone_id: null })}><option value="">No project</option>{projects.filter(item => item.status !== "archived").map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><label>Priority<select value={selectedTask.priority} onChange={event => void updateTask(selectedTask, { priority: event.target.value as Task["priority"] })}>{["low", "normal", "high", "urgent"].map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Due date<input type="date" value={taskDueDateValue(selectedTask.due_at)} onChange={event => void updateTask(selectedTask, { due_at: taskDueDateBoundary(event.target.value) })} /></label><label>Milestone<select value={selectedTask.milestone_id ?? ""} onChange={event => void updateTask(selectedTask, { milestone_id: event.target.value || null })}><option value="">No milestone</option>{milestones.map(item => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label><TaskPlanningFields task={selectedTask} onSave={changes => void updateTask(selectedTask, changes)} /><TaskReturnPoints task={selectedTask} onError={setError} /><section className="task-dependencies"><h4>Blocked by</h4><p className="quiet-note">These tasks need to be done first.</p>{dependencies.length ? <ul>{dependencies.map(item => <li key={item.id}><span>{item.title} · {item.status.replaceAll("_", " ")}</span><button type="button" className="text-button" aria-label={`Remove prerequisite ${item.title}`} onClick={() => void removeDependency(item)}>Remove</button></li>)}</ul> : <p className="inline-empty">No prerequisites.</p>}<form onSubmit={addDependency}><label htmlFor="task-dependency-choice">Add a prerequisite<select id="task-dependency-choice" value={dependencyChoice} onChange={event => setDependencyChoice(event.target.value)}><option value="">Choose a task</option>{tasks.filter(item => item.id !== selectedTask.id && !dependencies.some(dependency => dependency.id === item.id)).map(item => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label><button type="submit" className="secondary-button" disabled={!dependencyChoice}>Add dependency</button></form></section></aside>}
+        <section className="home-section"><h3>Progress</h3><p>{context.progress.total_tasks ? `${context.progress.completed_tasks} of ${context.progress.total_tasks} tasks complete (${context.progress.percentage}%)` : "No tasks yet; progress will appear when tasks are linked to this project."}</p>{context.progress.percentage !== null && <progress max="100" value={context.progress.percentage} aria-label="Project task completion" />}</section>
+        <section className="home-section"><h3>Next actions</h3>{context.next_actions.length ? <ul>{context.next_actions.map(task => <li key={task.id}>{task.title}</li>)}</ul> : <p className="inline-empty">No unfinished project tasks.</p>}</section>
+        <section className="home-section"><h3>Blockers</h3>{context.blockers.length ? <ul>{context.blockers.map(task => <li key={task.id}>{task.title}</li>)}</ul> : <p className="inline-empty">No current blockers.</p>}</section>
+        <section className="home-section"><h3>Recent activity</h3>{context.activity.length ? <ul>{context.activity.map(item => <li key={item.id}>{item.summary} · {new Date(item.created_at).toLocaleString()}</li>)}</ul> : <p className="inline-empty">No project activity yet.</p>}</section>
+        <section className="home-section"><h3>Knowledge and decisions</h3>{context.knowledge.length ? <div className="data-list">{context.knowledge.map(item => <article className="data-row" key={item.id}><div className="data-main"><strong>{item.title} · {item.type}</strong><p>{item.content}</p><small>Source: {item.source}</small></div><button className="secondary-button" onClick={() => void changeMemory(item, "archive")}>Archive</button><button className="secondary-button" onClick={() => void changeMemory(item, "delete")}>Delete</button></article>)}</div> : <p className="inline-empty">No saved project knowledge yet.</p>}
+          <form className="settings-section" onSubmit={saveMemory}><h4>Save project knowledge</h4><label>Type<select value={memoryType} onChange={event => setMemoryType(event.target.value)}>{["project", "commitment", "knowledge", "interaction", "pattern"].map(value => <option key={value}>{value}</option>)}</select></label><label>Title<input value={memoryTitle} onChange={event => setMemoryTitle(event.target.value)} maxLength={180} required /></label><label>Details<textarea value={memoryContent} onChange={event => setMemoryContent(event.target.value)} maxLength={5000} required /></label><button className="primary-button" disabled={busy}>Save memory</button></form>
+        </section>
+        <section className="home-section"><h3>Focus session</h3>{focus ? <><p>{focus.objective} · {focus.status} · ends {new Date(focus.ends_at).toLocaleTimeString()}</p>{focus.status === "active" ? <button className="secondary-button" onClick={() => void focusAction("pause")}>Pause</button> : <button className="secondary-button" onClick={() => void focusAction("resume")}>Resume</button>}<button className="secondary-button" onClick={() => void focusAction("complete")}>Complete</button><button className="secondary-button" onClick={() => void focusAction("cancel")}>Exit focus</button></> : <><label>Focus objective<input value={focusObjective} onChange={event => setFocusObjective(event.target.value)} placeholder={project.objective || `Work on ${project.name}`} maxLength={500} /></label><label>Duration<select value={duration} onChange={event => setDuration(Number(event.target.value))}><option value={25}>25 minutes</option><option value={60}>1 hour</option><option value={120}>2 hours</option><option value={240}>4 hours</option></select></label><button className="primary-button" disabled={busy} onClick={() => void startFocus()}>Start focus</button></>}</section>
+      </>}
+    </>}
+  </section>;
+}

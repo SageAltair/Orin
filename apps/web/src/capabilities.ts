@@ -1,0 +1,77 @@
+export type CapabilityId = "home" | "orin" | "opportunities" | "calendar" | "projects" | "tasks" | "activity" | "memories" | "focus" | "settings";
+export type Density = "comfortable" | "compact";
+export type Theme = "light" | "dark" | "system";
+
+export interface UserPreferences {
+  visibleCapabilities: CapabilityId[];
+  hiddenCapabilities: CapabilityId[];
+  minimizedCapabilities: CapabilityId[];
+  pinnedCapabilities: CapabilityId[];
+  density: Density;
+  theme: Theme;
+  autonomyMode: "conservative" | "balanced" | "automatic" | "custom";
+  customAutonomy: Record<string, "automatic" | "approval">;
+  proactiveMode: "quiet" | "supportive" | "proactive" | "persistent";
+}
+
+export interface Capability {
+  id: CapabilityId;
+  label: string;
+  description: string;
+  icon: string;
+}
+
+// Only capabilities currently implemented in this foundation are granted.
+export const capabilities: Capability[] = [
+  { id: "home", label: "Home", description: "Your current priorities", icon: "⌂" },
+  { id: "orin", label: "Orin", description: "Plan, ask, and continue work", icon: "✦" },
+  { id: "calendar", label: "Calendar", description: "See your commitments and plans", icon: "▦" },
+  { id: "opportunities", label: "Opportunities", description: "Explore possibilities and manage risks", icon: "O" },
+  { id: "projects", label: "Projects", description: "Organize work by outcome", icon: "▦" },
+  { id: "tasks", label: "Tasks", description: "Keep track of next steps", icon: "☑" },
+  { id: "activity", label: "Activity", description: "A record of recent changes", icon: "◷" },
+  { id: "memories", label: "Writing", description: "Capture thoughts, take notes, and develop ideas", icon: "M" },
+  { id: "focus", label: "Focus sessions", description: "Start and review focused work", icon: "F" },
+  { id: "settings", label: "Settings", description: "Shape your Orin workspace", icon: "\u2699" },
+];
+
+export const defaultPreferences: UserPreferences = {
+  visibleCapabilities: ["home", "orin", "calendar", "opportunities", "tasks", "projects", "activity", "memories", "focus"],
+  hiddenCapabilities: ["settings"],
+  minimizedCapabilities: [],
+  pinnedCapabilities: ["home", "tasks"],
+  density: "comfortable",
+  theme: "light",
+  autonomyMode: "balanced",
+  customAutonomy: {},
+  proactiveMode: "supportive",
+};
+
+export function getNavigationCapabilities(granted: Capability[], preferences: UserPreferences): Capability[] {
+  const visible = new Set(preferences.visibleCapabilities);
+  const pinned = new Set(preferences.pinnedCapabilities);
+  return granted.filter((capability) => visible.has(capability.id))
+    .sort((a, b) => Number(pinned.has(b.id)) - Number(pinned.has(a.id)) ||
+      Number(preferences.minimizedCapabilities.includes(a.id)) - Number(preferences.minimizedCapabilities.includes(b.id)));
+}
+
+export function normalizePreferences(value: unknown): UserPreferences {
+  if (!value || typeof value !== "object") return defaultPreferences;
+  const candidate = value as Partial<UserPreferences>;
+  const validIds = new Set(capabilities.map(({ id }) => id));
+  const ids = (items: unknown, fallback: CapabilityId[]) => Array.isArray(items)
+    ? [...new Set(items.filter((id): id is CapabilityId => typeof id === "string" && validIds.has(id as CapabilityId)))]
+    : fallback;
+  const visibleCapabilities = ids(candidate.visibleCapabilities, defaultPreferences.visibleCapabilities);
+  return {
+    visibleCapabilities,
+    hiddenCapabilities: capabilities.map(({ id }) => id).filter((id) => !visibleCapabilities.includes(id)),
+    minimizedCapabilities: ids(candidate.minimizedCapabilities, defaultPreferences.minimizedCapabilities).filter((id) => visibleCapabilities.includes(id)),
+    pinnedCapabilities: ids(candidate.pinnedCapabilities, defaultPreferences.pinnedCapabilities).filter((id) => visibleCapabilities.includes(id)),
+    density: candidate.density === "compact" ? "compact" : "comfortable",
+    theme: candidate.theme === "dark" || candidate.theme === "system" ? candidate.theme : "light",
+    autonomyMode: candidate.autonomyMode === "conservative" || candidate.autonomyMode === "automatic" || candidate.autonomyMode === "custom" ? candidate.autonomyMode : "balanced",
+    customAutonomy: candidate.customAutonomy && typeof candidate.customAutonomy === "object" ? candidate.customAutonomy as Record<string, "automatic" | "approval"> : {},
+    proactiveMode: candidate.proactiveMode === "quiet" || candidate.proactiveMode === "proactive" || candidate.proactiveMode === "persistent" ? candidate.proactiveMode : "supportive",
+  };
+}

@@ -1,0 +1,108 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-orin}
+      POSTGRES_USER: ${POSTGRES_USER:-orin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5273}
+      AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:?Set AUTH_SECRET_KEY in .env}
+      AUTH_REFRESH_COOKIE_SECURE: ${AUTH_REFRESH_COOKIE_SECURE:-true}
+      ACCESS_TOKEN_LIFETIME_MINUTES: ${ACCESS_TOKEN_LIFETIME_MINUTES:-15}
+      REFRESH_TOKEN_LIFETIME_DAYS: ${REFRESH_TOKEN_LIFETIME_DAYS:-30}
+      PYTHONPATH: /app/src
+      BACKGROUND_WORKER_ENABLED: "true"
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      AI_MODEL: ${AI_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      CLOUDFLARE_API_KEY: ${CLOUDFLARE_API_KEY:-}
+      CLOUDFLARE_ACCOUNT_ID: ${CLOUDFLARE_ACCOUNT_ID:-}
+      INTEGRATION_ENCRYPTION_KEY: ${INTEGRATION_ENCRYPTION_KEY:-}
+      GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
+      GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      GITHUB_APP_CALLBACK_URL: ${GITHUB_APP_CALLBACK_URL:-}
+      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:5273}
+      ATTACHMENT_STORAGE_PATH: ${ATTACHMENT_STORAGE_PATH:-/app/data/attachments}
+      ATTACHMENT_MAX_SIZE_BYTES: ${ATTACHMENT_MAX_SIZE_BYTES:-10485760}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src
+      - orin_attachments:/app/data/attachments
+    command: ["sh", "-lc", "alembic upgrade head && uvicorn orin_api.main:app --host 0.0.0.0 --port 8000 --reload"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "${API_PORT:-8100}:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8100}
+      VITE_FOCUS_ENABLED: ${VITE_FOCUS_ENABLED:-true}
+      VITE_USE_POLLING: "true"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./apps/web:/app/apps/web
+      - ./packages:/app/packages
+      - web_node_modules:/app/apps/web/node_modules
+    ports:
+      - "${WEB_PORT:-5273}:5173"
+
+  worker:
+    profiles: ["worker"]
+    build:
+      context: .
+      dockerfile: infrastructure/docker/worker.Dockerfile
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ORIN_API_URL: ${ORIN_API_URL:-}
+      ORIN_DEVICE_ID: ${ORIN_DEVICE_ID:-}
+      ORIN_WORKER_TOKEN: ${ORIN_WORKER_TOKEN:-}
+      ORIN_ALLOWED_ROOTS: /workspace
+      ORIN_WORKER_STATE_PATH: /state/worker.sqlite3
+    volumes:
+      - worker_state:/state
+      - ${ORIN_WORKER_ROOT:-./worker-workspace}:/workspace
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  orin_attachments:
+  worker_state:
+  web_node_modules:
