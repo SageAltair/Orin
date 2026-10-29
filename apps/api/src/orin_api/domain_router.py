@@ -1417,6 +1417,8 @@ def add_task_dependency(task_id: uuid.UUID, data: TaskDependencyCreate, user: Us
     prerequisite = session.scalar(select(Task).where(Task.id == data.depends_on_task_id, Task.owner_id == user.id))
     if task is None or prerequisite is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.workspace_id != prerequisite.workspace_id:
+        raise HTTPException(status_code=422, detail="Tasks belong to different workspaces")
     existing = session.scalar(select(TaskDependency).where(TaskDependency.task_id == task.id, TaskDependency.depends_on_task_id == prerequisite.id))
     if existing is not None:
         return prerequisite
@@ -1493,6 +1495,14 @@ def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
     changes = data.model_dump(exclude_unset=True)
     validate_task_links(session, user.id, changes.get("project_id", task.project_id), changes.get("assignee_id", task.assignee_id), changes.get("milestone_id", task.milestone_id))
+    effective_project_id = changes.get("project_id", task.project_id)
+    if "project_id" in changes and effective_project_id is not None:
+        project = session.get(Project, effective_project_id)
+        if project is not None:
+            if project.workspace_id is None and task.workspace_id is not None:
+                project.workspace_id = task.workspace_id
+            elif project.workspace_id != task.workspace_id:
+                raise HTTPException(status_code=422, detail="Project belongs to another workspace")
     if "title" in changes and changes["title"] is not None:
         changes["title"] = changes["title"].strip()
     requested_status = changes.pop("status", None)

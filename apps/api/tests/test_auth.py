@@ -222,3 +222,40 @@ def test_user_cannot_list_or_modify_another_users_data(auth_client: TestClient) 
         "/api/v1/tasks",
         json={"title": "Cross-user link", "project_id": project.json()["id"]},
     ).status_code == 422
+
+
+def test_authenticated_workspace_task_lifecycle_survives_token_refresh(auth_client: TestClient) -> None:
+    client = auth_client
+    register(client, "workflow@example.com")
+    first_token = login(client, "workflow@example.com")
+    authenticate(client, str(first_token["access_token"]))
+
+    personal = client.get("/api/v1/workspaces")
+    assert personal.status_code == 200 and len(personal.json()) == 1
+    office = client.post("/api/v1/workspaces", json={"name": "Office"})
+    assert office.status_code == 201, office.text
+    headers = {"X-Orin-Workspace-Id": office.json()["id"]}
+
+    project = client.post("/api/v1/projects", headers=headers, json={"name": "Launch"})
+    assert project.status_code == 201, project.text
+    task = client.post(
+        "/api/v1/tasks",
+        headers=headers,
+        json={"title": "Prepare launch", "project_id": project.json()["id"]},
+    )
+    assert task.status_code == 201, task.text
+    completed = client.patch(f"/api/v1/tasks/{task.json()['id']}", json={"status": "done"})
+    assert completed.status_code == 200, completed.text
+
+    refreshed = client.post("/api/v1/auth/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    authenticate(client, str(refreshed.json()["access_token"]))
+    assert [row["name"] for row in client.get("/api/v1/projects", headers=headers).json()] == ["Launch"]
+    saved_tasks = client.get("/api/v1/tasks", headers=headers)
+    assert saved_tasks.status_code == 200, saved_tasks.text
+    assert [(row["title"], row["status"], row["project_id"]) for row in saved_tasks.json()] == [
+        ("Prepare launch", "done", project.json()["id"])
+    ]
+    assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal.json()[0]["id"]}).json() == []
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401

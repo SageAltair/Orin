@@ -797,3 +797,79 @@ def test_command_rejects_task_id_owned_by_another_user(client: TestClient, monke
     assert response.json()["status"] == "denied"
     assert response.json()["execution"]["status"] == "denied"
     assert client.get("/api/v1/tasks").json() == []
+
+
+def test_task_project_reassignment_preserves_workspace_boundary(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+    personal_project = client.post("/api/v1/projects", json={"name": "Personal work"}).json()
+    another_personal_project = client.post("/api/v1/projects", json={"name": "Personal follow-up"}).json()
+    office_project = client.post("/api/v1/projects", headers=office_headers, json={"name": "Office work"}).json()
+    personal_task = client.post("/api/v1/tasks", json={"title": "Prepare notes", "project_id": personal_project["id"]}).json()
+    office_task = client.post("/api/v1/tasks", headers=office_headers, json={"title": "Review client", "project_id": office_project["id"]}).json()
+
+    for task, foreign_project in ((personal_task, office_project), (office_task, personal_project)):
+        rejected = client.patch(f"/api/v1/tasks/{task['id']}", json={"project_id": foreign_project["id"]})
+        assert rejected.status_code == 422, rejected.text
+        assert rejected.json()["detail"] == "Project belongs to another workspace"
+
+    assert client.patch(
+        f"/api/v1/tasks/{personal_task['id']}", json={"project_id": another_personal_project["id"]}
+    ).status_code == 200
+    assert {row["id"]: row["project_id"] for row in client.get("/api/v1/tasks").json()} == {
+        personal_task["id"]: another_personal_project["id"]
+    }
+    assert {row["id"]: row["project_id"] for row in client.get("/api/v1/tasks", headers=office_headers).json()} == {
+        office_task["id"]: office_project["id"]
+    }
+    assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json()[0]["id"] == personal_task["id"]
+
+
+def test_task_dependencies_cannot_cross_workspaces(client: TestClient) -> None:
+    client.get("/api/v1/workspaces")
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+    personal_task = client.post("/api/v1/tasks", json={"title": "Personal task"}).json()
+    personal_prerequisite = client.post("/api/v1/tasks", json={"title": "Personal prerequisite"}).json()
+    office_task = client.post("/api/v1/tasks", headers=office_headers, json={"title": "Office task"}).json()
+
+    for task, foreign_task in ((personal_task, office_task), (office_task, personal_task)):
+        response = client.post(
+            f"/api/v1/tasks/{task['id']}/dependencies",
+            json={"depends_on_task_id": foreign_task["id"]},
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "Tasks belong to different workspaces"
+        assert client.get(f"/api/v1/tasks/{task['id']}/dependencies").json() == []
+
+    allowed = client.post(
+        f"/api/v1/tasks/{personal_task['id']}/dependencies",
+        json={"depends_on_task_id": personal_prerequisite["id"]},
+    )
+    assert allowed.status_code == 201, allowed.text
+    assert [row["id"] for row in client.get(f"/api/v1/tasks/{personal_task['id']}/dependencies").json()] == [personal_prerequisite["id"]]
+
+
+def test_focus_capture_respects_selected_workspace(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+
+    captured = client.post("/api/v1/focus/capture", headers=office_headers, json={"title": "Office inbox"})
+    assert captured.status_code == 201, captured.text
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]
+    assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
+
+    default_capture = client.post("/api/v1/focus/capture", json={"title": "Personal inbox"})
+    assert default_capture.status_code == 201, default_capture.text
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal["id"]}).json()] == ["Personal inbox"]
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]
+
+    unknown_workspace = client.post(
+        "/api/v1/focus/capture",
+        headers={"X-Orin-Workspace-Id": str(uuid.uuid4())},
+        json={"title": "Must not be created"},
+    )
+    assert unknown_workspace.status_code == 404
+    assert [row["title"] for row in client.get("/api/v1/tasks", headers=office_headers).json()] == ["Office inbox"]

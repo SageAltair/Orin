@@ -298,9 +298,12 @@ def _now_view(task: Task | None, focus: FocusSession | None, day_key: str,
 
 @router.post("/capture", status_code=status.HTTP_201_CREATED)
 def capture_task(data: CaptureCreate = CaptureCreate(), user: User = Depends(get_current_user),
-                 session: Session = Depends(get_session)) -> dict[str, object]:
+                 session: Session = Depends(get_session),
+                 workspace_id: uuid.UUID | None = Header(default=None, alias="X-Orin-Workspace-Id")) -> dict[str, object]:
+    from orin_api.domain_router import active_workspace
+    workspace = active_workspace(session, user.id, workspace_id)
     title = (data.title or "").strip() or "Untitled task"
-    task = Task(owner_id=user.id, title=title, first_step=(data.first_step or "").strip() or None,
+    task = Task(owner_id=user.id, workspace_id=workspace.id, title=title, first_step=(data.first_step or "").strip() or None,
                 energy_level=data.energy_level, status=TaskStatus.TODO, focus_state=FocusState.INBOX)
     touch_task(task)
     session.add(task)
