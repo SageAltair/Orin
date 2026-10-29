@@ -509,3 +509,98 @@ def test_unlink_selects_only_the_requested_relationship(client: TestClient) -> N
     assert client.delete(f"{endpoint}/{note_id}?link_type=contrasts").status_code == 204
     assert [row["link_type"] for row in client.get(endpoint).json()] == ["supports"]
     assert client.get("/api/v1/creative/ideas").json()[0]["linked_document_ids"] == [note_id]
+
+
+def test_card_partial_patch_preserves_other_fields(client: TestClient) -> None:
+    project = _project(client)
+    base = f"/api/v1/creative/projects/{project['id']}/cards"
+    created = client.post(base, json={"title": "Chapter", "summary": "Keep this", "position": 4})
+    assert created.status_code == 201, created.text
+    updated = client.patch(f"{base}/{created.json()['id']}", json={"status": "published"})
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "published"
+    assert updated.json()["title"] == "Chapter"
+    assert updated.json()["summary"] == "Keep this"
+    assert updated.json()["position"] == 4
+    assert client.patch(f"{base}/{created.json()['id']}", json={"title": None}).status_code == 422
+    cleared = client.patch(f"{base}/{created.json()['id']}", json={"summary": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["summary"] is None
+
+
+def test_creative_references_must_be_owned_and_project_consistent(
+    client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]
+) -> None:
+    factory, owner_id = sessions
+    project = _project(client)
+    other_project = _project(client, "Another project")
+    base = f"/api/v1/creative/projects/{project['id']}"
+    note = _note(client)
+    valid_card = client.post(f"{base}/cards", json={"title": "Owned", "document_id": note["id"]})
+    assert valid_card.status_code == 201, valid_card.text
+    valid_outline = client.post(f"{base}/outline", json={"title": "Owned outline", "document_id": note["id"]})
+    assert valid_outline.status_code == 201, valid_outline.text
+
+    with factory.begin() as session:
+        intruder = User(email="other-writer@example.test", password_hash="test-hash", display_name="Other writer")
+        session.add(intruder)
+        session.flush()
+        from orin_api.models import KnowledgeDocument
+        foreign_document = KnowledgeDocument(user_id=intruder.id, title="Private document", content="Secret")
+        session.add(foreign_document)
+        session.flush()
+        foreign_id = str(foreign_document.id)
+
+    assert client.post(f"{base}/cards", json={"title": "Foreign", "document_id": foreign_id}).status_code == 404
+    assert client.post(f"{base}/outline", json={"title": "Foreign", "document_id": foreign_id}).status_code == 404
+    assert client.patch(f"{base}/cards/{valid_card.json()['id']}", json={"document_id": foreign_id}).status_code == 404
+    assert client.patch(f"{base}/cards/{valid_card.json()['id']}", json={"status": "ready"}).status_code == 200
+
+    parent = client.post(f"{base}/outline", json={"title": "Parent"}).json()
+    assert client.post(f"{base}/outline", json={"title": "Child", "parent_id": parent["id"]}).status_code == 201
+    assert client.post(f"/api/v1/creative/projects/{other_project['id']}/outline",
+                       json={"title": "Wrong parent", "parent_id": parent["id"]}).status_code == 404
+    assert client.post(f"{base}/outline",
+                       json={"title": "Missing parent", "parent_id": str(uuid.uuid4())}).status_code == 404
+    assert client.get(f"{base}/cards").json()[0]["document_id"] == note["id"]
+
+
+def test_creative_document_project_mismatch_is_rejected(client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]) -> None:
+    factory, _ = sessions
+    first = _project(client, "First")
+    second = _project(client, "Second")
+    note = _note(client)
+    from orin_api.models import KnowledgeDocument
+    with factory.begin() as session:
+        row = session.get(KnowledgeDocument, uuid.UUID(note["id"]))
+        row.project_id = uuid.UUID(first["id"])
+    base = f"/api/v1/creative/projects/{second['id']}"
+    assert client.post(f"{base}/cards", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
+    assert client.post(f"{base}/outline", json={"title": "Mismatch", "document_id": note["id"]}).status_code == 422
+
+
+def test_ideas_catalog_link_uses_persisted_model(
+    client: TestClient, sessions: tuple[sessionmaker, uuid.UUID]
+) -> None:
+    from orin_api.creative_domain import IdeasCatalog
+    factory, owner_id = sessions
+    idea_id = uuid.UUID(client.post("/api/v1/creative/ideas", json={"text": "Linkable"}).json()["id"])
+    document_id = uuid.UUID(_note(client)["id"])
+    with factory.begin() as session:
+        catalog = IdeasCatalog()
+        link = catalog.link_idea_to_document(
+            session=session, idea_id=idea_id, document_id=document_id,
+            link_type="supports", note="Source material"
+        )
+        assert link.user_id == owner_id
+        assert link.document_id == document_id
+        assert link.id is not None
+    with factory() as session:
+        stored = session.scalar(
+            select(IdeaDocumentLink).where(
+                IdeaDocumentLink.idea_id == idea_id,
+                IdeaDocumentLink.document_id == document_id,
+            )
+        )
+        assert stored is not None
+        assert stored.link_type == "supports"
