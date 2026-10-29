@@ -211,6 +211,8 @@ export const register = async (
   password: string,
   displayName: string,
 ) => {
+  // Registration is also an account switch: never attach a prior identity.
+  await Promise.all([persistToken(null), setActiveWorkspace(null)]);
   await request<User>(
     "/auth/register",
     {
