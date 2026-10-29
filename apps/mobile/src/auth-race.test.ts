@@ -46,7 +46,7 @@ describe("Android concurrent refresh and account transitions", () => {
       const pendingRefresh = new Promise<Response>((resolve) => {
         completeRefresh = resolve;
       });
-      const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
         const path = String(url);
         if (path.endsWith("/projects")) return new Response(null, { status: 401 });
         if (path.endsWith("/auth/refresh")) return pendingRefresh;
@@ -75,7 +75,7 @@ describe("Android concurrent refresh and account transitions", () => {
       await expect(oldRequest).rejects.toMatchObject({ status: 401 });
       await expect(api.request("/tasks", {}, false)).resolves.toEqual({ ok: true });
 
-      const taskCall = fetchMock.mock.calls.findLast(([url]) => String(url).endsWith("/tasks"));
+      const taskCall = [...fetchMock.mock.calls].reverse().find(([url]) => String(url).endsWith("/tasks"));
       expect(new Headers(taskCall?.[1]?.headers).get("Authorization")).toBe("Bearer new-token");
       expect(SecureStore.setItemAsync).toHaveBeenCalledWith(TOKEN_KEY, "new-token");
       expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(TOKEN_KEY, "old-refreshed-token");
@@ -87,7 +87,7 @@ describe("Android concurrent refresh and account transitions", () => {
     const pendingRefresh = new Promise<Response>((resolve) => {
       completeRefresh = resolve;
     });
-    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
       const path = String(url);
       if (path.endsWith("/projects")) return new Response(null, { status: 401 });
       if (path.endsWith("/auth/refresh")) return pendingRefresh;
@@ -108,7 +108,7 @@ describe("Android concurrent refresh and account transitions", () => {
     await expect(oldRequest).rejects.toMatchObject({ status: 401 });
 
     await expect(api.request("/tasks", {}, false)).resolves.toEqual({ ok: true });
-    const taskCall = fetchMock.mock.calls.findLast(([url]) => String(url).endsWith("/tasks"));
+    const taskCall = [...fetchMock.mock.calls].reverse().find(([url]) => String(url).endsWith("/tasks"));
     expect(new Headers(taskCall?.[1]?.headers).has("Authorization")).toBe(false);
     expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(TOKEN_KEY, "old-refreshed-token");
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(TOKEN_KEY);
