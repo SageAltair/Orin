@@ -47,6 +47,15 @@ describe("shared task views", () => {
     expect(filterTasksForView(items, "upcoming", "", now).map(item => item.id)).toEqual(["future"]);
   });
 
+  it("marks a task overdue immediately after its scheduled time, including today", () => {
+    const now = new Date(2026, 9, 11, 14, 30);
+    const earlierToday = new Date(2026, 9, 11, 14, 29).toISOString();
+    const laterToday = new Date(2026, 9, 11, 14, 31).toISOString();
+    const items = [task("late today", { due_at: earlierToday }), task("still ahead", { due_at: laterToday })];
+    expect(filterTasksForView(items, "overdue", "", now).map(item => item.id)).toEqual(["late today"]);
+    expect(filterTasksForView(items, "today", "", now).map(item => item.id)).toEqual(["late today", "still ahead"]);
+  });
+
   it("converts browser-local datetime to UTC and back without shifting wall time", () => {
     const local = "2026-10-11T16:35";
     const utc = toUtcDueAt(local);
@@ -54,5 +63,13 @@ describe("shared task views", () => {
     expect(toLocalDateTime(utc)).toBe(local);
     expect(toUtcDueAt("")).toBeNull();
     expect(() => toUtcDueAt("not-a-date")).toThrow("Choose a valid date and time.");
+    expect(() => toUtcDueAt("2026-02-31T12:00")).toThrow("Choose a valid date and time.");
+    expect(() => toUtcDueAt("2026-10-11T25:00")).toThrow("Choose a valid date and time.");
+  });
+
+  it("rejects nonexistent wall times during spring daylight-saving changes", () => {
+    if (Intl.DateTimeFormat().resolvedOptions().timeZone !== "America/New_York") return;
+    expect(() => toUtcDueAt("2026-03-08T02:30")).toThrow("Choose a valid date and time.");
+    expect(toLocalDateTime(toUtcDueAt("2026-03-08T03:30"))).toBe("2026-03-08T03:30");
   });
 });
