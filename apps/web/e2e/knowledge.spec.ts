@@ -8,7 +8,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Knowledge workflow test");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(`Orin-knowledge-${crypto.randomUUID()}!`);
+  await page.getByLabel("Password", { exact: true }).fill(`Orin-knowledge-${crypto.randomUUID()}!`);
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
@@ -130,7 +130,7 @@ test("Writing adapts its navigation and editor across desktop, tablet, and narro
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Writing responsive check");
   await page.getByLabel("Email").fill(`orin-writing-layout-${Date.now()}@example.com`);
-  await page.getByLabel("Password").fill(`Orin-layout-${crypto.randomUUID()}!`);
+  await page.getByLabel("Password", { exact: true }).fill(`Orin-layout-${crypto.randomUUID()}!`);
   await page.getByRole("button", { name: "Create account" }).click();
   await page.getByRole("button", { name: "Writing" }).click();
   await page.getByRole("button", { name: "New note" }).first().click();

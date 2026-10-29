@@ -28,7 +28,7 @@ test("Docker web, authentication, manual tasks, and live AI command flow", async
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Orin Docker smoke test");
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
 
   const ask = page.getByRole("textbox", { name: "Ask Orin" });

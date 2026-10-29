@@ -19,7 +19,7 @@ test("real API approval releases a signed job to a live worker and reports its r
     await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
     await page.getByLabel("Your name").fill("Worker integration test");
     await page.getByLabel("Email").fill(email);
-    await page.getByLabel("Password").fill(password);
+    await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Create account" }).click();
     await expect(page.getByRole("button", { name: "Ask Orin", exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Preferences" }).click();
