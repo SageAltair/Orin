@@ -1,0 +1,44 @@
+name: Android native build verification
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/android-native.yml"
+      - "apps/mobile/**"
+      - "packages/contracts/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      CI: "1"
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install Android native build dependencies
+        run: |
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1"
+      - name: Generate native project from tracked Expo configuration
+        working-directory: apps/mobile
+        run: |
+          npm ci
+          npx expo prebuild --platform android --no-install
+      - name: Compile arm64 Android debug APK without device installation
+        working-directory: apps/mobile/android
+        run: bash ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
+      - name: Verify APK exists and is nonempty
+        run: test -s apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
