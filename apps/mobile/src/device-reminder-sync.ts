@@ -34,10 +34,17 @@ export async function refreshDeviceReminders(
 ): Promise<void> {
   if (!isCurrent()) return;
   if (!(await getLocalReminderEnabled(owner)) || !isCurrent()) return;
-  const [reminders, policy, tasks] = await Promise.all([
+  // Revoking the server policy must cancel local alerts even when the task
+  // endpoint is unavailable. Do not make a full task scan a prerequisite.
+  const policy = await request<NotificationPolicy>("/notifications/preferences");
+  if (!isCurrent()) return;
+  if (!policy.enabled) {
+    await syncLocalReminders(owner, [], policy, []);
+    return;
+  }
+  const [reminders, tasks] = await Promise.all([
     request<Reminder[]>("/notifications"),
-    request<NotificationPolicy>("/notifications/preferences"),
-    fetchDeviceReminderTasks(),
+    policy.categories.includes("tasks") ? fetchDeviceReminderTasks() : Promise.resolve([]),
   ]);
   if (!isCurrent()) return;
   await syncLocalReminders(owner, reminders, policy, tasks);
