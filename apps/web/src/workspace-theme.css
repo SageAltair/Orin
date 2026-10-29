@@ -530,7 +530,7 @@
 .orin-shell:has(.writing-studio) .writing-paper>textarea,.orin-shell:has(.writing-studio) .writing-preview{width:100%;min-height:calc(100dvh - 390px);height:auto;padding:0 4px 80px;font-family:Georgia,"Times New Roman",serif;font-size:19px;line-height:1.75;background:transparent}
 .orin-shell:has(.writing-studio) .writing-preview{max-width:none}
 .orin-shell .writing-manuscript-stats{padding:20px 4px;color:var(--muted);border-top:1px solid var(--line)}
-.orin-shell .writing-details{display:none}
+.orin-shell .writing-details{display:block}
 .orin-shell .writing-inspector{grid-column:auto;min-width:0;overflow:auto;border-left:1px solid var(--line);background:var(--surface)}
 .orin-shell .writing-inspector-tabs{position:sticky;z-index:5;top:0;display:grid;grid-template-columns:1fr 1fr 1.15fr 34px;min-height:58px;align-items:stretch;border-bottom:1px solid var(--line);background:var(--surface)}
 .orin-shell .writing-inspector-tabs button{border:0;border-bottom:2px solid transparent;color:var(--muted);background:transparent;font:inherit;font-size:12px}

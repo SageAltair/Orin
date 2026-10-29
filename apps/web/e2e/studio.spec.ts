@@ -338,5 +338,6 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
       { headers },
     )
   ).json();
-  expect(restored.content).toBe("My conflicting local draft.");
+  expect(restored.content).toMatch(/^<!--orin-rich-v1-->/);
+  expect(restored.content).toContain("My conflicting local draft.");
 });
