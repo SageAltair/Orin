@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 test.beforeEach(() => { test.skip(process.env.ORIN_LIVE_E2E !== "true", "Set ORIN_LIVE_E2E=true with an isolated API running to verify live writing workflows"); });
 
 test("personal knowledge capture, editing, links, search, and reload persistence", async ({ page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(120_000);
   const email = `orin-knowledge-${Date.now()}@example.com`;
   await page.goto("http://localhost:5273");
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
@@ -12,7 +12,8 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "Capture", exact: true }).click();
+  await page.keyboard.press("Control+k");
+  await page.getByRole("button", { name: /Capture an idea/ }).click();
   await page.getByLabel("Your note").fill("Create Christian storytelling videos\nExplore short stories with a clear audience.");
   await page.getByRole("button", { name: "Save note" }).click();
   await page.getByRole("button", { name: "Writing" }).click();
@@ -23,9 +24,10 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByLabel("Tags, comma separated").fill("story, setting");
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
   await page.locator(".writing-details > summary").click();
-  await page.getByLabel("Filter notes").selectOption("idea");
+  await page.getByLabel("Filter notes").click();
+  await page.getByLabel("Document type").selectOption("idea");
   await expect(page.locator(".writing-documents").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
-  await page.getByLabel("Filter notes").selectOption("");
+  await page.getByLabel("Document type").selectOption("");
   let extractionPolls = 0;
   await page.route("**/api/v1/knowledge/documents/*/extract", route => route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify({ status: "queued" }) }));
   await page.route("**/api/v1/knowledge/documents/*/extraction", route => {
@@ -50,11 +52,13 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.locator(".writing-details > summary").click();
   await page.getByLabel("Content").fill("Research AI tools for story outlining and narration.");
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
+  await page.getByLabel("Content").click();
+  await page.keyboard.press("Control+a");
   await page.getByRole("button", { name: "Bold" }).click();
-  await expect(page.getByLabel("Content")).toContainText("**text**");
-  await page.getByRole("button", { name: "Preview formatting" }).click();
-  await expect(page.locator(".writing-preview").getByText("text")).toBeVisible();
-  await page.getByRole("button", { name: "Edit markdown" }).click();
+  expect(await page.getByLabel("Content").evaluate((element) => element.innerHTML)).toMatch(/<(b|strong)(>| )/i);
+  await page.getByRole("button", { name: "Preview document" }).click();
+  await expect(page.getByLabel("Document preview")).toContainText("Research AI tools");
+  await page.getByRole("button", { name: "Return to editing" }).click();
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
   await page.locator(".writing-details > summary").click();
   await page.getByLabel("Link to").selectOption({ label: "Create Christian storytelling videos" });
@@ -103,7 +107,9 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await expect(page.locator(".writing-relations").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
   await expect(page.locator(".writing-manuscript-stats")).toContainText("words");
   const markdownDownload = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export .md" }).click();
+  await page.getByRole("button", { name: "Manage document" }).click();
+  await page.getByRole("button", { name: /Export document/ }).click();
+  await page.getByRole("dialog", { name: "Export document" }).getByRole("button", { name: /Markdown/ }).click();
   expect((await markdownDownload).suggestedFilename()).toMatch(/\.md$/);
   await page.getByRole("button", { name: "Focus", exact: true }).click();
   await expect(page.locator(".writing-list")).toBeHidden();

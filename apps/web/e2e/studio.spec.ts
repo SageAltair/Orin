@@ -46,56 +46,48 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
     },
   });
   await page.goto("http://localhost:5273");
+  // The unified Writing workspace now stores ideas and outlines as rich notes.
+  // Exercise creation, metadata, linking, template content and persistence.
+  await page.getByLabel("Toggle light or dark theme").click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
   await page.getByRole("button", { name: "Writing", exact: true }).click();
-  await page.getByRole("button", { name: "Idea inbox", exact: true }).click();
-  await page
-    .locator("#studio-idea-input")
-    .fill("The courage scene\nAn ordinary person makes a difficult choice.");
-  await page.getByRole("button", { name: "Capture idea", exact: true }).click();
-  await expect(page.locator(".studio-inbox")).toContainText(
-    "The courage scene",
+  await page.getByRole("button", { name: "New note" }).first().click();
+  await page.getByLabel("Document title").fill("The courage scene");
+  await page.getByLabel("Content", { exact: true }).fill(
+    "An ordinary person makes a difficult choice.",
   );
-  await page.getByRole("button", { name: "Connections", exact: true }).click();
-  await page
-    .locator(".studio-canvas-idea")
-    .filter({ hasText: "The courage scene" })
-    .click();
-  await page
-    .locator("#studio-link-document")
-    .selectOption({ label: "Source note" });
-  await page.locator("#studio-link-type").selectOption("extends");
-  await page.getByRole("button", { name: "Link note", exact: true }).click();
-  await expect(page.locator(".studio-canvas-links")).toContainText(
-    "Source note",
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
+  await page.locator(".writing-details > summary").click();
+  await page.locator(".writing-details-grid label").filter({ hasText: "Type" }).locator("select").selectOption("idea");
+  await page.locator(".writing-details-grid label").filter({ hasText: "Project" }).locator("select").selectOption({ label: "A story worth telling" });
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
+  await page.getByLabel("Link to").selectOption({ label: "Source note" });
+  await page.getByRole("button", { name: "Add link" }).click();
+  await expect(page.locator(".writing-relations")).toContainText("Source note");
+  await page.locator(".writing-details > summary").click();
+  await page.locator(".writing-template-menu > summary").click();
+  await page.getByRole("button", { name: "Story outline" }).click();
+  await page.getByLabel("Document title").fill("Opening scene");
+  await page.getByLabel("Content", { exact: true }).fill(
+    "Opening purpose: Let the audience meet the character.",
   );
-  await page.getByRole("button", { name: "Manuscript", exact: true }).click();
-  await page.getByLabel("Outline title").fill("Opening scene");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.locator(".manuscript-outline")).toContainText(
-    "Opening scene",
-  );
-  await page.getByLabel("Card title", { exact: true }).fill("Opening purpose");
-  await page
-    .getByLabel("Card purpose")
-    .fill("Let the audience meet the character.");
-  await page.getByRole("button", { name: "Add card", exact: true }).click();
-  await page.getByLabel("Status of card Opening purpose").selectOption("ready");
-  await expect(page.getByLabel("Status of card Opening purpose")).toHaveValue(
-    "ready",
-  );
+  await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
   await page.reload();
   await page.getByRole("button", { name: "Writing", exact: true }).click();
-  await page.getByRole("button", { name: "Manuscript", exact: true }).click();
-  await expect(page.getByLabel("Status of card Opening purpose")).toHaveValue(
-    "ready",
-  );
+  await expect(page.locator(".writing-documents").getByRole("button", { name: /The courage scene/ })).toBeVisible();
+  await page.locator(".writing-documents").getByRole("button", { name: /The courage scene/ }).click();
+  await expect(page.getByLabel("Content", { exact: true })).toContainText("ordinary person");
+  await page.locator(".writing-details > summary").click();
+  await expect(page.locator(".writing-relations")).toContainText("Source note");
+  await page.locator(".writing-details > summary").click();
+  await page.locator(".writing-documents").getByRole("button", { name: /Opening scene/ }).click();
+  await expect(page.getByLabel("Content", { exact: true })).toContainText("Opening purpose");
   await page.setViewportSize({ width: 390, height: 844 });
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true);
-  await page.getByLabel("Toggle light or dark theme").click();
   await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
   await page
     .getByRole("button", { name: "Open navigation", exact: true })
@@ -304,7 +296,9 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
       { headers },
     )
   ).json();
-  expect(saved.content).toBe("Saved before navigation.");
+  // Rich text is stored as versioned HTML, not as the old plain-text value.
+  expect(saved.content).toMatch(/^<!--orin-rich-v1-->/);
+  expect(saved.content).toContain("Saved before navigation.");
   await page
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
