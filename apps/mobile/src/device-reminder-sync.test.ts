@@ -70,6 +70,29 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
+  it("cancels local schedules when policy is disabled even if tasks API is unavailable", async () => {
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") return { ...policy, enabled: false } as never;
+      throw new Error("Tasks API is offline");
+    });
+    await refreshDeviceReminders("alice");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", [], { ...policy, enabled: false }, [],
+    );
+  });
+
+  it("does not fetch task pages when the task notification category is disabled", async () => {
+    const otherPolicy = { ...policy, categories: ["calendar"] };
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") return otherPolicy as never;
+      if (path === "/notifications") return inbox as never;
+      throw new Error("Task endpoint should not be called");
+    });
+    await refreshDeviceReminders("alice");
+    expect(syncLocalReminders).toHaveBeenCalledWith("alice", inbox, otherPolicy, []);
+  });
+
   it("synchronizes complete tasks and inbox after a successful owner-scoped fetch", async () => {
     vi.mocked(request).mockImplementation(async (path) => {
       if (path.startsWith("/tasks")) return [task("future", due)] as never;
