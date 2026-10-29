@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Pressable,
   ScrollView,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { errorMessage, login, register, request } from "./api";
 import { fetchAllMobileTasks, fetchAllMobileProjects, fetchAllMobileProjectTasks } from "./task-pagination";
+import { TaskProjectPicker } from "./task-project-picker";
 import { dueAtForMobileEdit, filterMobileTasks, toLocalTaskDateTime, toUtcTaskDueAt, type MobileTaskView } from "./task-planning";
 import type { Palette } from "./theme";
 import type {
@@ -324,6 +325,13 @@ export function TasksScreen({
   onTasksChanged?: () => void;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectError, setProjectError] = useState("");
+  const [createProjectId, setCreateProjectId] = useState<string | null>(null);
+  const [editProjectId, setEditProjectId] = useState<string | null>(null);
+  const taskLoadVersion = useRef(0);
+  const projectLoadVersion = useRef(0);
   const [title, setTitle] = useState("");
   const [createDue, setCreateDue] = useState("");
   const [view, setView] = useState<MobileTaskView>("all");
@@ -339,18 +347,50 @@ export function TasksScreen({
   const [editDue, setEditDue] = useState("");
   const [saving, setSaving] = useState(false);
   const load = async () => {
+    const version = ++taskLoadVersion.current;
     setLoading(true);
     setError("");
     try {
-      setTasks(await fetchAllMobileTasks());
+      const next = await fetchAllMobileTasks();
+      if (version === taskLoadVersion.current) setTasks(next);
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (version === taskLoadVersion.current) setError(errorMessage(cause));
     } finally {
-      setLoading(false);
+      if (version === taskLoadVersion.current) setLoading(false);
+    }
+  };
+  const loadProjects = async () => {
+    const version = ++projectLoadVersion.current;
+    setProjectsLoading(true);
+    setProjectError("");
+    try {
+      const next = await fetchAllMobileProjects();
+      if (version === projectLoadVersion.current) setProjects(next);
+    } catch (cause) {
+      if (version === projectLoadVersion.current) setProjectError(errorMessage(cause));
+    } finally {
+      if (version === projectLoadVersion.current) setProjectsLoading(false);
     }
   };
   useEffect(() => {
-    if (active) void load();
+    // A response started in another workspace must never repopulate this workspace.
+    taskLoadVersion.current += 1;
+    projectLoadVersion.current += 1;
+    setTasks([]);
+    setProjects([]);
+    setLoading(false);
+    setProjectsLoading(false);
+    setEditing(null);
+    setCreateProjectId(null);
+    setEditProjectId(null);
+    if (active) {
+      void load();
+      void loadProjects();
+    }
+    return () => {
+      taskLoadVersion.current += 1;
+      projectLoadVersion.current += 1;
+    };
   }, [active, workspace?.id]);
   const create = async () => {
     if (!title.trim()) return;
@@ -359,10 +399,15 @@ export function TasksScreen({
     try {
       await request<Task>("/tasks", {
         method: "POST",
-        body: JSON.stringify({ title: title.trim(), due_at: toUtcTaskDueAt(createDue) }),
+        body: JSON.stringify({
+          title: title.trim(),
+          due_at: toUtcTaskDueAt(createDue),
+          project_id: createProjectId,
+        }),
       });
       setTitle("");
       setCreateDue("");
+      setCreateProjectId(null);
       await load();
       onTasksChanged?.();
     } catch (cause) {
@@ -394,6 +439,7 @@ export function TasksScreen({
     setEditStatus(task.status);
     setEditPriority(task.priority);
     setEditDue(toLocalTaskDateTime(task.due_at));
+    setEditProjectId(task.project_id);
     setError("");
   };
   const saveTask = async () => {
@@ -409,6 +455,7 @@ export function TasksScreen({
           status: editStatus,
           priority: editPriority,
           due_at: dueAtForMobileEdit(editDue, editing.due_at),
+          project_id: editProjectId,
         }),
       });
       setEditing(null);
@@ -421,6 +468,7 @@ export function TasksScreen({
     }
   };
   const visible = filterMobileTasks(tasks, view, search);
+  const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   return (
     <Screen colors={colors} refreshing={loading}>
       <View>
@@ -454,6 +502,16 @@ export function TasksScreen({
           onChangeText={setCreateDue}
           autoCapitalize="none"
           placeholder="YYYY-MM-DDTHH:MM"
+        />
+        <TaskProjectPicker
+          key={`create-${workspace?.id ?? "personal"}`}
+          projects={projects}
+          selectedId={createProjectId}
+          onSelect={setCreateProjectId}
+          loading={projectsLoading}
+          error={projectError}
+          onRetry={() => void loadProjects()}
+          colors={colors}
         />
       </Card>
       <ErrorNotice message={error} colors={colors} />
@@ -524,6 +582,7 @@ export function TasksScreen({
                   {task.due_at
                     ? ` · ${new Date(task.due_at).toLocaleString()}`
                     : ""}
+                  {task.project_id ? ` · ${projectNames.get(task.project_id) ?? "Linked project"}` : ""}
                 </Text>
               </Pressable>
               <Icon name="right" size={17} color={colors.muted} />
@@ -580,6 +639,16 @@ export function TasksScreen({
               onChangeText={setEditDue}
               autoCapitalize="none"
               placeholder="YYYY-MM-DDTHH:MM"
+            />
+            <TaskProjectPicker
+              key={`edit-${workspace?.id ?? "personal"}-${editing?.id ?? ""}`}
+              projects={projects}
+              selectedId={editProjectId}
+              onSelect={setEditProjectId}
+              loading={projectsLoading}
+              error={projectError}
+              onRetry={() => void loadProjects()}
+              colors={colors}
             />
             <ErrorNotice message={error} colors={colors} />
             <PrimaryButton
