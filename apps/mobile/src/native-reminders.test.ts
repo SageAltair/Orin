@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { getLocalReminderEnabled, reconcileLocalReminderAccount, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
 import type { NotificationPolicy, Reminder } from "./types";
 
-vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("react-native", () => ({ Platform: { OS: "android", Version: 35 } }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: vi.fn(), setItemAsync: vi.fn(), deleteItemAsync: vi.fn(),
 }));
@@ -37,6 +38,7 @@ const policy: NotificationPolicy = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(Platform, { Version: 35 });
   stored = null;
   scheduled = [];
   vi.mocked(SecureStore.getItemAsync).mockImplementation(async () => stored);
@@ -121,6 +123,15 @@ describe("native reminder account isolation and consent", () => {
     expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(false);
     expect(stored).toBeNull();
     expect(scheduled).toHaveLength(0);
+  });
+  it("does not require notification channels on Android before API 26", async () => {
+    Object.assign(Platform, { Version: 25 });
+    vi.mocked(Notifications.getNotificationChannelAsync).mockResolvedValue(null);
+    expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(true);
+    expect(await getLocalReminderEnabled("alice")).toBe(true);
+    expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalled();
+    expect(Notifications.getNotificationChannelAsync).not.toHaveBeenCalled();
+    expect(scheduled).toHaveLength(1);
   });
   it("does not opt in if OS permission is denied", async () => {
     vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);

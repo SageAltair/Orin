@@ -39,10 +39,14 @@ async function clearTagged() {
   }
 }
 
+function supportsAndroidChannels(): boolean {
+  return Platform.OS === "android" && Number(Platform.Version) >= 26;
+}
+
 async function canDeliverLocally(): Promise<boolean> {
   const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted) return false;
-  if (Platform.OS !== "android") return true;
+  if (!supportsAndroidChannels()) return true;
   const channel = await Notifications.getNotificationChannelAsync(CHANNEL);
   return channel !== null && channel.importance !== Notifications.AndroidImportance.NONE;
 }
@@ -147,7 +151,7 @@ export function setLocalReminderEnabled(
     // A new account must never inherit pending notifications from the old one,
     // even when the new account denies OS permission.
     await ownerEnabled(owner);
-    if (Platform.OS === "android") {
+    if (supportsAndroidChannels()) {
       await Notifications.setNotificationChannelAsync(CHANNEL, {
         name: "Orin reminders",
         importance: Notifications.AndroidImportance.DEFAULT,
