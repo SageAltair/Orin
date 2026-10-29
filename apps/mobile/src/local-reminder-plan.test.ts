@@ -4,7 +4,7 @@ import type { NotificationPolicy, Reminder } from "./types";
 
 const policy: NotificationPolicy = {
   enabled: true,
-  categories: ["task", "system"],
+  categories: ["tasks", "calendar"],
   persistent: false,
   repeat_minutes: 15,
   max_repeats: 1,
@@ -20,7 +20,7 @@ const now = Date.parse("2026-10-29T12:00:00Z");
 function reminder(id: string, dueAt: string): Reminder {
   return {
     id, title: "Private task", message: "Sensitive details",
-    category: "task", source_id: null, due_at: dueAt,
+    category: "tasks", source_id: null, due_at: dueAt,
     read_at: null, snoozed_until: null, revision: 1,
     repeats: 0, attention_ready: false,
   };
@@ -43,6 +43,7 @@ describe("local Android reminder planner", () => {
     expect(planLocalReminders([r], { ...policy, enabled: false }, now)).toEqual([]);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true }, now)).toEqual([]);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "09:00", quiet_end: "17:00" }, now)).toHaveLength(1);
+    expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "12:00", quiet_end: "12:00" }, now)).toEqual([]);
   });
   it("caps device scheduling and prioritizes earliest dates", () => {
     const items = Array.from({ length: 40 }, (_, i) => reminder(String(i), new Date(now + (40 - i) * 60_000).toISOString()));

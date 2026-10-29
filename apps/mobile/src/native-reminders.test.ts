@@ -25,12 +25,12 @@ let stored: string | null;
 let scheduled: Array<{ identifier: string; content: { data: Record<string, unknown> } }>;
 const now = Date.now();
 const reminder: Reminder = {
-  id: "rem-1", title: "Sensitive title", message: "Secret body", category: "task",
+  id: "rem-1", title: "Sensitive title", message: "Secret body", category: "tasks",
   source_id: null, due_at: new Date(now + 120_000).toISOString(),
   read_at: null, snoozed_until: null, revision: 1, repeats: 0, attention_ready: false,
 };
 const policy: NotificationPolicy = {
-  enabled: true, categories: ["task"], persistent: false, repeat_minutes: 15,
+  enabled: true, categories: ["tasks"], persistent: false, repeat_minutes: 15,
   max_repeats: 1, timezone: "UTC", quiet_enabled: false, quiet_start: "22:00",
   quiet_end: "07:00", respect_focus: false, browser_alerts: false, sound: false,
 };

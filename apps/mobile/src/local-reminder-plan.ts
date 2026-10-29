@@ -29,7 +29,8 @@ function inQuietHours(fireAt: number, policy: NotificationPolicy): boolean {
     const minute = Number(parts.find((part) => part.type === "minute")?.value);
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) return true;
     const current = hour * 60 + minute;
-    if (start === end) return false;
+    // The API interprets equal quiet bounds as quiet all day.
+    if (start === end) return true;
     return start < end
       ? current >= start && current < end
       : current >= start || current < end;
