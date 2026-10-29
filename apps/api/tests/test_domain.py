@@ -245,6 +245,42 @@ def test_workspaces_scope_projects_tasks_and_routines(client: TestClient) -> Non
     assert client.get("/api/v1/calendar/routines", headers={"X-Orin-Workspace-Id": personal["id"]}).json() == []
 
 
+def test_task_cannot_move_to_project_in_another_workspace(client: TestClient) -> None:
+    personal = client.get("/api/v1/workspaces").json()[0]
+    office = client.post("/api/v1/workspaces", json={"name": "Office"}).json()
+    personal_headers = {"X-Orin-Workspace-Id": personal["id"]}
+    office_headers = {"X-Orin-Workspace-Id": office["id"]}
+    personal_project = client.post(
+        "/api/v1/projects", headers=personal_headers, json={"name": "Personal project"}
+    ).json()
+    office_project = client.post(
+        "/api/v1/projects", headers=office_headers, json={"name": "Office project"}
+    ).json()
+    second_office_project = client.post(
+        "/api/v1/projects", headers=office_headers, json={"name": "Second office project"}
+    ).json()
+    task = client.post(
+        "/api/v1/tasks", headers=office_headers,
+        json={"title": "Office task", "project_id": office_project["id"]},
+    ).json()
+
+    allowed = client.patch(
+        f"/api/v1/tasks/{task['id']}", json={"project_id": second_office_project["id"]}
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["project_id"] == second_office_project["id"]
+
+    rejected = client.patch(
+        f"/api/v1/tasks/{task['id']}", json={"project_id": personal_project["id"]}
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == "Project belongs to another workspace"
+    office_tasks = client.get("/api/v1/tasks", headers=office_headers).json()
+    assert len(office_tasks) == 1
+    assert office_tasks[0]["project_id"] == second_office_project["id"]
+    assert client.get("/api/v1/tasks", headers=personal_headers).json() == []
+
+
 def test_preference_rejects_pinning_a_hidden_capability(client: TestClient) -> None:
     test_client = client
     response = test_client.put(
