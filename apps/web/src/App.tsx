@@ -97,7 +97,7 @@ import { AccountSecurity } from "./AccountSecurity";
 import { ActivityTimeline } from "./ActivityTimeline";
 import { GitHubSettings } from "./GitHubSettings";
 import { FocusExperience } from "./features/focus/FocusExperience";
-import { LegacyTasks } from "./features/focus/LegacyTasks";
+import { TaskCollection } from "./features/focus/TaskCollection";
 import { QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { FocusSessions } from "./FocusSessions";
 import { CalendarWorkspace } from "./CalendarWorkspace";
@@ -788,6 +788,8 @@ export default function App() {
   );
   const [activeWorkspaceName, setActiveWorkspaceName] = useState("Personal");
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
+  const activeWorkspaceRef = useRef(activeWorkspaceId);
+  activeWorkspaceRef.current = activeWorkspaceId;
   const handleWorkspaceChange = useCallback((workspace: { id: string; name: string }) => {
     setActiveWorkspaceName(workspace.name);
     setActiveWorkspaceId(current => {
@@ -1687,11 +1689,17 @@ export default function App() {
                     onScheduleTask={scheduleTask}
                   /></div>
                 ) : (
-                  <div data-orin-control="tasks-workspace"><LegacyTasks
-                    tasks={tasks}
-                    projects={projects}
-                    onChange={setTasks}
+                  <div data-orin-control="tasks-workspace"><TaskCollection
+                    key={activeWorkspaceId || "personal"}
                     onScheduleTask={scheduleTask}
+                    onTaskSaved={(updated) => {
+                      // An old workspace's in-flight save must never populate
+                      // the newly selected workspace's dashboard.
+                      if (activeWorkspaceRef.current !== activeWorkspaceId) return;
+                      setTasks(current => current.some(task => task.id === updated.id)
+                        ? current.map(task => task.id === updated.id ? updated : task)
+                        : [updated, ...current]);
+                    }}
                   /></div>
                 )
               ) : page === "projects" ? (
