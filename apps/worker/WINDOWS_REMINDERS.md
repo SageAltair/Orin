@@ -51,4 +51,3 @@ The OS toast adapter and lifecycle still require real Windows validation.
 
 Tests use disposable SQLite, fake clocks, mocked HTTP and fake notifiers.
 No real notifications, accounts or production data are touched.
-
