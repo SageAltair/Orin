@@ -299,7 +299,9 @@ function NotificationOperation({
       const enabled = await getLocalReminderEnabled(ownerId);
       setDeviceEnabled(enabled);
       if (enabled) {
-        const tasks = await fetchDeviceReminderTasks();
+        const tasks = prefs.enabled && prefs.categories.includes("tasks")
+          ? await fetchDeviceReminderTasks()
+          : [];
         await syncLocalReminders(ownerId, next, prefs, tasks);
       }
     } catch (cause) {
@@ -327,7 +329,9 @@ function NotificationOperation({
     setDeviceBusy(true);
     setError("");
     try {
-      const tasks = enabled ? await fetchDeviceReminderTasks() : [];
+      const tasks = enabled && policy.enabled && policy.categories.includes("tasks")
+        ? await fetchDeviceReminderTasks()
+        : [];
       const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy, tasks);
       setDeviceEnabled(accepted);
       if (enabled && !accepted) {
@@ -350,7 +354,9 @@ function NotificationOperation({
       });
       setPolicy(updated);
       if (deviceEnabled) {
-        const tasks = await fetchDeviceReminderTasks();
+        const tasks = updated.enabled && updated.categories.includes("tasks")
+          ? await fetchDeviceReminderTasks()
+          : [];
         await syncLocalReminders(ownerId, items, updated, tasks);
       }
     } catch (cause) {
