@@ -3,7 +3,7 @@ import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getLocalReminderEnabled, reconcileLocalReminderAccount, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
-import type { NotificationPolicy, Reminder } from "./types";
+import type { NotificationPolicy, Reminder, Task } from "./types";
 
 vi.mock("react-native", () => ({ Platform: { OS: "android", Version: 35 } }));
 vi.mock("expo-secure-store", () => ({
@@ -74,6 +74,22 @@ describe("native reminder account isolation and consent", () => {
     await syncLocalReminders("alice", [reminder], policy);
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
     await syncLocalReminders("alice", [{ ...reminder, read_at: new Date().toISOString() }], policy);
+    expect(scheduled).toHaveLength(0);
+  });
+  it("reconciles future task deadlines, rescheduling and completion without revealing task details", async () => {
+    const task: Task = {
+      id: "future-task", title: "Secret task title", description: null, status: "todo",
+      priority: "normal", project_id: null, due_at: new Date(now + 4 * 86_400_000).toISOString(),
+      created_at: new Date(now).toISOString(), updated_at: new Date(now).toISOString(),
+    };
+    expect(await setLocalReminderEnabled("alice", true, [], policy, [task])).toBe(true);
+    expect(scheduled).toHaveLength(1);
+    expect(JSON.stringify(vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].content))
+      .not.toContain("Secret");
+    await syncLocalReminders("alice", [], policy, [{ ...task, due_at: new Date(now + 5 * 86_400_000).toISOString() }]);
+    expect(scheduled).toHaveLength(1);
+    expect(Notifications.cancelScheduledNotificationAsync).toHaveBeenCalledTimes(1);
+    await syncLocalReminders("alice", [], policy, [{ ...task, status: "done" }]);
     expect(scheduled).toHaveLength(0);
   });
   it("cancels previous-account schedules and revokes opt in on sign out", async () => {
