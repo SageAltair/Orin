@@ -73,6 +73,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.locator(".writing-details-grid label").filter({ hasText: "Review date" }).locator("input").fill("2020-01-01T10:00");
   await page.getByLabel("Content").fill("Opening scene and narration are not finished.");
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
+  await expect(page.locator(".writing-details")).toHaveAttribute("open", "");
 
   await page.locator(".writing-tools > summary").click();
   await page.getByRole("button", { name: "Weekly report" }).click();

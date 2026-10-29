@@ -61,6 +61,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   await page.locator(".writing-details-grid label").filter({ hasText: "Type" }).locator("select").selectOption("idea");
   await page.locator(".writing-details-grid label").filter({ hasText: "Project" }).locator("select").selectOption({ label: "A story worth telling" });
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10000 });
+  await expect(page.locator(".writing-details")).toHaveAttribute("open", "");
   await page.getByLabel("Link to").selectOption({ label: "Source note" });
   await page.getByRole("button", { name: "Add link" }).click();
   await expect(page.locator(".writing-relations")).toContainText("Source note");

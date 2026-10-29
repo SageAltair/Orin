@@ -261,6 +261,7 @@ export function KnowledgeWorkspace({
   );
   const [reporting, setReporting] = useState(false);
   const editor = useRef<HTMLDivElement>(null);
+  const writingDetailsRef = useRef<HTMLDetailsElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const selectedDesignElement = useRef<HTMLElement | null>(null);
   const activeDocumentId = useRef<string | null>(null);
@@ -638,6 +639,9 @@ export function KnowledgeWorkspace({
     document_type: string;
   }) => {
     if (creating || !(await save())) return;
+    // A new note starts with collapsed metadata; autosaving its local draft
+    // must not unexpectedly collapse details while the user edits them.
+    if (writingDetailsRef.current) writingDetailsRef.current.open = false;
     setCreating(true);
     setMobileEditor(true);
     setError("");
@@ -1712,7 +1716,7 @@ export function KnowledgeWorkspace({
                 <span>{readingMinutes} min read</span>
               </div>
             </div>
-            <details key={selected.id} className="writing-details">
+            <details ref={writingDetailsRef} className="writing-details">
               <summary>Note details</summary>
               <div className="writing-details-grid">
                 <label>
