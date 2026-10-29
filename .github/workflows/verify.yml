@@ -80,6 +80,8 @@ jobs:
           cache-dependency-path: |
             apps/web/package-lock.json
             apps/mobile/package-lock.json
+      - name: Guard local Docker source verification logic
+        run: python -m unittest discover -s scripts -p 'test_verify_local_runtime.py'
       - name: Install Python dependencies
         run: |
           python -m pip install -r apps/api/requirements-dev.lock
