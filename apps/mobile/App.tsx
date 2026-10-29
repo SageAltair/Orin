@@ -32,6 +32,7 @@ import { paletteFor } from "./src/theme";
 import type { TabKey, User, Workspace } from "./src/types";
 import { ErrorNotice, Sheet, TabBar } from "./src/ui";
 import { Icon } from "./src/icons";
+import { reconcileLocalReminderAccount } from "./src/native-reminders";
 
 export default function App() {
   const scheme = useColorScheme();
@@ -71,6 +72,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (booting) return;
+    void reconcileLocalReminderAccount(user?.id ?? null).catch(() => {
+      Alert.alert("Device reminders", "Could not clear reminders from a previous session. Check Android notification settings.");
+    });
+  }, [booting, user?.id]);
+
+  useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!user || tab === "home") return false;
       setTab("home");
@@ -96,6 +104,11 @@ export default function App() {
         "Orin could not confirm server-side session revocation. Revoke this device from account security when connected.",
       );
     } finally {
+      try {
+        await reconcileLocalReminderAccount(null);
+      } catch {
+        Alert.alert("Device reminders", "Could not cancel device reminders. Disable Orin notifications in Android settings until this is resolved.");
+      }
       setUser(null);
       setWorkspaces([]);
       setWorkspace(null);

@@ -1199,6 +1199,7 @@ export function MoreScreen({
       <OperationsScreen
         kind={operation}
         colors={colors}
+        ownerId={user.id}
         onBack={() => setOperation(null)}
         onLogout={onLogout}
       />

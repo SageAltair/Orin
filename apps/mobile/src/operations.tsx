@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { errorMessage, request } from "./api";
+import { getLocalReminderEnabled, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
 import type {
   Activity,
   Approval,
@@ -45,11 +46,13 @@ export function OperationsScreen({
   colors,
   onBack,
   onLogout,
+  ownerId,
 }: {
   kind: OperationsKey;
   colors: Palette;
   onBack: () => void;
   onLogout?: () => void;
+  ownerId: string;
 }) {
   if (kind === "focus" || kind === "routines" || kind === "opportunities")
     return <PlanningScreen kind={kind} colors={colors} onBack={onBack} />;
@@ -72,7 +75,7 @@ export function OperationsScreen({
       {kind === "calendar" ? (
         <CalendarOperation colors={colors} onBack={onBack} />
       ) : kind === "notifications" ? (
-        <NotificationOperation colors={colors} onBack={onBack} />
+        <NotificationOperation colors={colors} onBack={onBack} ownerId={ownerId} />
       ) : kind === "approvals" ? (
         <ApprovalOperation colors={colors} onBack={onBack} />
       ) : (
@@ -269,14 +272,18 @@ function CalendarOperation({
 function NotificationOperation({
   colors,
   onBack,
+  ownerId,
 }: {
   colors: Palette;
   onBack: () => void;
+  ownerId: string;
 }) {
   const [items, setItems] = useState<Reminder[]>([]);
   const [policy, setPolicy] = useState<NotificationPolicy | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deviceEnabled, setDeviceEnabled] = useState(false);
+  const [deviceBusy, setDeviceBusy] = useState(false);
   const [error, setError] = useState("");
   const load = async () => {
     setLoading(true);
@@ -288,6 +295,9 @@ function NotificationOperation({
       ]);
       setItems(next);
       setPolicy(prefs);
+      const enabled = await getLocalReminderEnabled(ownerId);
+      setDeviceEnabled(enabled);
+      if (enabled) await syncLocalReminders(ownerId, next, prefs);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -308,17 +318,31 @@ function NotificationOperation({
       setError(errorMessage(cause));
     }
   };
+  const changeDeviceReminders = async (enabled: boolean) => {
+    if (!policy) return;
+    setDeviceBusy(true);
+    setError("");
+    try {
+      const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy);
+      setDeviceEnabled(accepted);
+      if (enabled && !accepted) setError("Android notification permission was not granted.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
   const save = async () => {
     if (!policy) return;
     setSaving(true);
     setError("");
     try {
-      setPolicy(
-        await request<NotificationPolicy>("/notifications/preferences", {
-          method: "PUT",
-          body: JSON.stringify(policy),
-        }),
-      );
+      const updated = await request<NotificationPolicy>("/notifications/preferences", {
+        method: "PUT",
+        body: JSON.stringify(policy),
+      });
+      setPolicy(updated);
+      if (deviceEnabled) await syncLocalReminders(ownerId, items, updated);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -337,10 +361,18 @@ function NotificationOperation({
       {policy && (
         <Card colors={colors}>
           <Text style={[styles.body, { color: colors.muted }]}>
-            These preferences control Orin reminders and the in-app inbox.
-            Android system alerts are not available in this build, including
-            when Orin is closed. Silent mode and Do Not Disturb cannot be bypassed.
+            Orin can schedule known upcoming reminders on this device when you
+            explicitly enable device alerts. New server reminders will not arrive
+            while the app is closed until push delivery is implemented. Android
+            may delay alerts and silent mode or Do Not Disturb still applies.
           </Text>
+          <Toggle
+            label={deviceBusy ? "Updating device alerts..." : "Device reminders (opt in)"}
+            disabled={deviceBusy}
+            value={deviceEnabled}
+            onChange={(enabled) => void changeDeviceReminders(enabled)}
+            colors={colors}
+          />
           <Toggle
             label="Automatic notifications"
             value={policy.enabled}
@@ -416,17 +448,20 @@ function Toggle({
   value,
   onChange,
   colors,
+  disabled = false,
 }: {
   label: string;
   value: boolean;
   onChange: (value: boolean) => void;
   colors: Palette;
+  disabled?: boolean;
 }) {
   return (
     <View style={styles.toggle}>
       <Text style={[styles.toggleLabel, { color: colors.text }]}>{label}</Text>
       <Switch
         value={value}
+        disabled={disabled}
         onValueChange={onChange}
         trackColor={{ true: colors.accent }}
       />

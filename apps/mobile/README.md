@@ -74,3 +74,10 @@ npm run export:android
 ```
 
 `npm run export:android` verifies that Metro can produce the Android JavaScript bundle. A signed Play Store build will additionally require an Expo Application Services project or a generated native Android project and signing configuration.
+
+
+## Android device reminders (local, opt-in)
+
+The Notifications screen offers a separate **Device reminders** opt-in. Permission is requested only when enabled. Orin schedules a capped set of known future, unread, category-allowed reminders using Expo Notifications' best-effort Android date triggers, without exact-alarm or Do Not Disturb bypass permissions. Notification tray text is generic to avoid exposing task details on a lock screen. Reopening the inbox reconciles revisions, acknowledgements, snoozes and policy changes. Logout and account switching cancel Orin-owned scheduled and presented notifications and clear the account-specific opt-in.
+
+**Important limitations:** No push token is registered and no server-to-device push delivery exists. Reminders created or changed on the server while the app stays closed cannot be delivered or cancelled until Orin reconnects. Android can delay or suppress alerts under battery, permission, silent mode or DND policies. This is not an always-on reminder guarantee. Physical-device delivery is not verified; do not describe it as release-ready until emulator/device acceptance is complete. To run tests: `npm test --prefix apps/mobile` and `npm run typecheck --prefix apps/mobile` from the repository root.
