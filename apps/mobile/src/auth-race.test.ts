@@ -235,4 +235,41 @@ describe("Android concurrent refresh and account transitions", () => {
     },
   );
 
+  it.each(["login", "logout"] as const)(
+    "rejects a stale successful task response after %s",
+    async (operation) => {
+      let completeTasks!: (response: Response) => void;
+      const pendingTasks = new Promise<Response>((resolve) => {
+        completeTasks = resolve;
+      });
+      const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+        const path = String(url);
+        if (path.endsWith("/tasks")) return pendingTasks;
+        if (path.endsWith("/auth/login"))
+          return new Response(JSON.stringify({ access_token: "new-token" }), { status: 200 });
+        if (path.endsWith("/auth/me"))
+          return new Response(JSON.stringify(user), { status: 200 });
+        if (path.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+        throw new Error(`Unexpected URL: ${path}`);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      const api = await oldSession();
+
+      const oldTasks = api.request<{ account: string }>("/tasks", {}, false);
+      await vi.waitFor(() => {
+        expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/tasks"))).toBe(true);
+      });
+      if (operation === "login") {
+        await api.login(user.email, "new-password");
+      } else {
+        await api.logout();
+      }
+      completeTasks(new Response(JSON.stringify({ account: "old" }), { status: 200 }));
+      await expect(oldTasks).rejects.toMatchObject({
+        status: 0,
+        message: "Session changed while the request was in progress.",
+      });
+    },
+  );
+
 });
