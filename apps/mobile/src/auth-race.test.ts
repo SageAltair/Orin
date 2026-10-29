@@ -272,4 +272,47 @@ describe("Android concurrent refresh and account transitions", () => {
     },
   );
 
+  it("ignores an old-cookie refresh that starts while the new login is pending", async () => {
+    let finishLogin!: (response: Response) => void;
+    let finishRefresh!: (response: Response) => void;
+    const pendingLogin = new Promise<Response>((resolve) => {
+      finishLogin = resolve;
+    });
+    const pendingRefresh = new Promise<Response>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login")) return pendingLogin;
+      if (path.endsWith("/projects")) return new Response(null, { status: 401 });
+      if (path.endsWith("/auth/refresh")) return pendingRefresh;
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify(user), { status: 200 });
+      if (path.endsWith("/tasks"))
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      throw new Error(`Unexpected URL: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = await oldSession();
+
+    const switching = api.login(user.email, "new-password");
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/auth/login"))).toBe(true);
+    });
+    const staleRequest = api.request("/projects");
+    await vi.waitFor(() => {
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/auth/refresh"))).toBe(true);
+    });
+
+    finishLogin(new Response(JSON.stringify({ access_token: "new-token" }), { status: 200 }));
+    await expect(switching).resolves.toEqual(user);
+    finishRefresh(new Response(JSON.stringify({ access_token: "old-cookie-token" }), { status: 200 }));
+    await expect(staleRequest).rejects.toMatchObject({ status: 401 });
+
+    await api.request("/tasks", {}, false);
+    const taskCall = [...fetchMock.mock.calls].reverse().find(([url]) => String(url).endsWith("/tasks"));
+    expect(new Headers(taskCall?.[1]?.headers).get("Authorization")).toBe("Bearer new-token");
+    expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(TOKEN_KEY, "old-cookie-token");
+  });
+
 });
