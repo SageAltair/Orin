@@ -1,24 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ISOLATED_API_URL, ISOLATED_WEB_URL, isolatedLiveEnabled, requireIsolatedApi } from "./isolated-runtime";
 
-test.beforeEach(() => {
-  test.skip(
-    process.env.ORIN_LIVE_E2E !== "true",
-    "Requires an isolated API with ORIN_LIVE_E2E=true",
-  );
+test.beforeEach(async ({ request }) => {
+  test.skip(!isolatedLiveEnabled("ORIN_LIVE_E2E"), "Requires ORIN_ISOLATED_E2E=true and ORIN_LIVE_E2E=true with disposable stack");
+  await requireIsolatedApi(request);
 });
 
 async function account(page: Page) {
   const email = `studio-${Date.now()}-${Math.random()}@example.com`;
   const password = "Isolated-studio-passphrase-123!";
   const register = await page.request.post(
-    "http://localhost:8100/api/v1/auth/register",
+    ISOLATED_API_URL + "/api/v1/auth/register",
     {
       data: { email, password, display_name: "Studio writer" },
     },
   );
   expect(register.status()).toBe(201);
   const response = await page.request.post(
-    "http://localhost:8100/api/v1/auth/login",
+    ISOLATED_API_URL + "/api/v1/auth/login",
     { data: { email, password } },
   );
   expect(response.ok()).toBe(true);
@@ -32,12 +31,12 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   test.setTimeout(90000);
   const headers = await account(page);
   const project = await (
-    await page.request.post("http://localhost:8100/api/v1/projects", {
+    await page.request.post(ISOLATED_API_URL + "/api/v1/projects", {
       headers,
       data: { name: "A story worth telling" },
     })
   ).json();
-  await page.request.post("http://localhost:8100/api/v1/knowledge/documents", {
+  await page.request.post(ISOLATED_API_URL + "/api/v1/knowledge/documents", {
     headers,
     data: {
       title: "Source note",
@@ -45,7 +44,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
       project_id: project.id,
     },
   });
-  await page.goto("http://localhost:5273");
+  await page.goto(ISOLATED_WEB_URL);
   // The unified Writing workspace now stores ideas and outlines as rich notes.
   // Exercise creation, metadata, linking, template content and persistence.
   await page.getByLabel("Toggle light or dark theme").click();
@@ -172,7 +171,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
       .first(),
   ).toBeVisible();
   // A real due task triggers a durable reminder. Persistent mode requires an explicit saved choice.
-  await page.request.post("http://localhost:8100/api/v1/tasks", {
+  await page.request.post(ISOLATED_API_URL + "/api/v1/tasks", {
     headers,
     data: {
       title: "Review notification delivery",
@@ -183,7 +182,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
     .poll(
       async () => {
         const rows = await (
-          await page.request.get("http://localhost:8100/api/v1/notifications", {
+          await page.request.get(ISOLATED_API_URL + "/api/v1/notifications", {
             headers,
           })
         ).json();
@@ -217,7 +216,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
   ).toBeVisible();
   const savedNotificationPolicy = await (
     await page.request.get(
-      "http://localhost:8100/api/v1/notifications/preferences",
+      ISOLATED_API_URL + "/api/v1/notifications/preferences",
       { headers },
     )
   ).json();
@@ -244,7 +243,7 @@ test("Writing connects ideas, notes, outlines and cards across reload and phone 
     }),
   ).toHaveCount(0);
   const inbox = await (
-    await page.request.get("http://localhost:8100/api/v1/notifications", {
+    await page.request.get(ISOLATED_API_URL + "/api/v1/notifications", {
       headers,
     })
   ).json();
@@ -261,18 +260,18 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
   const headers = await account(page);
   const initial = await (
     await page.request.post(
-      "http://localhost:8100/api/v1/knowledge/documents",
+      ISOLATED_API_URL + "/api/v1/knowledge/documents",
       {
         headers,
         data: { title: "First note", content: "Initial text" },
       },
     )
   ).json();
-  await page.request.post("http://localhost:8100/api/v1/knowledge/documents", {
+  await page.request.post(ISOLATED_API_URL + "/api/v1/knowledge/documents", {
     headers,
     data: { title: "Second note", content: "A second thought" },
   });
-  await page.goto("http://localhost:5273");
+  await page.goto(ISOLATED_WEB_URL);
   await page.getByRole("button", { name: "Writing", exact: true }).click();
   await page
     .locator(".writing-documents")
@@ -293,7 +292,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
   );
   const saved = await (
     await page.request.get(
-      `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
+      `${ISOLATED_API_URL}/api/v1/knowledge/documents/${initial.id}`,
       { headers },
     )
   ).json();
@@ -308,7 +307,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     "Saved before navigation.",
   );
   await page.request.patch(
-    `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
+    `${ISOLATED_API_URL}/api/v1/knowledge/documents/${initial.id}`,
     {
       headers,
       data: { content: "Newer server work", expected_version: saved.version },
@@ -335,7 +334,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
   await expect(page.locator(".writing-save-status")).toContainText("Saved");
   const restored = await (
     await page.request.get(
-      `http://localhost:8100/api/v1/knowledge/documents/${initial.id}`,
+      `${ISOLATED_API_URL}/api/v1/knowledge/documents/${initial.id}`,
       { headers },
     )
   ).json();
