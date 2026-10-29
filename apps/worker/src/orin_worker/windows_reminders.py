@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -142,7 +143,8 @@ def _quiet(prefs: dict[str, object], now: int) -> bool:
 def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
     identity = client.get("/auth/me")
     identity.raise_for_status()
-    if identity.json().get("id") != owner_id:
+    account = identity.json()
+    if not isinstance(account, dict) or account.get("id") != owner_id:
         raise PermissionError("Authenticated owner differs from the configured owner")
     response = client.get("/notifications/preferences")
     response.raise_for_status()
@@ -167,6 +169,10 @@ def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now:
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 raise ValueError("Invalid task record")
+            if item.get("owner_id", owner_id) != owner_id or item.get("workspace_id", workspace_id) != workspace_id:
+                raise PermissionError("Task belongs to another owner or workspace")
+            if item.get("status") not in {"todo", "in_progress", "blocked", "done", "cancelled"}:
+                raise ValueError("Invalid task status")
             if item["id"] in seen:
                 raise ValueError("Overlapping task pages")
             seen.add(item["id"])
@@ -178,6 +184,34 @@ def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now:
         if len(items) < PAGE_SIZE:
             return tasks, prefs
     raise ValueError("Task pagination limit reached")
+
+
+@contextmanager
+def single_instance(path: Path):
+    """Prevent duplicate companion processes and simultaneous duplicate alerts."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as handle:
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+        handle.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
+            raise RuntimeError("Another Windows reminder companion is already running") from error
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _toast_environment() -> dict[str, str]:
@@ -245,34 +279,35 @@ def main() -> None:
     except ValueError as error:
         raise SystemExit("Owner and workspace must be UUIDs") from error
     path = Path(os.getenv("ORIN_WINDOWS_REMINDERS_DB", str(Path.home() / ".orin" / "windows-reminders.sqlite3")))
-    ledger = ReminderLedger(path, owner, workspace)
-    stopping = threading.Event()
-    signal.signal(signal.SIGINT, lambda *_: stopping.set())
-    signal.signal(signal.SIGTERM, lambda *_: stopping.set())
-    logging.basicConfig(level=logging.INFO)
-    try:
-        with httpx.Client(
-            base_url=url + "/api/v1", headers={"Authorization": "Bearer " + token},
-            timeout=httpx.Timeout(15, connect=5), follow_redirects=False,
-            trust_env=urlparse(url).hostname not in {"localhost", "127.0.0.1", "::1"},
-        ) as client:
-            while not stopping.is_set():
-                try:
-                    run_once(client, ledger, now=int(time.time()))
-                except httpx.HTTPStatusError as error:
-                    if error.response.status_code in {401, 403}:
-                        logger.error("Reminder authorization revoked; stopping companion")
+    with single_instance(path):
+        ledger = ReminderLedger(path, owner, workspace)
+        stopping = threading.Event()
+        signal.signal(signal.SIGINT, lambda *_: stopping.set())
+        signal.signal(signal.SIGTERM, lambda *_: stopping.set())
+        logging.basicConfig(level=logging.INFO)
+        try:
+            with httpx.Client(
+                base_url=url + "/api/v1", headers={"Authorization": "Bearer " + token},
+                timeout=httpx.Timeout(15, connect=5), follow_redirects=False,
+                trust_env=urlparse(url).hostname not in {"localhost", "127.0.0.1", "::1"},
+            ) as client:
+                while not stopping.is_set():
+                    try:
+                        run_once(client, ledger, now=int(time.time()))
+                    except httpx.HTTPStatusError as error:
+                        if error.response.status_code in {401, 403}:
+                            logger.error("Reminder authorization revoked; stopping companion")
+                            break
+                        logger.warning("Reminder API unavailable; no toast attempted")
+                    except PermissionError:
+                        logger.error("Reminder account verification failed; stopping companion")
                         break
-                    logger.warning("Reminder API unavailable; no toast attempted")
-                except PermissionError:
-                    logger.error("Reminder account verification failed; stopping companion")
-                    break
-                except (httpx.HTTPError, ValueError, sqlite3.Error, subprocess.SubprocessError, RuntimeError):
-                    logger.warning("Reminder sync or toast failed; no delivery is confirmed")
-                stopping.wait(POLL_SECONDS)
-    finally:
-        ledger.close()
+                    except (httpx.HTTPError, ValueError, sqlite3.Error, subprocess.SubprocessError, RuntimeError):
+                        logger.warning("Reminder sync or toast failed; no delivery is confirmed")
+                    stopping.wait(POLL_SECONDS)
+        finally:
+            ledger.close()
 
 
-if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        main()

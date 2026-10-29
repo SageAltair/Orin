@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from orin_worker.windows_reminders import (
-    ReminderLedger, _due_epoch, _quiet, _secure_api, _toast_environment, run_once,
+    ReminderLedger, _due_epoch, _quiet, _secure_api, _toast_environment, single_instance, run_once,
 )
 
 OWNER = "16e447d8-27f9-4b0d-82be-3f0dbf2d899b"
@@ -234,4 +234,36 @@ def test_overlapping_task_pages_abort_before_delivery(tmp_path):
         with pytest.raises(ValueError, match="Overlapping"):
             run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no alerts"))
     assert queue.due(NOW) == [("previous", NOW + 60)]
+    queue.close()
+
+
+def test_only_one_companion_can_hold_a_queue_lock(tmp_path):
+    path = tmp_path / "reminders.sqlite3"
+    with single_instance(path):
+        with pytest.raises(RuntimeError, match="already running"):
+            with single_instance(path):
+                pytest.fail("second instance must not start")
+    with single_instance(path):
+        pass
+
+
+def test_cross_workspace_task_record_is_rejected(tmp_path):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    wrong = task("foreign", NOW + 60)
+    wrong["workspace_id"] = "another-workspace"
+    with api([wrong]) as client:
+        with pytest.raises(PermissionError, match="workspace"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no alerts"))
+    assert queue.due(NOW) == []
+    queue.close()
+
+
+def test_invalid_task_status_aborts_without_notification(tmp_path):
+    queue = ledger(tmp_path)
+    record = task("bad", NOW + 60)
+    record["status"] = "unknown"
+    with api([record]) as client:
+        with pytest.raises(ValueError, match="status"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no alerts"))
     queue.close()

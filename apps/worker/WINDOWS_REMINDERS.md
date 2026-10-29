@@ -12,12 +12,13 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   only in process memory and are **never stored** in the SQLite reminder queue.
 - Reads tasks only with `X-Orin-Workspace-Id`. The queue contains only scoped
   task identifiers, due timestamps and toast-attempt markers, never task names.
-  A different owner/workspace clears previous queue entries.
+  A different owner/workspace clears previous queue entries. A single-instance file lock prevents concurrent companions from double-alerting.
 - Checks live authentication, current task state and notification preferences
   before each delivery pass. HTTP 401/403 or owner mismatch clears the queue.
   Network failure fails closed without delivering cached reminders.
 - Opting out of tasks notifications clears the local queue on the next
   successful sync. Quiet hours are respected. No silent/DND bypass.
+- The server preference to respect active Focus sessions is not yet integrated with this companion. Native focus suppression is therefore a release gate.
 - The current Orin web logout flow does not necessarily revoke an independently
   supplied bearer token. Stop this process and revoke its token on logout or
   account change. A fully integrated session lifecycle is **not implemented**.
