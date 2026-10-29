@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { errorMessage, login, register, request } from "./api";
-import { fetchAllMobileTasks } from "./task-pagination";
+import { fetchAllMobileTasks, fetchAllMobileProjects, fetchAllMobileProjectTasks } from "./task-pagination";
 import { dueAtForMobileEdit, filterMobileTasks, toLocalTaskDateTime, toUtcTaskDueAt, type MobileTaskView } from "./task-planning";
 import type { Palette } from "./theme";
 import type {
@@ -672,7 +672,7 @@ export function ProjectsScreen({
     setLoading(true);
     setError("");
     try {
-      setProjects(await request<Project[]>("/projects"));
+      setProjects(await fetchAllMobileProjects());
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -711,9 +711,7 @@ export function ProjectsScreen({
     setError("");
     setLoading(true);
     try {
-      setProjectTasks(
-        await request<Task[]>(`/tasks?project_id=${project.id}&limit=100`),
-      );
+      setProjectTasks(await fetchAllMobileProjectTasks(project.id));
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -754,9 +752,7 @@ export function ProjectsScreen({
         }),
       });
       setTaskTitle("");
-      setProjectTasks(
-        await request<Task[]>(`/tasks?project_id=${selected.id}&limit=100`),
-      );
+      setProjectTasks(await fetchAllMobileProjectTasks(selected.id));
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
