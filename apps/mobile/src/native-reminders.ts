@@ -100,7 +100,7 @@ async function sync(owner: string, reminders: Reminder[], policy: NotificationPo
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: new Date(fireAt),
-        ...(Platform.OS === "android" ? { channelId: CHANNEL } : {}),
+        ...(supportsAndroidChannels() ? { channelId: CHANNEL } : {}),
       },
     });
   }

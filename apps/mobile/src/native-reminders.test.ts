@@ -67,6 +67,7 @@ describe("native reminder account isolation and consent", () => {
   it("schedules generic private content once, then cancels after acknowledgement", async () => {
     expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(true);
     expect(scheduled).toHaveLength(1);
+    expect(vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].trigger).toHaveProperty("channelId", "orin-reminders");
     const content = vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].content;
     expect(content?.title).toBe("Orin reminder");
     expect(JSON.stringify(content)).not.toContain("Sensitive");
@@ -131,6 +132,7 @@ describe("native reminder account isolation and consent", () => {
     expect(await getLocalReminderEnabled("alice")).toBe(true);
     expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalled();
     expect(Notifications.getNotificationChannelAsync).not.toHaveBeenCalled();
+    expect(vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].trigger).not.toHaveProperty("channelId");
     expect(scheduled).toHaveLength(1);
   });
   it("does not opt in if OS permission is denied", async () => {
