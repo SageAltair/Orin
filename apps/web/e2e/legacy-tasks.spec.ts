@@ -37,6 +37,9 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
 
   const workspace = page.locator('[data-orin-control="tasks-workspace"]');
   await expect(workspace.locator("#task-collection-heading")).toBeVisible();
+  await expect(workspace).toHaveClass(/focus-shell/);
+  await expect(workspace).toHaveClass(/focus-embedded/);
+  expect(await workspace.locator(".focus-task-views").evaluate(element => getComputedStyle(element).display)).toBe("flex");
   await expect(workspace.locator("#legacy-tasks-heading")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toHaveCount(0);
   await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
