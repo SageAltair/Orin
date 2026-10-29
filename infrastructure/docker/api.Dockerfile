@@ -9,7 +9,9 @@ COPY apps/api/src ./src
 COPY apps/api/migrations ./migrations
 COPY apps/api/alembic.ini ./alembic.ini
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --disable-pip-version-check --timeout 120 --retries 3 -r requirements.lock && pip install --no-deps --no-build-isolation .
+    pip install --disable-pip-version-check --timeout 120 --retries 3 -r requirements.lock \
+    && pip install --no-deps --no-build-isolation . \
+    && pip uninstall -y setuptools
 RUN useradd --create-home --uid 10001 orin && mkdir -p /app/data/attachments /state && chown -R orin:orin /app /state
 USER orin
 EXPOSE 8000
