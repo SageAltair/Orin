@@ -500,7 +500,12 @@ export function TasksScreen({
                   {task.status === "done" && <Icon name="check" size={14} color="#FFFFFF" strokeWidth={2.4} />}
                 </View>
               </Pressable>
-              <Pressable style={local.rowCopy} onPress={() => openTask(task)}>
+              <Pressable
+                style={local.rowCopy}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${task.title}`}
+                onPress={() => openTask(task)}
+              >
                 <Text
                   style={[
                     local.rowTitle,
@@ -610,6 +615,9 @@ function ChoiceRow({
         {values.map((value) => (
           <Pressable
             key={value}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}: ${value.replace("_", " ")}`}
+            accessibilityState={{ selected: selected === value }}
             onPress={() => onSelect(value)}
             style={[
               local.choice,
