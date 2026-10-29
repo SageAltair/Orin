@@ -6,10 +6,11 @@ build-backend = "setuptools.build_meta"
 name = "orin-worker"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["httpx>=0.28,<1.0", "pydantic>=2.7,<3.0"]
+dependencies = ["httpx>=0.28,<1.0", "pydantic>=2.7,<3.0", "tzdata>=2025.2; sys_platform == 'win32'"]
 
 [project.scripts]
 orin-worker = "orin_worker.main:main"
+orin-windows-reminders = "orin_worker.windows_reminders:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
