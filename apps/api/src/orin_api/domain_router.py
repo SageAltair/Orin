@@ -1493,6 +1493,14 @@ def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
     changes = data.model_dump(exclude_unset=True)
     validate_task_links(session, user.id, changes.get("project_id", task.project_id), changes.get("assignee_id", task.assignee_id), changes.get("milestone_id", task.milestone_id))
+    # A task must not be reassigned to a project in a different workspace.
+    # Legacy records may have no workspace until they are migrated.
+    if "project_id" in changes and changes["project_id"] is not None:
+        target_project = ensure_project_access(session, changes["project_id"], user.id)
+        if (target_project is not None and task.workspace_id is not None
+                and target_project.workspace_id is not None
+                and target_project.workspace_id != task.workspace_id):
+            raise HTTPException(status_code=422, detail="Project belongs to another workspace")
     if "title" in changes and changes["title"] is not None:
         changes["title"] = changes["title"].strip()
     requested_status = changes.pop("status", None)
