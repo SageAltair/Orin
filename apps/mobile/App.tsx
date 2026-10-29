@@ -33,7 +33,7 @@ import { paletteFor } from "./src/theme";
 import type { TabKey, User, Workspace } from "./src/types";
 import { ErrorNotice, Sheet, TabBar } from "./src/ui";
 import { Icon } from "./src/icons";
-import { reconcileLocalReminderAccount } from "./src/native-reminders";
+import { reconcileLocalReminderAccount, reminderOwnerForSession } from "./src/native-reminders";
 import { refreshDeviceReminders } from "./src/device-reminder-sync";
 
 export default function App() {
@@ -78,8 +78,9 @@ export default function App() {
     // A failed offline session restore is not an explicit logout. Clearing
     // schedules here would silently discard already-opted-in future alerts
     // whenever Orin starts without network access. signOut() clears them.
-    if (booting || !user) return;
-    void reconcileLocalReminderAccount(user.id).catch(() => {
+    const owner = reminderOwnerForSession(booting, user?.id ?? null);
+    if (!owner) return;
+    void reconcileLocalReminderAccount(owner).catch(() => {
       Alert.alert("Device reminders", "Could not reconcile reminders from a previous account. Check Android notification settings.");
     });
   }, [booting, user?.id]);
