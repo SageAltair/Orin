@@ -12,7 +12,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
-  await page.getByRole("button", { name: "Capture a thought" }).click();
+  await page.getByRole("button", { name: "Capture", exact: true }).click();
   await page.getByLabel("Your note").fill("Create Christian storytelling videos\nExplore short stories with a clear audience.");
   await page.getByRole("button", { name: "Save note" }).click();
   await page.getByRole("button", { name: "Writing" }).click();
@@ -120,7 +120,7 @@ test("personal knowledge capture, editing, links, search, and reload persistence
   await page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ }).click();
   await expect(page.getByText(/A local draft is available/)).toBeVisible();
   await page.getByRole("button", { name: "Restore draft" }).click();
-  await expect(page.getByLabel("Content")).toHaveValue("A local draft to recover after an interrupted save.");
+  await expect(page.getByLabel("Content")).toHaveText("A local draft to recover after an interrupted save.");
   await expect(page.locator(".writing-save-status")).toContainText("Saved", { timeout: 10_000 });
 });
 
@@ -132,6 +132,12 @@ test("Writing adapts its navigation and editor across desktop, tablet, and narro
   await page.getByLabel("Email").fill(`orin-writing-layout-${Date.now()}@example.com`);
   await page.getByLabel("Password", { exact: true }).fill(`Orin-layout-${crypto.randomUUID()}!`);
   await page.getByRole("button", { name: "Create account" }).click();
+  // The Writing studio intentionally hides the global topbar, so verify theme
+  // switching while the accessible control is present before entering it.
+  await page.getByLabel("Toggle light or dark theme").click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
+  await page.getByLabel("Toggle light or dark theme").click();
+  await expect(page.locator(".orin-shell")).toHaveClass(/theme-light/);
   await page.getByRole("button", { name: "Writing" }).click();
   await page.getByRole("button", { name: "New note" }).first().click();
   await page.getByLabel("Document title").fill("Responsive writing note");
@@ -153,11 +159,6 @@ test("Writing adapts its navigation and editor across desktop, tablet, and narro
       await expect(page.getByLabel("Back to notes")).toBeVisible();
       if (width === 390) {
         await page.screenshot({ path: "test-results/writing-mobile-390.png", fullPage: true });
-        await page.getByLabel("Toggle light or dark theme").click();
-        await expect(page.locator(".orin-shell")).toHaveClass(/theme-dark/);
-        await page.screenshot({ path: "test-results/writing-mobile-dark-390.png", fullPage: true });
-        await page.getByLabel("Toggle light or dark theme").click();
-        await expect(page.locator(".orin-shell")).toHaveClass(/theme-light/);
       }
       if (width === 320) await page.screenshot({ path: "test-results/writing-narrow-320.png", fullPage: true });
       await page.getByLabel("Back to notes").click();

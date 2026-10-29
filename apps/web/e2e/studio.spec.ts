@@ -285,7 +285,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Content", { exact: true })).toHaveText(
     "Initial text",
   );
   await page
@@ -295,7 +295,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /Second note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Content", { exact: true })).toHaveText(
     "A second thought",
   );
   const saved = await (
@@ -309,7 +309,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .locator(".writing-documents")
     .getByRole("button", { name: /First note/ })
     .click();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Content", { exact: true })).toHaveText(
     "Saved before navigation.",
   );
   await page.request.patch(
@@ -323,7 +323,7 @@ test("unsaved notes flush on switching and conflicts retain a recoverable local 
     .getByLabel("Content", { exact: true })
     .fill("My conflicting local draft.");
   await expect(page.getByRole("button", { name: "Retry save" })).toBeVisible();
-  await expect(page.getByLabel("Content", { exact: true })).toHaveValue(
+  await expect(page.getByLabel("Content", { exact: true })).toHaveText(
     "My conflicting local draft.",
   );
   page.on("dialog", (dialog) => dialog.accept());
