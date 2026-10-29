@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { login, request, restoreSession } from "./api";
+import { login, logout, request, restoreSession, setActiveWorkspace } from "./api";
 
 describe("session restoration", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -57,5 +57,70 @@ describe("authentication refresh reliability", () => {
     await expect(request<unknown[]>("/tasks")).rejects.toMatchObject({ status: 401 });
     expect(dispatchEvent).toHaveBeenCalledOnce();
     expect(dispatchEvent.mock.calls[0]?.[0]).toMatchObject({ type: "orin:session-expired" });
+  });
+});
+
+
+describe("web logout and account isolation", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("refreshes an expired access token before revoking the server session", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "renewed-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    setActiveWorkspace("workspace-1");
+    await expect(logout()).resolves.toBeUndefined();
+    await expect(request<unknown[]>("/tasks")).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(String(fetchMock.mock.calls[3]?.[0])).toContain("/auth/refresh");
+    const retryHeaders = new Headers(fetchMock.mock.calls[4]?.[1]?.headers);
+    expect(retryHeaders.get("Authorization")).toBe("Bearer renewed-token");
+    const afterLogoutHeaders = new Headers(fetchMock.mock.calls[5]?.[1]?.headers);
+    expect(afterLogoutHeaders.get("Authorization")).toBeNull();
+    expect(afterLogoutHeaders.get("X-Orin-Workspace-Id")).toBeNull();
+  });
+
+  it("clears local account and workspace state when server logout is unavailable", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockRejectedValueOnce(new TypeError("Offline"))
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    setActiveWorkspace("workspace-1");
+    await expect(logout()).rejects.toMatchObject({ status: 0 });
+    await expect(request<unknown[]>("/tasks")).resolves.toEqual([]);
+    const afterLogoutHeaders = new Headers(fetchMock.mock.calls[3]?.[1]?.headers);
+    expect(afterLogoutHeaders.get("Authorization")).toBeNull();
+    expect(afterLogoutHeaders.get("X-Orin-Workspace-Id")).toBeNull();
+  });
+
+  it("does not send a previous account's workspace when switching logins", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "first-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "second-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("first@example.com", "password");
+    setActiveWorkspace("first-user-workspace");
+    await login("second@example.com", "password");
+    const headers = new Headers(fetchMock.mock.calls[3]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer second-token");
+    expect(headers.get("X-Orin-Workspace-Id")).toBeNull();
   });
 });
