@@ -226,7 +226,7 @@ test("an existing task can be scheduled directly from the Today task interface",
   await mockApi(page, true);
   await page.goto("/");
   await signIn(page);
-  await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
+  await page.locator('[data-orin-control="nav-tasks"]').click();
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Today" }).click();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Schedule a task" })).toBeVisible();
@@ -256,7 +256,7 @@ test("calendar search and filters find project tasks and open the original task"
   await taskAfterClear.scrollIntoViewIfNeeded();
   await expect(taskAfterClear).toBeVisible();
   await taskAfterClear.click({ position: { x: 4, y: 5 } });
-  await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toHaveAttribute("aria-current", "page");
+  await expect(page.locator('[data-orin-control="nav-tasks"]')).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("Write project brief").first()).toBeVisible();
 });
 
@@ -297,7 +297,7 @@ test("home shows the personal dashboard and offers Ask Orin", async ({ page }) =
   await signIn(page);
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
   await expect(page.getByRole("navigation").getByRole("button", { name: "Home" })).toBeVisible();
-  await expect(page.getByRole("navigation").getByRole("button", { name: "Tasks" })).toBeVisible();
+  await expect(page.locator('[data-orin-control="nav-tasks"]')).toBeVisible();
   await expect(page.getByText("Recent requests")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Ask Orin", exact: true })).toBeVisible();
   await expect(page.getByRole("banner").getByRole("button", { name: "Ask Orin", exact: true })).toHaveCount(0);
@@ -396,7 +396,7 @@ test("Ask Orin works alongside the focus task workspace and capture", async ({ p
   await ask.fill("Create a task called Call John");
   await page.getByRole("button", { name: "Send message" }).click();
   await page.getByRole("button", { name: "Close Ask Orin" }).last().click();
-  await page.getByRole("navigation").getByRole("button", { name: "Tasks" }).click();
+  await page.locator('[data-orin-control="nav-tasks"]').click();
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Ask Orin" }).first()).toBeVisible();
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Capture" }).click();

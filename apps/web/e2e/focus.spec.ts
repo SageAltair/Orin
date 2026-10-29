@@ -87,7 +87,7 @@ test("capture appears on Now and starts a timer within three taps", async ({ pag
   await setupFocus(page);
   await page.goto("/");
   await signIn(page);
-  await page.getByRole("button", { name: /Tasks/ }).click();
+  await page.locator('[data-orin-control="nav-tasks"]').click();
   await expect(page.getByRole("heading", { name: "What’s one thing on your mind?" })).toBeVisible();
   await page.getByRole("button", { name: "Add one thing" }).click();
   await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Write the first paragraph");
