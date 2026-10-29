@@ -54,6 +54,7 @@ async function sync(owner: string, reminders: Reminder[], policy: NotificationPo
   const permission = await Notifications.getPermissionsAsync();
   if (!permission.granted) {
     await clearTagged();
+    await SecureStore.deleteItemAsync(OPT_IN_KEY);
     return;
   }
   const desired = new Map(
@@ -105,7 +106,16 @@ export function reconcileLocalReminderAccount(owner: string | null) {
 }
 
 export function getLocalReminderEnabled(owner: string) {
-  return serialized(() => ownerEnabled(owner));
+  return serialized(async () => {
+    if (!(await ownerEnabled(owner))) return false;
+    const permission = await Notifications.getPermissionsAsync();
+    if (permission.granted) return true;
+    // Revoked OS permission invalidates device consent. Never display the
+    // toggle as enabled when Android cannot deliver these notifications.
+    await clearTagged();
+    await SecureStore.deleteItemAsync(OPT_IN_KEY);
+    return false;
+  });
 }
 
 export function syncLocalReminders(

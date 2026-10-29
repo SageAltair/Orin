@@ -88,6 +88,24 @@ describe("native reminder account isolation and consent", () => {
     await syncLocalReminders("alice", [reminder], { ...policy, enabled: false });
     expect(scheduled).toHaveLength(0);
   });
+  it("revokes stale opt in when Android permission is removed, preserving unrelated alerts", async () => {
+    await setLocalReminderEnabled("alice", true, [reminder], policy);
+    expect(await getLocalReminderEnabled("alice")).toBe(true);
+    scheduled.push({ identifier: "unrelated", content: { data: {} } });
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);
+    expect(await getLocalReminderEnabled("alice")).toBe(false);
+    expect(stored).toBeNull();
+    expect(scheduled).toEqual([{ identifier: "unrelated", content: { data: {} } }]);
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+  it("revokes stale opt in if permission disappears during synchronization", async () => {
+    await setLocalReminderEnabled("alice", true, [reminder], policy);
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);
+    await syncLocalReminders("alice", [reminder], policy);
+    expect(stored).toBeNull();
+    expect(scheduled).toHaveLength(0);
+    expect(await getLocalReminderEnabled("alice")).toBe(false);
+  });
   it("does not opt in if OS permission is denied", async () => {
     vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);
     vi.mocked(Notifications.requestPermissionsAsync).mockResolvedValue({ granted: false } as never);
