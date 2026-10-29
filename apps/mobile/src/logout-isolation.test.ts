@@ -56,6 +56,7 @@ describe("Android account isolation and logout revocation", () => {
       .toBe("Bearer new-access-token");
     expect(api.getActiveWorkspaceId()).toBeNull();
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.workspace-id.v1");
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1");
   });
 
   it("refreshes an expired token before revoking the server session", async () => {
@@ -75,6 +76,25 @@ describe("Android account isolation and logout revocation", () => {
     expect(api.getActiveWorkspaceId()).toBeNull();
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.access-token.v1");
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.workspace-id.v1");
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1");
+  });
+
+  it("prevents cookie-backed auto-login after offline logout until explicit sign-in", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("Offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = await storedSession();
+
+    await expect(api.logout()).rejects.toMatchObject({ status: 0 });
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1", "1");
+    expect(SecureStore.deleteItemAsync).not.toHaveBeenCalledWith("orin.mobile.logout-pending.v1");
+
+    vi.mocked(SecureStore.getItemAsync)
+      .mockResolvedValueOnce("old-access-token")
+      .mockResolvedValueOnce("old-workspace")
+      .mockResolvedValueOnce("1");
+    await expect(api.restoreSession()).resolves.toBeNull();
+    expect(api.getActiveWorkspaceId()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("bounds logout requests to eight seconds instead of the default two minutes", async () => {
