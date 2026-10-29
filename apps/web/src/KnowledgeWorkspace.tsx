@@ -262,6 +262,10 @@ export function KnowledgeWorkspace({
   );
   const [reporting, setReporting] = useState(false);
   const editor = useRef<HTMLDivElement>(null);
+  const replaceDocumentContent = (next: string) => {
+    setContent(next);
+    if (editor.current) editor.current.innerHTML = sanitizeRichHtml(richHtmlFromContent(next));
+  };
   const writingDetailsRef = useRef<HTMLDetailsElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const selectedDesignElement = useRef<HTMLElement | null>(null);
@@ -1021,7 +1025,7 @@ export function KnowledgeWorkspace({
     try {
       const full = await request<Document>(`/knowledge/documents/${current.selected.id}`);
       setRecovery({version: current.selected.version, draft: current.draft});
-      setSelected(full); setTitle(full.title); setContent(full.content);
+      setSelected(full); setTitle(full.title); replaceDocumentContent(full.content);
       setType(full.document_type); setTagsInput(full.tags.join(", ")); setStatus(full.status);
       setProjectId(full.project_id ?? ""); setExcludeAI(full.exclude_from_ai);
       setReviewAt(full.review_at ? localDateTime(full.review_at) : "");
@@ -1135,7 +1139,7 @@ export function KnowledgeWorkspace({
       );
       setSelected(restored);
       setTitle(restored.title);
-      setContent(restored.content);
+      replaceDocumentContent(restored.content);
       setVersions(
         await request<Version[]>(
           `/knowledge/documents/${restored.id}/versions`,
@@ -1674,7 +1678,7 @@ export function KnowledgeWorkspace({
                     type="button"
                     onClick={() => {
                       setTitle(recovery.draft.title);
-                      setContent(recovery.draft.content);
+                      replaceDocumentContent(recovery.draft.content);
                       setType(recovery.draft.document_type);
                       setTagsInput(recovery.draft.tags.join(", "));
                       setStatus(recovery.draft.status);
