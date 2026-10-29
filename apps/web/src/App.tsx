@@ -106,6 +106,7 @@ import { VoiceInput } from "./VoiceInput";
 import { IntelligenceReview } from "./IntelligenceReview";
 import { HomeDashboard } from "./HomeDashboard";
 import { SidebarWorkspaces } from "./SidebarWorkspaces";
+import { attemptSignOut, clearSignOutUnconfirmed, isSignOutUnconfirmed, UNCONFIRMED_SIGN_OUT_MESSAGE } from "./signOut";
 
 const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
 
@@ -281,6 +282,7 @@ function PreferenceSettings({
   user,
   approvals,
   refreshApprovals,
+  onSignOut,
 }: {
   section: SettingsSection;
   preferences: UserPreferences;
@@ -288,6 +290,7 @@ function PreferenceSettings({
   user: User;
   approvals: Approval[];
   refreshApprovals: () => void;
+  onSignOut: () => void;
 }) {
   const [profileName, setProfileName] = useState(user.display_name);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -446,9 +449,7 @@ function PreferenceSettings({
         {securityMessage && <p role="status">{securityMessage}</p>}
         <button
           className="secondary-button"
-          onClick={() => {
-            logout().finally(() => window.location.reload());
-          }}
+          onClick={onSignOut}
         >
           Sign out of this session
         </button>
@@ -600,8 +601,14 @@ function PreferenceSettings({
 
 function AuthScreen({
   onAuthenticated,
+  signOutWarning = "",
+  onRetrySignOut,
+  signingOut = false,
 }: {
   onAuthenticated: (user: User) => void;
+  signOutWarning?: string;
+  onRetrySignOut?: () => void;
+  signingOut?: boolean;
 }) {
   const [isRegister, setIsRegister] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -628,7 +635,7 @@ function AuthScreen({
   };
   return (
     <main className="auth-screen">
-      <form className="auth-card" onSubmit={submit} aria-busy={busy}>
+      <form className="auth-card" onSubmit={submit} aria-busy={busy || signingOut}>
         <span className="brand-mark">
           <Command size={17} />
         </span>
@@ -672,17 +679,27 @@ function AuthScreen({
           </span>
           {isRegister && <small>Use at least 15 characters.</small>}
         </label>
+        {signOutWarning && (
+          <div role="alert" className="api-error">
+            <p>{signOutWarning}</p>
+            {onRetrySignOut && (
+              <button type="button" className="secondary-button" disabled={busy || signingOut} onClick={onRetrySignOut}>
+                {signingOut ? "Checking server sign-out…" : "Retry server sign-out"}
+              </button>
+            )}
+          </div>
+        )}
         {error && (
           <p className="api-error" role="alert">
             {error}
           </p>
         )}
-        <button className="primary-button" disabled={busy}>
+        <button className="primary-button" disabled={busy || signingOut}>
           {busy ? "Please wait…" : isRegister ? "Create account" : "Sign in"}
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || signingOut}
           className="auth-switch"
           onClick={() => {
             setIsRegister(!isRegister);
@@ -720,6 +737,9 @@ function NavigationIcon({ id }: { id: CapabilityId }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [signOutWarning, setSignOutWarning] = useState(() => isSignOutUnconfirmed() ? UNCONFIRMED_SIGN_OUT_MESSAGE : "");
+  const [signingOut, setSigningOut] = useState(false);
+  const signOutInFlight = useRef(false);
   const [preferences, setPreferences] =
     useState<UserPreferences>(readPreferences);
   const [page, setPage] = useState<Page>(() =>
@@ -830,13 +850,15 @@ export default function App() {
     syncModels(); window.addEventListener("orin:ai-models-changed", syncModels); return () => window.removeEventListener("orin:ai-models-changed", syncModels);
   }, [user?.id]);
   useEffect(() => {
+    // Do not silently restore a cookie-backed session after remote sign-out failed.
+    if (isSignOutUnconfirmed()) { setAuthReady(true); return; }
     restoreSession()
       .then(setUser)
       .catch(() => setUser(null))
       .finally(() => setAuthReady(true));
   }, []);
   useEffect(() => {
-    const expire = () => window.location.reload();
+    const expire = () => { if (!isSignOutUnconfirmed()) window.location.reload(); };
     window.addEventListener("orin:session-expired", expire);
     return () => window.removeEventListener("orin:session-expired", expire);
   }, []);
@@ -845,6 +867,45 @@ export default function App() {
       setUser((event as CustomEvent<User>).detail);
     window.addEventListener("orin:profile-updated", update);
     return () => window.removeEventListener("orin:profile-updated", update);
+  }, []);
+  const handleSignOut = useCallback(async () => {
+    if (signOutInFlight.current) return;
+    signOutInFlight.current = true;
+    setSigningOut(true);
+    // Hide all account-owned state immediately, even when the API is offline.
+    setUser(null);
+    setTasks([]);
+    setProjects([]);
+    setApprovals([]);
+    setConversations([]);
+    setChatTurns([]);
+    setSavedAttachments([]);
+    setPendingFiles([]);
+    setUploadedFiles([]);
+    setImagePreviews({});
+    setConversationId(null);
+    setActiveProjectId("");
+    setActiveTaskId("");
+    setAiModels([]);
+    setSelectedModelId("");
+    setSearchResults([]);
+    setCommand("");
+    setCommandMessage("");
+    setActiveWorkspaceId("");
+    setActiveWorkspaceName("Personal");
+    try { window.localStorage.removeItem(conversationStorageKey); } catch { /* storage unavailable */ }
+    try {
+      const confirmed = await attemptSignOut(logout);
+      setSignOutWarning(confirmed ? "" : UNCONFIRMED_SIGN_OUT_MESSAGE);
+    } finally {
+      setSigningOut(false);
+      signOutInFlight.current = false;
+    }
+  }, []);
+  const handleAuthenticated = useCallback((authenticated: User) => {
+    clearSignOutUnconfirmed();
+    setSignOutWarning("");
+    setUser(authenticated);
   }, []);
   const refreshApprovals = () => {
     request<Approval[]>("/approvals")
@@ -1354,7 +1415,7 @@ export default function App() {
         Checking your session…
       </div>
     );
-  if (!user) return <AuthScreen onAuthenticated={setUser} />;
+  if (!user) return <AuthScreen onAuthenticated={handleAuthenticated} signOutWarning={signOutWarning} signingOut={signingOut} onRetrySignOut={() => { void handleSignOut(); }} />;
   return (
     <div
       className={`orin-shell density-${preferences.density} theme-${preferences.theme}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}
@@ -1438,9 +1499,7 @@ export default function App() {
             <button
               className="logout-button"
               aria-label="Sign out"
-              onClick={() => {
-                logout().finally(() => window.location.reload());
-              }}
+              onClick={() => { void handleSignOut(); }}
             >
               <LogOut size={15} />
             </button>
@@ -1544,7 +1603,8 @@ export default function App() {
                 </div>
                 <PreferenceSettings section={section}
                   preferences={preferences} onChange={savePreferences} user={user}
-                  approvals={approvals} refreshApprovals={refreshApprovals} />
+                  approvals={approvals} refreshApprovals={refreshApprovals}
+                  onSignOut={() => { void handleSignOut(); }} />
                 <div hidden={section !== "account"}>
                   <AccountSecurity user={user} onUpdated={setUser} />
                 </div>
@@ -1621,9 +1681,7 @@ export default function App() {
                 focusRolloutEnabled && activeWorkspaceName === "Personal" ? (
                   <div data-orin-control="tasks-workspace"><FocusExperience
                     name={user.display_name}
-                    onSignOut={() => {
-                      logout().finally(() => window.location.reload());
-                    }}
+                    onSignOut={() => { void handleSignOut(); }}
                     embedded
                     onScheduleTask={scheduleTask}
                   /></div>
