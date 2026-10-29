@@ -19,8 +19,15 @@ function advisoryIdsForPackage(name, vulnerabilities, trail = new Set()) {
   const ids = new Set();
   for (const via of entry.via) {
     if (typeof via === "string") {
+      const dependency = vulnerabilities[via];
+      if (!dependency) throw new Error(`Missing mobile audit advisory details for ${via}`);
+      if (dependency.severity !== "high" && dependency.severity !== "critical") continue;
       for (const id of advisoryIdsForPackage(via, vulnerabilities, nextTrail)) ids.add(id);
     } else if (via && typeof via === "object" && typeof via.url === "string") {
+      if (typeof via.severity !== "string") {
+        throw new Error(`Missing mobile audit advisory severity for ${name}`);
+      }
+      if (via.severity !== "high" && via.severity !== "critical") continue;
       const match = via.url.match(/(?:^|\/)(GHSA-[a-z0-9-]+)(?:[/?#]|$)/i);
       if (!match) throw new Error(`Unrecognized mobile audit advisory URL for ${name}`);
       ids.add(match[1].toLowerCase());
@@ -28,6 +35,7 @@ function advisoryIdsForPackage(name, vulnerabilities, trail = new Set()) {
       throw new Error(`Unrecognized mobile audit advisory for ${name}`);
     }
   }
+  if (ids.size === 0) throw new Error(`No high/critical advisory resolved for ${name}`);
   return ids;
 }
 
