@@ -59,6 +59,21 @@ describe("Android account isolation and logout revocation", () => {
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1");
   });
 
+  it("does not attach the old account to registration requests", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "new-access-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = await storedSession();
+
+    await expect(api.register(user.email, "example-password", user.display_name)).resolves.toEqual(user);
+    const registrationHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(registrationHeaders.has("Authorization")).toBe(false);
+    expect(registrationHeaders.has("X-Orin-Workspace-Id")).toBe(false);
+    expect(api.getActiveWorkspaceId()).toBeNull();
+  });
+
   it("refreshes an expired token before revoking the server session", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 401 }))
