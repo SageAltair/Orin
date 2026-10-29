@@ -325,7 +325,9 @@ function NotificationOperation({
     try {
       const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy);
       setDeviceEnabled(accepted);
-      if (enabled && !accepted) setError("Android notification permission was not granted.");
+      if (enabled && !accepted) {
+        setError("Android notifications are blocked for Orin. Enable app and reminder-channel notifications in system settings, then try again.");
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {

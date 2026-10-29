@@ -1,16 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 import { getLocalReminderEnabled, reconcileLocalReminderAccount, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
 import type { NotificationPolicy, Reminder } from "./types";
 
-vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("react-native", () => ({ Platform: { OS: "android", Version: 35 } }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: vi.fn(), setItemAsync: vi.fn(), deleteItemAsync: vi.fn(),
 }));
 vi.mock("expo-notifications", () => ({
   setNotificationHandler: vi.fn(),
   setNotificationChannelAsync: vi.fn(),
+  getNotificationChannelAsync: vi.fn(),
   getPermissionsAsync: vi.fn(),
   requestPermissionsAsync: vi.fn(),
   getAllScheduledNotificationsAsync: vi.fn(),
@@ -19,7 +21,7 @@ vi.mock("expo-notifications", () => ({
   cancelScheduledNotificationAsync: vi.fn(),
   dismissNotificationAsync: vi.fn(),
   SchedulableTriggerInputTypes: { DATE: "date" },
-  AndroidImportance: { DEFAULT: 3 },
+  AndroidImportance: { NONE: 2, DEFAULT: 5 },
 }));
 let stored: string | null;
 let scheduled: Array<{ identifier: string; content: { data: Record<string, unknown> } }>;
@@ -36,6 +38,7 @@ const policy: NotificationPolicy = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(Platform, { Version: 35 });
   stored = null;
   scheduled = [];
   vi.mocked(SecureStore.getItemAsync).mockImplementation(async () => stored);
@@ -44,6 +47,7 @@ beforeEach(() => {
   vi.mocked(Notifications.getAllScheduledNotificationsAsync).mockImplementation(async () => scheduled as never);
   vi.mocked(Notifications.getPresentedNotificationsAsync).mockResolvedValue([]);
   vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: true } as never);
+  vi.mocked(Notifications.getNotificationChannelAsync).mockResolvedValue({ importance: Notifications.AndroidImportance.DEFAULT } as never);
   vi.mocked(Notifications.requestPermissionsAsync).mockResolvedValue({ granted: true } as never);
   vi.mocked(Notifications.scheduleNotificationAsync).mockImplementation(async (request) => {
     const identifier = `scheduled-${scheduled.length + 1}`;
@@ -63,6 +67,7 @@ describe("native reminder account isolation and consent", () => {
   it("schedules generic private content once, then cancels after acknowledgement", async () => {
     expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(true);
     expect(scheduled).toHaveLength(1);
+    expect(vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].trigger).toHaveProperty("channelId", "orin-reminders");
     const content = vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].content;
     expect(content?.title).toBe("Orin reminder");
     expect(JSON.stringify(content)).not.toContain("Sensitive");
@@ -87,6 +92,48 @@ describe("native reminder account isolation and consent", () => {
     expect(scheduled).toHaveLength(1);
     await syncLocalReminders("alice", [reminder], { ...policy, enabled: false });
     expect(scheduled).toHaveLength(0);
+  });
+  it("revokes stale opt in when Android permission is removed, preserving unrelated alerts", async () => {
+    await setLocalReminderEnabled("alice", true, [reminder], policy);
+    expect(await getLocalReminderEnabled("alice")).toBe(true);
+    scheduled.push({ identifier: "unrelated", content: { data: {} } });
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);
+    expect(await getLocalReminderEnabled("alice")).toBe(false);
+    expect(stored).toBeNull();
+    expect(scheduled).toEqual([{ identifier: "unrelated", content: { data: {} } }]);
+    expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+  it("revokes stale opt in if permission disappears during synchronization", async () => {
+    await setLocalReminderEnabled("alice", true, [reminder], policy);
+    vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);
+    await syncLocalReminders("alice", [reminder], policy);
+    expect(stored).toBeNull();
+    expect(scheduled).toHaveLength(0);
+    expect(await getLocalReminderEnabled("alice")).toBe(false);
+  });
+  it("detects Android channel-level blocking even when app permission remains granted", async () => {
+    await setLocalReminderEnabled("alice", true, [reminder], policy);
+    vi.mocked(Notifications.getNotificationChannelAsync).mockResolvedValue({ importance: Notifications.AndroidImportance.NONE } as never);
+    expect(await getLocalReminderEnabled("alice")).toBe(false);
+    expect(stored).toBeNull();
+    expect(scheduled).toHaveLength(0);
+    expect(Notifications.getPermissionsAsync).toHaveBeenCalled();
+  });
+  it("refuses opt in when the user has disabled the Android reminder channel", async () => {
+    vi.mocked(Notifications.getNotificationChannelAsync).mockResolvedValue({ importance: Notifications.AndroidImportance.NONE } as never);
+    expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(false);
+    expect(stored).toBeNull();
+    expect(scheduled).toHaveLength(0);
+  });
+  it("does not require notification channels on Android before API 26", async () => {
+    Object.assign(Platform, { Version: 25 });
+    vi.mocked(Notifications.getNotificationChannelAsync).mockResolvedValue(null);
+    expect(await setLocalReminderEnabled("alice", true, [reminder], policy)).toBe(true);
+    expect(await getLocalReminderEnabled("alice")).toBe(true);
+    expect(Notifications.setNotificationChannelAsync).not.toHaveBeenCalled();
+    expect(Notifications.getNotificationChannelAsync).not.toHaveBeenCalled();
+    expect(vi.mocked(Notifications.scheduleNotificationAsync).mock.calls[0]?.[0].trigger).not.toHaveProperty("channelId");
+    expect(scheduled).toHaveLength(1);
   });
   it("does not opt in if OS permission is denied", async () => {
     vi.mocked(Notifications.getPermissionsAsync).mockResolvedValue({ granted: false } as never);

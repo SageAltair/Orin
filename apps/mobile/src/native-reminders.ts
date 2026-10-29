@@ -39,21 +39,34 @@ async function clearTagged() {
   }
 }
 
+function supportsAndroidChannels(): boolean {
+  return Platform.OS === "android" && Number(Platform.Version) >= 26;
+}
+
+async function canDeliverLocally(): Promise<boolean> {
+  const permission = await Notifications.getPermissionsAsync();
+  if (!permission.granted) return false;
+  if (!supportsAndroidChannels()) return true;
+  const channel = await Notifications.getNotificationChannelAsync(CHANNEL);
+  return channel !== null && channel.importance !== Notifications.AndroidImportance.NONE;
+}
+
+async function revokeLocalOptIn() {
+  await clearTagged();
+  await SecureStore.deleteItemAsync(OPT_IN_KEY);
+}
+
 async function ownerEnabled(owner: string): Promise<boolean> {
   const stored = await SecureStore.getItemAsync(OPT_IN_KEY);
   if (stored === owner) return true;
-  if (stored !== null) {
-    await clearTagged();
-    await SecureStore.deleteItemAsync(OPT_IN_KEY);
-  }
+  if (stored !== null) await revokeLocalOptIn();
   return false;
 }
 
 async function sync(owner: string, reminders: Reminder[], policy: NotificationPolicy) {
   if (!(await ownerEnabled(owner))) return;
-  const permission = await Notifications.getPermissionsAsync();
-  if (!permission.granted) {
-    await clearTagged();
+  if (!(await canDeliverLocally())) {
+    await revokeLocalOptIn();
     return;
   }
   const desired = new Map(
@@ -87,7 +100,7 @@ async function sync(owner: string, reminders: Reminder[], policy: NotificationPo
       trigger: {
         type: Notifications.SchedulableTriggerInputTypes.DATE,
         date: new Date(fireAt),
-        ...(Platform.OS === "android" ? { channelId: CHANNEL } : {}),
+        ...(supportsAndroidChannels() ? { channelId: CHANNEL } : {}),
       },
     });
   }
@@ -105,7 +118,14 @@ export function reconcileLocalReminderAccount(owner: string | null) {
 }
 
 export function getLocalReminderEnabled(owner: string) {
-  return serialized(() => ownerEnabled(owner));
+  return serialized(async () => {
+    if (!(await ownerEnabled(owner))) return false;
+    if (await canDeliverLocally()) return true;
+    // Android may revoke the app permission or disable only Orin's channel.
+    // Neither state may appear as an enabled reminder switch.
+    await revokeLocalOptIn();
+    return false;
+  });
 }
 
 export function syncLocalReminders(
@@ -131,7 +151,7 @@ export function setLocalReminderEnabled(
     // A new account must never inherit pending notifications from the old one,
     // even when the new account denies OS permission.
     await ownerEnabled(owner);
-    if (Platform.OS === "android") {
+    if (supportsAndroidChannels()) {
       await Notifications.setNotificationChannelAsync(CHANNEL, {
         name: "Orin reminders",
         importance: Notifications.AndroidImportance.DEFAULT,
@@ -141,7 +161,10 @@ export function setLocalReminderEnabled(
     const permission = existing.granted
       ? existing
       : await Notifications.requestPermissionsAsync();
-    if (!permission.granted) return false;
+    if (!permission.granted || !(await canDeliverLocally())) {
+      await revokeLocalOptIn();
+      return false;
+    }
     await ownerEnabled(owner);
     await SecureStore.setItemAsync(OPT_IN_KEY, owner);
     await sync(owner, reminders, policy);
