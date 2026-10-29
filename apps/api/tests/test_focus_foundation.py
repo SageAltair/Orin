@@ -5,7 +5,7 @@ import ast
 import logging
 import sqlite3
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from collections.abc import Generator
 
@@ -297,7 +297,8 @@ def test_focus_write_routes_reject_invalid_and_unknown_inputs(client: TestClient
 
 def test_progress_reentry_is_shown_once_and_rest_day_is_neutral(client: TestClient) -> None:
     primary, _, _, _ = app.state.focus_test_users
-    today = datetime.now(timezone.utc).date()
+    # Focus days roll over at 04:00 local time, not midnight UTC.
+    today = date.fromisoformat(local_day_key(datetime.now(timezone.utc), "UTC"))
     old_day = (today - timedelta(days=4)).isoformat()
     with app.state.focus_test_session_factory.begin() as session:
         session.add(UserSettings(user_id=primary.id, timezone="UTC", last_seen_day_key=old_day))
