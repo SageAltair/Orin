@@ -336,6 +336,11 @@ function NotificationOperation({
       <ErrorNotice message={error} colors={colors} />
       {policy && (
         <Card colors={colors}>
+          <Text style={[styles.body, { color: colors.muted }]}>
+            These preferences control Orin reminders and the in-app inbox.
+            Android system alerts are not available in this build, including
+            when Orin is closed. Silent mode and Do Not Disturb cannot be bypassed.
+          </Text>
           <Toggle
             label="Automatic notifications"
             value={policy.enabled}
