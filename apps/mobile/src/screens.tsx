@@ -428,32 +428,34 @@ export function TasksScreen({
         <Text style={[local.pageTitle, { color: colors.text }]}>Tasks</Text>
       </View>
       <Card colors={colors} style={local.capture}>
-        <TextInput
-          accessibilityLabel="New task"
-          value={title}
-          onChangeText={setTitle}
-          onSubmitEditing={() => void create()}
-          returnKeyType="done"
-          placeholder="Add a task…"
-          placeholderTextColor={colors.muted}
-          style={[local.captureInput, { color: colors.text }]}
-        />
-        <PrimaryButton
-          compact
-          label={creating ? "Adding…" : "Add"}
-          onPress={() => void create()}
+        <View style={local.captureRow}>
+          <TextInput
+            accessibilityLabel="New task"
+            value={title}
+            onChangeText={setTitle}
+            onSubmitEditing={() => void create()}
+            returnKeyType="done"
+            placeholder="Add a task…"
+            placeholderTextColor={colors.muted}
+            style={[local.captureInput, { color: colors.text }]}
+          />
+          <PrimaryButton
+            compact
+            label={creating ? "Adding…" : "Add"}
+            onPress={() => void create()}
+            colors={colors}
+            disabled={creating || !title.trim()}
+          />
+        </View>
+        <Field
+          label="Due date and time (optional)"
           colors={colors}
-          disabled={creating || !title.trim()}
+          value={createDue}
+          onChangeText={setCreateDue}
+          autoCapitalize="none"
+          placeholder="YYYY-MM-DDTHH:MM"
         />
       </Card>
-      <Field
-        label="Optional due date and time (YYYY-MM-DDTHH:MM)"
-        colors={colors}
-        value={createDue}
-        onChangeText={setCreateDue}
-        autoCapitalize="none"
-        placeholder="2026-10-29T14:30"
-      />
       <ErrorNotice message={error} colors={colors} />
       <ChoiceRow
         label="View"
@@ -567,12 +569,12 @@ export function TasksScreen({
               colors={colors}
             />
             <Field
-              label="Due date and time (YYYY-MM-DDTHH:MM)"
+              label="Due date and time (optional)"
               colors={colors}
               value={editDue}
               onChangeText={setEditDue}
               autoCapitalize="none"
-              placeholder="2026-10-29T14:30"
+              placeholder="YYYY-MM-DDTHH:MM"
             />
             <ErrorNotice message={error} colors={colors} />
             <PrimaryButton
@@ -1514,13 +1516,8 @@ const local = StyleSheet.create({
   rowTitle: { fontSize: 15, fontWeight: "600", lineHeight: 20 },
   rowMeta: { fontSize: 11, textTransform: "capitalize" },
   taskDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2 },
-  capture: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 10,
-    paddingLeft: 16,
-  },
+  capture: { gap: 12, padding: 12 },
+  captureRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   captureInput: { flex: 1, minHeight: 42, fontSize: 16 },
   filterRow: {
     flexDirection: "row",

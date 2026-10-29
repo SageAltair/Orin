@@ -76,6 +76,10 @@ npm run export:android
 `npm run export:android` verifies that Metro can produce the Android JavaScript bundle. A signed Play Store build will additionally require an Expo Application Services project or a generated native Android project and signing configuration.
 
 
+## Mobile Tasks planning
+
+The mobile Tasks screen now opens on **All**, loads every owner/workspace-scoped task page instead of silently stopping at 100, and offers Today, Upcoming, Overdue, Completed and text search. Quick creation and editing accept an optional local due date and time in `YYYY-MM-DDTHH:MM` format. Orin converts it to UTC, rejects nonexistent or ambiguous daylight-saving clock times, and preserves an existing exact instant when unrelated fields are edited. Due timestamps appear with local date and time. Network/pagination failures do not replace previously loaded tasks. This is a text-entry date/time control, not a native calendar picker.
+
 ## Android device reminders (local, opt-in)
 
 The Notifications screen offers a separate **Device reminders** opt-in. Permission is requested only when enabled. Orin schedules a capped set of known future task deadlines (up to seven days ahead) and unread, category-allowed inbox reminders using Expo Notifications' best-effort Android date triggers, without exact-alarm or Do Not Disturb bypass permissions. Notification tray text is generic to avoid exposing task details on a lock screen. Opening Orin, returning it to the foreground, editing tasks in the mobile Tasks screen, or reopening the inbox reconciles known future task deadlines, revisions, acknowledgements, snoozes and policy changes. The planner deduplicates a task deadline when its matching server reminder appears. A complete paginated owner/workspace-scoped task fetch must succeed before replacing device schedules; fetch failures preserve existing alerts. Explicit logout and account switching cancel Orin-owned scheduled and presented notifications and clear the account-specific opt-in. An offline session-restore failure does not count as logout and does not erase previously opted-in local schedules.
