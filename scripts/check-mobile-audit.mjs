@@ -21,7 +21,7 @@ function advisoryIdsForPackage(name, vulnerabilities, trail = new Set()) {
     if (typeof via === "string") {
       for (const id of advisoryIdsForPackage(via, vulnerabilities, nextTrail)) ids.add(id);
     } else if (via && typeof via === "object" && typeof via.url === "string") {
-      const match = via.url.match(/(?:^|\\/)(GHSA-[a-z0-9-]+)(?:[/?#]|$)/i);
+      const match = via.url.match(/(?:^|\/)(GHSA-[a-z0-9-]+)(?:[/?#]|$)/i);
       if (!match) throw new Error(`Unrecognized mobile audit advisory URL for ${name}`);
       ids.add(match[1].toLowerCase());
     } else {
