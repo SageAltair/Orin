@@ -138,6 +138,7 @@ export async function request<T>(
   path: string,
   options: RequestInit = {},
   retry = true,
+  timeoutMs = 120_000,
 ): Promise<T> {
   if (!API_BASE_URL)
     throw new ApiError(
@@ -155,7 +156,7 @@ export async function request<T>(
       ...options,
       headers,
       credentials: "include",
-    });
+    }, timeoutMs);
   } catch (cause) {
     const timedOut = cause instanceof Error && cause.name === "AbortError";
     throw new ApiError(
@@ -169,8 +170,8 @@ export async function request<T>(
       0,
     );
   }
-  if (response.status === 401 && retry && !path.startsWith("/auth/")) {
-    if (await refresh()) return request<T>(path, options, false);
+  if (response.status === 401 && retry && (!path.startsWith("/auth/") || path === "/auth/logout")) {
+    if (await refresh()) return request<T>(path, options, false, timeoutMs);
   }
   if (!response.ok) {
     const fallback = `Request failed (${response.status}).`;
@@ -187,6 +188,8 @@ export async function request<T>(
 }
 
 export const login = async (email: string, password: string) => {
+  // A new account must never inherit the previous account's token or workspace.
+  await Promise.all([persistToken(null), setActiveWorkspace(null)]);
   const result = await request<{ access_token: string }>(
     "/auth/login",
     {
@@ -239,7 +242,9 @@ export const restoreSession = async () => {
 
 export const logout = async () => {
   try {
-    await request<void>("/auth/logout", { method: "POST" }, false);
+    // An expired access token may still have a valid refresh cookie. Retry
+    // once with a refreshed token so server-side revocation can succeed.
+    await request<void>("/auth/logout", { method: "POST" }, true, 8_000);
   } finally {
     await Promise.all([persistToken(null), setActiveWorkspace(null)]);
   }
