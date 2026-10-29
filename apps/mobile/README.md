@@ -60,7 +60,7 @@ Do not expose the development API directly to the public internet or disable And
 
 **Notification delivery limitation:** These controls currently manage server-side reminder policy and the in-app inbox. The Android client does not yet request notification permission or schedule/post OS notifications. It cannot alert a user while closed, and cannot override silent mode or Do Not Disturb. Native delivery requires a compatible Expo notifications integration, explicit user consent, Android channel configuration, account/workspace isolation, and physical-device validation. Do not describe persistent follow-up as an OS-level guarantee.
 
-**Dependency audit:** Expo's transitive build/config dependencies have an unresolved mobile audit baseline of 3 high and 5 low findings (2026-10-29). CI records a fresh mobile audit and rejects critical findings or a rise above the known high count; this is a regression ceiling, not a declaration that existing high findings are safe. Review the uploaded audit artifact and upstream patches before release.
+**Dependency audit:** Expo's transitive build/config dependencies have an unresolved mobile audit baseline of 3 high and 5 low findings (2026-10-29). CI records a fresh mobile audit and rejects critical findings, increases above the known high count, or any high-severity package outside the currently observed `@expo/cli`, `expo`, and `zod`. This is a regression guard, not a declaration that existing high findings are safe. Review the uploaded audit artifact and upstream patches before release.
 
 
 Desktop magazine notes are readable but intentionally not editable on mobile yet. This protects their rich layout from lossy conversion until the native block editor is implemented.
