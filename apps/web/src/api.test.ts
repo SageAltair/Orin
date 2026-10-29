@@ -107,6 +107,27 @@ describe("web logout and account isolation", () => {
     expect(afterLogoutHeaders.get("X-Orin-Workspace-Id")).toBeNull();
   });
 
+  it("bounds logout requests and clears local scope when the server times out", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockImplementationOnce(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        expect(init?.signal).toBeInstanceOf(AbortSignal);
+        throw new DOMException("Timed out", "TimeoutError");
+      })
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    setActiveWorkspace("workspace-1");
+    await expect(logout()).rejects.toMatchObject({ status: 0 });
+    await expect(request<unknown[]>("/tasks")).resolves.toEqual([]);
+    const headers = new Headers(fetchMock.mock.calls[3]?.[1]?.headers);
+    expect(headers.get("Authorization")).toBeNull();
+    expect(headers.get("X-Orin-Workspace-Id")).toBeNull();
+  });
+
   it("can revoke the cookie-backed session on retry after an offline sign-out", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
     fetchMock
