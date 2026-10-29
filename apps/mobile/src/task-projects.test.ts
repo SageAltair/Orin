@@ -18,7 +18,7 @@ describe("mobile task project association", () => {
     const result = searchMobileProjects(projects, "");
     expect(result.total).toBe(140);
     expect(result.choices).toHaveLength(PROJECT_CHOICE_LIMIT);
-    expect(result.choices[0].name).toBe("Project 0");
+    expect(result.choices[0]?.name).toBe("Project 0");
   });
 
   it("sorts duplicate names consistently and handles an empty search", () => {
