@@ -12,20 +12,24 @@ const newAdvisory = { url: "https://github.com/advisories/GHSA-new-advisory-0000
 
 function report(highNames = KNOWN_HIGH_PACKAGES, criticalNames = []) {
   const viaFor = (name) => {
-    if (name === "expo") return ["@expo/cli"];
-    if (name === "@expo/cli") return ["zod"];
+    if (name === "expo") return ["@expo/cli", "@expo/config", "@expo/local-build-cache-provider", "@expo/metro-config"];
+    if (name === "@expo/cli") return ["@expo/config", "@expo/metro-config", "@expo/prebuild-config", "zod"];
     if (name === "zod") return [knownAdvisory];
     return [newAdvisory];
   };
   const vulnerabilities = Object.fromEntries([
     ...highNames.map((name) => [name, { severity: "high", via: viaFor(name) }]),
     ...criticalNames.map((name) => [name, { severity: "critical", via: viaFor(name) }]),
+    ["@expo/config", { severity: "low", via: ["deepmerge"] }],
+    ["@expo/metro-config", { severity: "low", via: ["@expo/config"] }],
+    ["@expo/prebuild-config", { severity: "low", via: ["@expo/config"] }],
+    ["@expo/local-build-cache-provider", { severity: "low", via: ["@expo/config"] }],
     ["deepmerge", { severity: "low", via: [{ url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4", severity: "low" }] }],
   ]);
   return {
     metadata: {
       vulnerabilities: {
-        low: 1, moderate: 0, high: highNames.length, critical: criticalNames.length,
+        low: 5, moderate: 0, high: highNames.length, critical: criticalNames.length,
       },
     },
     vulnerabilities,
