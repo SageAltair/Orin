@@ -281,6 +281,35 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
 
 });
 
+test("Tasks recovers project choices and offers projects beyond the first API page", async ({ page }) => {
+  await setupFocus(page);
+  const projects = Array.from({ length: 105 }, (_, index) => ({ id: `project-${index}`, name: `Project ${index}`, status: "active" }));
+  let fail = true;
+  await page.route("**/api/v1/projects?*", route => {
+    if (fail) return route.fulfill({ status: 503, json: { detail: "Project list unavailable" } });
+    const url = new URL(route.request().url());
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    return route.fulfill({ json: projects.slice(offset, offset + limit) });
+  });
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const workspace = page.locator(".focus-task-collection");
+  await workspace.getByRole("button", { name: "New task" }).click();
+  await expect(workspace.getByRole("alert").filter({ hasText: "Project choices unavailable" })).toBeVisible();
+  await expect(workspace.getByLabel("Project", { exact: true })).toBeDisabled();
+  fail = false;
+  await workspace.getByRole("button", { name: "Retry projects" }).click();
+  await expect(workspace.getByLabel("Project", { exact: true })).toBeEnabled();
+  await expect(workspace.getByLabel("Project", { exact: true }).locator("option")).toHaveCount(106);
+  await workspace.getByLabel("Task name").fill("Review final project");
+  await workspace.getByLabel("Project", { exact: true }).selectOption("project-104");
+  const saveRequest = page.waitForRequest(req => new URL(req.url()).pathname === "/api/v1/tasks" && req.method() === "POST");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  expect((await saveRequest).postDataJSON().project_id).toBe("project-104");
+  await expect(workspace.getByText("Project 104")).toBeVisible();
+});
+
 test("Tasks creates and edits a precisely scheduled task in the unified list", async ({ page }) => {
   await setupFocus(page); await page.goto("/"); await signIn(page);
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
