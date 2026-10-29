@@ -99,7 +99,7 @@ export async function logout(): Promise<void> {
   try {
     // An expired access token may still have a valid refresh cookie. Refresh
     // once so the server can revoke the session instead of silently leaving it active.
-    await request<void>("/auth/logout", { method: "POST" });
+    await request<void>("/auth/logout", { method: "POST", signal: AbortSignal.timeout(8000) });
   } finally {
     accessToken = null;
     activeWorkspaceId = null;
