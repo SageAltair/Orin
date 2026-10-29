@@ -29,6 +29,12 @@ export function toLocalDateTime(value: string | null): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** Keep an existing exact instant if the user only edited other task fields. */
+export function dueAtForEdit(localValue: string, original: string | null): string | null {
+  if (original && toLocalDateTime(original) === localValue) return original;
+  return toUtcDueAt(localValue);
+}
+
 export function toUtcDueAt(localValue: string): string | null {
   if (!localValue) return null;
   // Reject calendar rollovers and nonexistent local times during DST transitions.
@@ -36,6 +42,17 @@ export function toUtcDueAt(localValue: string): string | null {
   const date = new Date(localValue);
   if (Number.isNaN(date.getTime()) || toLocalDateTime(date.toISOString()) !== localValue) {
     throw new Error("Choose a valid date and time.");
+  }
+  // A fall-back clock change can map one wall time to two UTC instants.
+  // Refuse to guess which occurrence the user intended.
+  const offset = date.getTimezoneOffset();
+  for (const hours of [-24, 24]) {
+    const nearbyOffset = new Date(date.getTime() + hours * 60 * 60 * 1000).getTimezoneOffset();
+    if (nearbyOffset === offset) continue;
+    const alternative = new Date(date.getTime() + (nearbyOffset - offset) * 60 * 1000);
+    if (toLocalDateTime(alternative.toISOString()) === localValue) {
+      throw new Error("This time occurs twice when clocks change. Choose another time.");
+    }
   }
   return date.toISOString();
 }

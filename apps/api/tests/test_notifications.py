@@ -124,6 +124,40 @@ def test_due_task_is_deduplicated_and_completion_stops_followup(sessions):
         assert session.scalar(select(Notification)).read_at is not None
 
 
+def test_task_due_time_creates_in_app_reminder_and_rescheduling_invalidates_old_one(client, sessions):
+    factory, _ = sessions
+    now = datetime.now(timezone.utc)
+    first_due = now + timedelta(minutes=25)
+    created = client.post(
+        "/api/v1/tasks", json={"title": "Time-specific reminder", "due_at": first_due.isoformat()}
+    )
+    assert created.status_code == 201, created.text
+    task_id = created.json()["id"]
+
+    tick(factory, now)
+    rows = client.get("/api/v1/notifications").json()
+    assert len(rows) == 1 and rows[0]["attention_ready"]
+    assert rows[0]["category"] == "tasks"
+    assert datetime.fromisoformat(rows[0]["due_at"]) == first_due
+
+    later_due = now + timedelta(hours=2)
+    updated = client.patch(f"/api/v1/tasks/{task_id}", json={"due_at": later_due.isoformat()})
+    assert updated.status_code == 200, updated.text
+    rows = client.get("/api/v1/notifications").json()
+    assert rows[0]["read_at"] is not None
+    assert not rows[0]["attention_ready"]
+
+    tick(factory, now + timedelta(hours=1, minutes=31))
+    rows = client.get("/api/v1/notifications").json()
+    assert len(rows) == 2
+    assert any(datetime.fromisoformat(row["due_at"]) == later_due for row in rows)
+    assert sum(row["read_at"] is None for row in rows) == 1
+
+    completed = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "done"})
+    assert completed.status_code == 200, completed.text
+    assert all(row["read_at"] is not None for row in client.get("/api/v1/notifications").json())
+
+
 def test_persistent_requires_opt_in_and_respects_repeat_limit(sessions):
     factory, owner = sessions
     now = datetime.now(timezone.utc)

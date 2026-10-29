@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Task } from "../../api";
-import { filterTasksForView, toLocalDateTime, toUtcDueAt } from "./taskViews";
+import { dueAtForEdit, filterTasksForView, toLocalDateTime, toUtcDueAt } from "./taskViews";
 
 const task = (id: string, changes: Partial<Task> = {}): Task => ({
   id, title: id, description: null, status: "todo", priority: "normal", due_at: null,
@@ -71,5 +71,18 @@ describe("shared task views", () => {
     if (Intl.DateTimeFormat().resolvedOptions().timeZone !== "America/New_York") return;
     expect(() => toUtcDueAt("2026-03-08T02:30")).toThrow("Choose a valid date and time.");
     expect(toLocalDateTime(toUtcDueAt("2026-03-08T03:30"))).toBe("2026-03-08T03:30");
+  });
+
+  it("preserves the exact original due instant when editing unrelated fields", () => {
+    const original = "2026-10-11T13:35:27.000Z";
+    expect(dueAtForEdit(toLocalDateTime(original), original)).toBe(original);
+    expect(dueAtForEdit("", original)).toBeNull();
+  });
+
+  it("rejects ambiguous fall-back wall times instead of silently choosing an offset", () => {
+    if (Intl.DateTimeFormat().resolvedOptions().timeZone !== "America/New_York") return;
+    expect(() => toUtcDueAt("2026-11-01T01:30")).toThrow("This time occurs twice when clocks change.");
+    expect(toLocalDateTime(toUtcDueAt("2026-11-01T00:30"))).toBe("2026-11-01T00:30");
+    expect(toLocalDateTime(toUtcDueAt("2026-11-01T02:30"))).toBe("2026-11-01T02:30");
   });
 });

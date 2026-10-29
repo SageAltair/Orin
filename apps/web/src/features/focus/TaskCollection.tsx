@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
-import { filterTasksForView, toLocalDateTime, toUtcDueAt, type TaskView } from "./taskViews";
+import { dueAtForEdit, filterTasksForView, toLocalDateTime, type TaskView } from "./taskViews";
+import { fetchAllPages } from "./taskPagination";
 
 const views: Array<[TaskView, string]> = [
   ["all", "All tasks"], ["today", "Today"], ["upcoming", "Upcoming"],
@@ -15,15 +16,12 @@ const fromTask = (task: Task): Draft => ({
 });
 const errorMessage = (value: unknown, fallback: string) => value instanceof ApiError ? value.message : value instanceof Error ? value.message : fallback;
 
-async function fetchAllTasks(): Promise<Task[]> {
-  const items: Task[] = [];
-  for (let page = 0; page < 50; page++) {
-    const batch = await request<Task[]>(`/tasks?limit=100&offset=${page * 100}`);
-    items.push(...batch);
-    if (batch.length < 100) return items;
-  }
-  throw new Error("More than 5,000 tasks exist. The full list could not be loaded safely.");
-}
+const fetchAllTasks = () => fetchAllPages<Task>(
+  (offset, limit) => request<Task[]>(`/tasks?limit=${limit}&offset=${offset}`), "tasks",
+);
+const fetchAllProjects = () => fetchAllPages<Project>(
+  (offset, limit) => request<Project[]>(`/projects?limit=${limit}&offset=${offset}`), "projects",
+);
 
 export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -35,7 +33,14 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(blankDraft);
   const [error, setError] = useState("");
+  const [projectError, setProjectError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const loadProjects = async () => {
+    setProjectError("");
+    try { setProjects(await fetchAllProjects()); }
+    catch (value) { setProjectError(errorMessage(value, "Project choices could not be loaded.")); }
+  };
 
   const load = async () => {
     setLoading(true); setError("");
@@ -45,7 +50,7 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
   };
   useEffect(() => {
     void load();
-    void request<Project[]>("/projects?limit=100").then(setProjects).catch(() => { /* Tasks remain usable without the project selector. */ });
+    void loadProjects();
   }, []);
 
   const visibleTasks = filterTasksForView(tasks, view, search);
@@ -59,9 +64,11 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
     if (!draft.title.trim() || !editingId) return;
     setBusyId(editingId); setError(""); setNotice("");
     try {
+      const original = tasks.find(item => item.id === editingId);
       const payload = {
         title: draft.title.trim(), description: draft.description.trim() || null,
-        priority: draft.priority, project_id: draft.project_id || null, due_at: toUtcDueAt(draft.due),
+        priority: draft.priority, project_id: draft.project_id || null,
+        due_at: dueAtForEdit(draft.due, original?.due_at ?? null),
       };
       const isNew = editingId === "new";
       const saved = await request<Task>(isNew ? "/tasks" : `/tasks/${editingId}`, {
@@ -105,9 +112,10 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
       <div className="focus-task-editor-grid">
         <div><label htmlFor="task-editor-due">Due date and time (local)</label><input id="task-editor-due" type="datetime-local" value={draft.due} onChange={event => setDraft(current => ({ ...current, due: event.target.value }))} /></div>
         <div><label htmlFor="task-editor-priority">Priority</label><select id="task-editor-priority" value={draft.priority} onChange={event => setDraft(current => ({ ...current, priority: event.target.value as Task["priority"] }))}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
-        <div><label htmlFor="task-editor-project">Project</label><select id="task-editor-project" value={draft.project_id} onChange={event => setDraft(current => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
+        <div><label htmlFor="task-editor-project">Project</label><select id="task-editor-project" value={draft.project_id} disabled={Boolean(projectError)} onChange={event => setDraft(current => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{draft.project_id && !projects.some(project => project.id === draft.project_id) && <option value={draft.project_id}>Current project (not loaded)</option>}{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
       </div>
-      <p className="focus-task-hint">A due time schedules the task. Device notifications depend on your notification settings and delivery support.</p>
+      {projectError && <p role="alert" className="focus-error">Project choices unavailable: {projectError} Existing task links will be preserved. <button type="button" className="focus-text-button" onClick={() => void loadProjects()}>Retry projects</button></p>}
+      <p className="focus-task-hint">Due times use your device timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Task reminders appear in Orin when enabled, up to 30 minutes before the deadline. Native device delivery is not guaranteed.</p>
       <div className="focus-task-editor-actions"><button type="button" className="focus-secondary" onClick={() => setEditingId(null)}>Cancel</button><button type="submit" className="focus-primary" disabled={Boolean(busyId) || !draft.title.trim()}>{busyId ? "Saving…" : "Save task"}</button></div>
     </form>}
     {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ?
