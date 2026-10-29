@@ -29,7 +29,7 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
   });
   await page.goto("/");
   await page.getByLabel("Email").fill("morgan@example.com");
-  await page.getByLabel("Password").fill("a-secure-test-password");
+  await page.getByLabel("Password", { exact: true }).fill("a-secure-test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("navigation").first().getByRole("button", { name: "Tasks" }).click();
   await expect(page.locator("#legacy-tasks-heading")).toBeVisible();

@@ -65,7 +65,7 @@ async function setupFocus(page: Page) {
 
 async function signIn(page: Page) {
   await page.getByLabel("Email").fill("morgan@example.com");
-  await page.getByLabel("Password").fill("a-secure-test-password");
+  await page.getByLabel("Password", { exact: true }).fill("a-secure-test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const workspaceNav = page.getByRole("navigation").first();
   await expect(workspaceNav.getByRole("button", { name: "Home" })).toBeVisible();

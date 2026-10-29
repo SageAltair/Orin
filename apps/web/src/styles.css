@@ -179,9 +179,9 @@ button:disabled { cursor: not-allowed; }
 .auth-card > .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; }
 .auth-card h1 { margin: 4px 0 0; font-size: 22px; font-weight: 550; }
 .auth-card > p { margin: -8px 0 5px; color: #909992; font-size: 12px; }
-.auth-card label { display: grid; gap: 6px; font-size: 11px; color: #68736b; }
-.auth-card label input, .create-form input { width: 100%; min-width: 0; padding: 10px 11px; color: #252c28; background: white; border: 1px solid #e1e7e1; border-radius: 6px; }
-.auth-card label small { color: #909992; }
+.auth-card label, .auth-card .auth-password-group { display: grid; gap: 6px; font-size: 11px; color: #68736b; }
+.auth-card label input, .auth-card .auth-password-field input, .create-form input { width: 100%; min-width: 0; padding: 10px 11px; color: #252c28; background: white; border: 1px solid #e1e7e1; border-radius: 6px; }
+.auth-card label small, .auth-card .auth-password-group small { color: #909992; }
 .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 13px; color: white; background: #537b61; border: 0; border-radius: 6px; font-size: 11px; }
 .primary-button:disabled { opacity: .55; }
 .icon-only-button { width: 38px; min-width: 38px; padding: 0; }

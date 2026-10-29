@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("administrator console is separate and performs account management", async ({ page }) => {
   let roleChanged = false;
-  await page.route("http://localhost:8100/api/v1/**", async route => {
+  await page.route("**/api/v1/**", async route => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/auth/refresh")) return route.fulfill({ json: { access_token: "admin-token" } });
     if (path.endsWith("/auth/me")) return route.fulfill({ json: { id: "a", email: "owner@example.com", display_name: "Owner", created_at: new Date().toISOString(), is_admin: true, is_disabled: false } });

@@ -662,10 +662,11 @@ export function AuthScreen({
             autoComplete="email"
           />
         </label>
-        <label>
-          Password
+        <div className="auth-password-group">
+          <label htmlFor="orin-auth-password">Password</label>
           <span className="auth-password-field">
             <input
+              id="orin-auth-password"
               required
               type={passwordVisible ? "text" : "password"}
               minLength={isRegister ? 15 : 1}
@@ -678,7 +679,7 @@ export function AuthScreen({
             </button>
           </span>
           {isRegister && <small>Use at least 15 characters.</small>}
-        </label>
+        </div>
         {signOutWarning && (
           <div role="alert" className="api-error">
             <p>{signOutWarning}</p>
