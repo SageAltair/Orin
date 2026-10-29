@@ -364,7 +364,8 @@ function NotificationOperation({
             Orin can schedule known upcoming reminders on this device when you
             explicitly enable device alerts. New server reminders will not arrive
             while the app is closed until push delivery is implemented. Android
-            may delay alerts and silent mode or Do Not Disturb still applies.
+            may delay alerts; silent mode and Do Not Disturb still apply.
+            Future focus sessions cannot be checked while Orin is closed.
           </Text>
           <Toggle
             label={deviceBusy ? "Updating device alerts..." : "Device reminders (opt in)"}
