@@ -345,3 +345,85 @@ def test_explicit_first_personal_workspace_does_not_create_duplicate(
     project = client.post("/api/v1/projects", json={"name": "My project"})
     assert project.status_code == 201, project.text
     assert project.json()["workspace_id"] == personal.json()["id"]
+
+
+def test_authenticated_project_writing_and_notification_journey_isolated(
+    auth_client: TestClient,
+) -> None:
+    """Exercise actual auth and persistence against disposable in-memory storage."""
+    from datetime import datetime, timedelta, timezone
+
+    from orin_api.notifications import notification_tick
+
+    client = auth_client
+    register(client, "acceptance-owner@example.com")
+    authenticate(client, str(login(client, "acceptance-owner@example.com")["access_token"]))
+
+    now = datetime.now(timezone.utc)
+    project_response = client.post("/api/v1/projects", json={"name": "Acceptance project"})
+    assert project_response.status_code == 201, project_response.text
+    project = project_response.json()
+    task_response = client.post("/api/v1/tasks", json={
+        "title": "Review the draft",
+        "project_id": project["id"],
+        "due_at": (now - timedelta(minutes=1)).isoformat(),
+    })
+    assert task_response.status_code == 201, task_response.text
+    task = task_response.json()
+
+    document_response = client.post("/api/v1/knowledge/documents", json={
+        "title": "Acceptance draft", "content": "First version", "document_type": "draft",
+    })
+    assert document_response.status_code == 201, document_response.text
+    document = document_response.json()
+    updated = client.patch(f"/api/v1/knowledge/documents/{document['id']}", json={
+        "content": "Saved second version", "expected_version": document["version"],
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["version"] > document["version"]
+
+    # Run the real notification scheduler against the fixture's in-memory DB only.
+    session_factory = app.dependency_overrides[get_session]
+    with next(session_factory()) as session:
+        notification_tick(session, now)
+        notification_tick(session, now + timedelta(seconds=1))
+        session.commit()
+    notifications_response = client.get("/api/v1/notifications")
+    assert notifications_response.status_code == 200, notifications_response.text
+    task_alerts = [
+        row for row in notifications_response.json()
+        if row["category"] == "tasks" and row["source_id"] == task["id"]
+    ]
+    assert len(task_alerts) == 1
+    alert_id = task_alerts[0]["id"]
+
+    refreshed = client.post("/api/v1/auth/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    authenticate(client, str(refreshed.json()["access_token"]))
+    saved_document = client.get(f"/api/v1/knowledge/documents/{document['id']}")
+    assert saved_document.status_code == 200, saved_document.text
+    assert saved_document.json()["content"] == "Saved second version"
+    assert client.get("/api/v1/tasks").json()[0]["id"] == task["id"]
+
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert client.get(f"/api/v1/knowledge/documents/{document['id']}").status_code == 401
+
+    register(client, "acceptance-other@example.com")
+    authenticate(client, str(login(client, "acceptance-other@example.com")["access_token"]))
+    assert client.get("/api/v1/projects").json() == []
+    assert client.get("/api/v1/tasks").json() == []
+    assert client.get("/api/v1/notifications").json() == []
+    assert client.get(f"/api/v1/knowledge/documents/{document['id']}").status_code == 404
+    assert client.post(
+        f"/api/v1/notifications/{alert_id}/action", json={"action": "acknowledge"},
+    ).status_code == 404
+
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    authenticate(client, str(login(client, "acceptance-owner@example.com")["access_token"]))
+    acknowledged = client.post(
+        f"/api/v1/notifications/{alert_id}/action", json={"action": "acknowledge"},
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
+    assert next(
+        row for row in client.get("/api/v1/notifications").json() if row["id"] == alert_id
+    )["read_at"] is not None
