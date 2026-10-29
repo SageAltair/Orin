@@ -39,22 +39,30 @@ async function clearTagged() {
   }
 }
 
+async function canDeliverLocally(): Promise<boolean> {
+  const permission = await Notifications.getPermissionsAsync();
+  if (!permission.granted) return false;
+  if (Platform.OS !== "android") return true;
+  const channel = await Notifications.getNotificationChannelAsync(CHANNEL);
+  return channel !== null && channel.importance !== Notifications.AndroidImportance.NONE;
+}
+
+async function revokeLocalOptIn() {
+  await clearTagged();
+  await SecureStore.deleteItemAsync(OPT_IN_KEY);
+}
+
 async function ownerEnabled(owner: string): Promise<boolean> {
   const stored = await SecureStore.getItemAsync(OPT_IN_KEY);
   if (stored === owner) return true;
-  if (stored !== null) {
-    await clearTagged();
-    await SecureStore.deleteItemAsync(OPT_IN_KEY);
-  }
+  if (stored !== null) await revokeLocalOptIn();
   return false;
 }
 
 async function sync(owner: string, reminders: Reminder[], policy: NotificationPolicy) {
   if (!(await ownerEnabled(owner))) return;
-  const permission = await Notifications.getPermissionsAsync();
-  if (!permission.granted) {
-    await clearTagged();
-    await SecureStore.deleteItemAsync(OPT_IN_KEY);
+  if (!(await canDeliverLocally())) {
+    await revokeLocalOptIn();
     return;
   }
   const desired = new Map(
@@ -108,12 +116,10 @@ export function reconcileLocalReminderAccount(owner: string | null) {
 export function getLocalReminderEnabled(owner: string) {
   return serialized(async () => {
     if (!(await ownerEnabled(owner))) return false;
-    const permission = await Notifications.getPermissionsAsync();
-    if (permission.granted) return true;
-    // Revoked OS permission invalidates device consent. Never display the
-    // toggle as enabled when Android cannot deliver these notifications.
-    await clearTagged();
-    await SecureStore.deleteItemAsync(OPT_IN_KEY);
+    if (await canDeliverLocally()) return true;
+    // Android may revoke the app permission or disable only Orin's channel.
+    // Neither state may appear as an enabled reminder switch.
+    await revokeLocalOptIn();
     return false;
   });
 }
@@ -151,7 +157,10 @@ export function setLocalReminderEnabled(
     const permission = existing.granted
       ? existing
       : await Notifications.requestPermissionsAsync();
-    if (!permission.granted) return false;
+    if (!permission.granted || !(await canDeliverLocally())) {
+      await revokeLocalOptIn();
+      return false;
+    }
     await ownerEnabled(owner);
     await SecureStore.setItemAsync(OPT_IN_KEY, owner);
     await sync(owner, reminders, policy);
