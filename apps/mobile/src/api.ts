@@ -3,6 +3,7 @@ import type { User } from "./types";
 
 const TOKEN_KEY = "orin.mobile.access-token.v1";
 const WORKSPACE_KEY = "orin.mobile.workspace-id.v1";
+const LOGOUT_PENDING_KEY = "orin.mobile.logout-pending.v1";
 const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL;
 const isDevelopment = typeof __DEV__ !== "undefined" && __DEV__;
 
@@ -199,7 +200,10 @@ export const login = async (email: string, password: string) => {
     false,
   );
   await persistToken(result.access_token);
-  return request<User>("/auth/me", {}, false);
+  const user = await request<User>("/auth/me", {}, false);
+  // A successful explicit login supersedes a previously unconfirmed logout.
+  await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
+  return user;
 };
 
 export const register = async (
@@ -224,6 +228,13 @@ export const register = async (
 
 export const restoreSession = async () => {
   await hydrateSession();
+  // Offline logout may leave a valid HttpOnly refresh cookie on the device.
+  // Never silently restore that session until the user signs in explicitly.
+  if (await SecureStore.getItemAsync(LOGOUT_PENDING_KEY)) {
+    accessToken = null;
+    activeWorkspaceId = null;
+    return null;
+  }
   if (!accessToken && !(await refresh())) return null;
   try {
     return await request<User>("/auth/me", {}, false);
@@ -241,11 +252,16 @@ export const restoreSession = async () => {
 };
 
 export const logout = async () => {
+  let revoked = false;
   try {
-    // An expired access token may still have a valid refresh cookie. Retry
-    // once with a refreshed token so server-side revocation can succeed.
+    // Persist the marker before the network request: a crash or offline
+    // failure must not permit cookie-backed restoration on next launch.
+    await SecureStore.setItemAsync(LOGOUT_PENDING_KEY, "1");
+    // An expired access token may still have a valid refresh cookie.
     await request<void>("/auth/logout", { method: "POST" }, true, 8_000);
+    revoked = true;
   } finally {
     await Promise.all([persistToken(null), setActiveWorkspace(null)]);
+    if (revoked) await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
   }
 };
