@@ -106,6 +106,12 @@ async function sync(owner: string, reminders: Reminder[], policy: NotificationPo
   }
 }
 
+// An unauthenticated launch may simply be offline. Only an explicit sign-out
+// should clear existing opted-in OS schedules.
+export function reminderOwnerForSession(booting: boolean, owner: string | null): string | undefined {
+  return booting || !owner ? undefined : owner;
+}
+
 export function reconcileLocalReminderAccount(owner: string | null) {
   return serialized(async () => {
     if (owner === null) {
