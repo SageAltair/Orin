@@ -40,3 +40,30 @@ The authenticated `/api/v1/privacy/export` endpoint returns an account ZIP with 
 ## Release gate
 
 Require the `verify`, `production-containers`, and `security` GitHub Actions jobs on the protected release branch. The security job audits locked Python and production npm dependencies, scans repository configuration and secrets, scans production images for high/critical fixed vulnerabilities, and publishes an SPDX SBOM. Review and pin base images to registry digests in the release manifest. Block release on any failed required job, an overdue restore drill, expired certificate, failed alert-delivery test, or missing rollback record.
+
+
+## Read-only local Docker source verification
+
+Before using a running local Orin stack, check that its web and API bind mounts
+actually point to the canonical checkout. A healthy HTTP response alone does
+not prove that the live containers use the latest source.
+
+From the canonical repository root:
+
+```powershell
+python scripts/verify_local_runtime.py
+```
+
+If the running API uses an existing local environment file different from this
+checkout's `.env`, pass that file explicitly without copying or printing its
+contents:
+
+```powershell
+python scripts/verify_local_runtime.py --env-file 'C:\path\to\active\.env'
+```
+
+The guard checks live source mounts, environment-key drift (never values),
+migration-at-startup hazards, and web lockfile freshness. It is **read-only**.
+Do not recreate the API with different credentials or a migration-running
+command. Use `docker-compose.local-recovery.yml` for any authorized local
+API recreation, inspect worker jobs first, and preserve existing volumes.
