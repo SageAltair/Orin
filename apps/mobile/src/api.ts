@@ -230,7 +230,7 @@ export async function request<T>(
 }
 
 export const login = async (email: string, password: string) => {
-  const revision = beginAuthTransition();
+  let revision = beginAuthTransition();
   // An unsuccessful account switch must not silently restore the old cookie
   // on the next launch. Only a verified explicit login clears this marker.
   await SecureStore.setItemAsync(LOGOUT_PENDING_KEY, "1");
@@ -245,6 +245,10 @@ export const login = async (email: string, password: string) => {
     false,
   );
   if (revision !== authRevision) throw new ApiError("Authentication changed during login.", 0);
+  // Requests issued during the login network round trip may have refreshed
+  // the previous account's cookie. Fence those responses before accepting
+  // the new account's token.
+  revision = beginAuthTransition();
   await persistToken(result.access_token, revision);
   const user = await request<User>("/auth/me", {}, false);
   if (revision !== authRevision) throw new ApiError("Authentication changed during login.", 0);
