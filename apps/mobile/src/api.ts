@@ -26,6 +26,15 @@ export const API_BASE_URL =
 let accessToken: string | null = null;
 let activeWorkspaceId: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
+let authRevision = 0;
+let tokenWriteQueue: Promise<void> = Promise.resolve();
+
+// Fence responses from a previous account/session, including in-flight refreshes.
+const beginAuthTransition = () => {
+  authRevision += 1;
+  refreshPromise = null;
+  return authRevision;
+};
 
 export class ApiError extends Error {
   constructor(
@@ -84,10 +93,17 @@ const fetchWithTimeout = async (
   }
 };
 
-const persistToken = async (token: string | null) => {
-  accessToken = token;
-  if (token) await SecureStore.setItemAsync(TOKEN_KEY, token);
-  else await SecureStore.deleteItemAsync(TOKEN_KEY);
+const persistToken = async (token: string | null, revision = authRevision) => {
+  // Serialize secure-storage writes so an older refresh cannot finish after a
+  // newer login and overwrite the new account's stored credentials.
+  const write = tokenWriteQueue.catch(() => undefined).then(async () => {
+    if (revision !== authRevision) return;
+    accessToken = token;
+    if (token) await SecureStore.setItemAsync(TOKEN_KEY, token);
+    else await SecureStore.deleteItemAsync(TOKEN_KEY);
+  });
+  tokenWriteQueue = write;
+  await write;
 };
 
 export const hydrateSession = async () => {
@@ -107,6 +123,7 @@ export const getActiveWorkspaceId = () => activeWorkspaceId;
 const refresh = async () => {
   if (!API_BASE_URL) return false;
   if (!refreshPromise) {
+    const revision = authRevision;
     refreshPromise = fetchWithTimeout(
       `${API_BASE_URL}/api/v1/auth/refresh`,
       {
@@ -116,20 +133,23 @@ const refresh = async () => {
       10_000,
     )
       .then(async (response) => {
+        if (revision !== authRevision) return false;
         if (!response.ok) {
           // A rejected refresh credential ends the session. Temporary server
           // errors must not erase a still-valid token from secure storage.
           if (response.status === 401 || response.status === 403)
-            await persistToken(null);
+            await persistToken(null, revision);
           return false;
         }
         const data = (await response.json()) as { access_token: string };
-        await persistToken(data.access_token);
-        return true;
+        if (revision !== authRevision) return false;
+        await persistToken(data.access_token, revision);
+        return revision === authRevision;
       })
       .catch(() => false)
       .finally(() => {
-        refreshPromise = null;
+        // Do not clear a newer account's independently started refresh.
+        if (revision === authRevision) refreshPromise = null;
       });
   }
   return refreshPromise;
@@ -189,8 +209,9 @@ export async function request<T>(
 }
 
 export const login = async (email: string, password: string) => {
+  const revision = beginAuthTransition();
   // A new account must never inherit the previous account's token or workspace.
-  await Promise.all([persistToken(null), setActiveWorkspace(null)]);
+  await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
   const result = await request<{ access_token: string }>(
     "/auth/login",
     {
@@ -199,8 +220,10 @@ export const login = async (email: string, password: string) => {
     },
     false,
   );
-  await persistToken(result.access_token);
+  if (revision !== authRevision) throw new ApiError("Authentication changed during login.", 0);
+  await persistToken(result.access_token, revision);
   const user = await request<User>("/auth/me", {}, false);
+  if (revision !== authRevision) throw new ApiError("Authentication changed during login.", 0);
   // A successful explicit login supersedes a previously unconfirmed logout.
   await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
   return user;
@@ -211,8 +234,9 @@ export const register = async (
   password: string,
   displayName: string,
 ) => {
+  const revision = beginAuthTransition();
   // Registration is also an account switch: never attach a prior identity.
-  await Promise.all([persistToken(null), setActiveWorkspace(null)]);
+  await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
   await request<User>(
     "/auth/register",
     {
@@ -225,6 +249,7 @@ export const register = async (
     },
     false,
   );
+  if (revision !== authRevision) throw new ApiError("Authentication changed during registration.", 0);
   return login(email, password);
 };
 
@@ -254,6 +279,7 @@ export const restoreSession = async () => {
 };
 
 export const logout = async () => {
+  const revision = beginAuthTransition();
   let revoked = false;
   try {
     // Persist the marker before the network request: a crash or offline
@@ -263,7 +289,10 @@ export const logout = async () => {
     await request<void>("/auth/logout", { method: "POST" }, true, 8_000);
     revoked = true;
   } finally {
-    await Promise.all([persistToken(null), setActiveWorkspace(null)]);
-    if (revoked) await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
+    // An older logout must not clear credentials from a newer explicit login.
+    if (revision === authRevision) {
+      await Promise.all([persistToken(null, revision), setActiveWorkspace(null)]);
+      if (revoked) await SecureStore.deleteItemAsync(LOGOUT_PENDING_KEY);
+    }
   }
 };
