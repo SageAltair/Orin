@@ -30,6 +30,7 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
 // Session and workspace changes fence stale in-flight network responses.
 export async function refreshDeviceReminders(
   owner: string,
+  workspaceId: string,
   isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (!isCurrent()) return;
@@ -39,7 +40,7 @@ export async function refreshDeviceReminders(
   const policy = await request<NotificationPolicy>("/notifications/preferences");
   if (!isCurrent()) return;
   if (!policy.enabled) {
-    await syncLocalReminders(owner, [], policy, []);
+    await syncLocalReminders(owner, workspaceId, [], policy, []);
     return;
   }
   const [reminders, tasks] = await Promise.all([
@@ -47,5 +48,5 @@ export async function refreshDeviceReminders(
     policy.categories.includes("tasks") ? fetchDeviceReminderTasks() : Promise.resolve([]),
   ]);
   if (!isCurrent()) return;
-  await syncLocalReminders(owner, reminders, policy, tasks);
+  await syncLocalReminders(owner, workspaceId, reminders, policy, tasks);
 }

@@ -54,7 +54,7 @@ describe("future task device reminder synchronization", () => {
 
   it("requires explicit opt-in and fences a stale account or workspace response", async () => {
     vi.mocked(getLocalReminderEnabled).mockResolvedValueOnce(false);
-    await refreshDeviceReminders("alice");
+    await refreshDeviceReminders("alice", "workspace-a");
     expect(request).not.toHaveBeenCalled();
 
     let current = true;
@@ -66,7 +66,7 @@ describe("future task device reminder synchronization", () => {
       if (path === "/notifications") return inbox as never;
       return policy as never;
     });
-    await refreshDeviceReminders("alice", () => current);
+    await refreshDeviceReminders("alice", "workspace-a", () => current);
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
@@ -75,10 +75,10 @@ describe("future task device reminder synchronization", () => {
       if (path === "/notifications/preferences") return { ...policy, enabled: false } as never;
       throw new Error("Tasks API is offline");
     });
-    await refreshDeviceReminders("alice");
+    await refreshDeviceReminders("alice", "workspace-a");
     expect(request).toHaveBeenCalledTimes(1);
     expect(syncLocalReminders).toHaveBeenCalledWith(
-      "alice", [], { ...policy, enabled: false }, [],
+      "alice", "workspace-a", [], { ...policy, enabled: false }, [],
     );
   });
 
@@ -89,8 +89,8 @@ describe("future task device reminder synchronization", () => {
       if (path === "/notifications") return inbox as never;
       throw new Error("Task endpoint should not be called");
     });
-    await refreshDeviceReminders("alice");
-    expect(syncLocalReminders).toHaveBeenCalledWith("alice", inbox, otherPolicy, []);
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(syncLocalReminders).toHaveBeenCalledWith("alice", "workspace-a", inbox, otherPolicy, []);
   });
 
   it("synchronizes complete tasks and inbox after a successful owner-scoped fetch", async () => {
@@ -99,9 +99,9 @@ describe("future task device reminder synchronization", () => {
       if (path === "/notifications") return inbox as never;
       return policy as never;
     });
-    await refreshDeviceReminders("alice");
+    await refreshDeviceReminders("alice", "workspace-a");
     expect(syncLocalReminders).toHaveBeenCalledWith(
-      "alice", inbox, policy, [task("future", due)],
+      "alice", "workspace-a", inbox, policy, [task("future", due)],
     );
   });
 });
