@@ -1233,6 +1233,10 @@ def list_workspaces(user: User = Depends(get_current_user), session: Session = D
 def create_workspace(data: WorkspaceCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> Workspace:
     if session.scalar(select(Workspace.id).where(Workspace.owner_id == user.id, func.lower(Workspace.name) == data.name.lower())):
         raise HTTPException(status_code=409, detail="A workspace with this name already exists")
+    # Creating a custom workspace first must not turn it into the default Personal workspace.
+    # Existing users retain their oldest workspace as the default for compatibility.
+    if data.name.casefold() != "personal":
+        ensure_personal_workspace(session, user.id)
     workspace = Workspace(owner_id=user.id, **data.model_dump())
     session.add(workspace)
     session.commit()

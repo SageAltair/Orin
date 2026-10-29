@@ -31,11 +31,16 @@ def _owned_project(session: Session, project_id: uuid.UUID, user: User) -> Proje
     return project
 
 
-def _owned_document(session: Session, document_id: uuid.UUID | None, user: User) -> None:
-    if document_id is not None and session.scalar(select(KnowledgeDocument.id).where(
+def _owned_document(session: Session, document_id: uuid.UUID | None, project_id: uuid.UUID, user: User) -> None:
+    if document_id is None:
+        return
+    document = session.scalar(select(KnowledgeDocument).where(
         KnowledgeDocument.id == document_id, KnowledgeDocument.user_id == user.id
-    )) is None:
+    ))
+    if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
+    if document.project_id is not None and document.project_id != project_id:
+        raise HTTPException(status_code=422, detail="Document belongs to another project")
 
 
 class OutlineItemCreate(BaseModel):
@@ -172,7 +177,7 @@ def create_outline_item(
     _owned_project(session, project_id, user)
     if payload.parent_id is not None and payload.document_id is not None:
         raise HTTPException(status_code=422, detail="Provide only one of parent_id or document_id")
-    _owned_document(session, payload.document_id, user)
+    _owned_document(session, payload.document_id, project_id, user)
     if payload.parent_id is not None:
         parent = session.get(CreativeOutlineItem, payload.parent_id)
         if parent is None or parent.user_id != user.id or parent.project_id != project_id:
@@ -265,7 +270,7 @@ def create_document_card(
     user: User = Depends(get_current_user),
 ) -> DocumentCardRead:
     _owned_project(session, project_id, user)
-    _owned_document(session, payload.document_id, user)
+    _owned_document(session, payload.document_id, project_id, user)
     if payload.project_id is not None and payload.project_id != project_id:
         raise HTTPException(status_code=422, detail="Project does not match the URL")
     row = CreativeDocumentCard(
@@ -310,7 +315,7 @@ def update_document_card(
     card = session.get(CreativeDocumentCard, card_id)
     if card is None or card.project_id != project_id or card.user_id != user.id:
         raise HTTPException(status_code=404, detail="Card not found")
-    _owned_document(session, payload.document_id, user)
+    _owned_document(session, payload.document_id, project_id, user)
     changes = payload.model_dump(exclude_unset=True)
     if any(changes.get(key) is None for key in ("title", "status", "position") if key in changes):
         raise HTTPException(status_code=422, detail="Title, status and position cannot be null")
