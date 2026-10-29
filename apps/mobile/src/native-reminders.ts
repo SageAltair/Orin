@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { planLocalReminders } from "./local-reminder-plan";
-import type { NotificationPolicy, Reminder } from "./types";
+import type { NotificationPolicy, Reminder, Task } from "./types";
 
 const OPT_IN_KEY = "orin.mobile.device-reminders.v1";
 const CHANNEL = "orin-reminders";
@@ -63,14 +63,14 @@ async function ownerEnabled(owner: string): Promise<boolean> {
   return false;
 }
 
-async function sync(owner: string, reminders: Reminder[], policy: NotificationPolicy) {
+async function sync(owner: string, reminders: Reminder[], policy: NotificationPolicy, tasks: Task[] = []) {
   if (!(await ownerEnabled(owner))) return;
   if (!(await canDeliverLocally())) {
     await revokeLocalOptIn();
     return;
   }
   const desired = new Map(
-    planLocalReminders(reminders, policy).map((item) => [item.key, item.fireAt]),
+    planLocalReminders(reminders, policy, Date.now(), tasks).map((item) => [item.key, item.fireAt]),
   );
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const existing = new Set<string>();
@@ -132,8 +132,9 @@ export function syncLocalReminders(
   owner: string,
   reminders: Reminder[],
   policy: NotificationPolicy,
+  tasks: Task[] = [],
 ) {
-  return serialized(() => sync(owner, reminders, policy));
+  return serialized(() => sync(owner, reminders, policy, tasks));
 }
 
 export function setLocalReminderEnabled(
@@ -141,6 +142,7 @@ export function setLocalReminderEnabled(
   enabled: boolean,
   reminders: Reminder[],
   policy: NotificationPolicy,
+  tasks: Task[] = [],
 ): Promise<boolean> {
   return serialized(async () => {
     if (!enabled) {
@@ -167,7 +169,7 @@ export function setLocalReminderEnabled(
     }
     await ownerEnabled(owner);
     await SecureStore.setItemAsync(OPT_IN_KEY, owner);
-    await sync(owner, reminders, policy);
+    await sync(owner, reminders, policy, tasks);
     return true;
   });
 }
