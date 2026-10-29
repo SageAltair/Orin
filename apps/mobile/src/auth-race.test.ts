@@ -315,4 +315,39 @@ describe("Android concurrent refresh and account transitions", () => {
     expect(SecureStore.setItemAsync).not.toHaveBeenCalledWith(TOKEN_KEY, "old-cookie-token");
   });
 
+  it("does not clear a new login when the old restore's pending-marker read finishes late", async () => {
+    let finishMarkerRead!: (value: string | null) => void;
+    const pendingMarkerRead = new Promise<string | null>((resolve) => {
+      finishMarkerRead = resolve;
+    });
+    vi.mocked(SecureStore.getItemAsync).mockImplementation(async (key) => {
+      if (key === TOKEN_KEY) return "old-token";
+      if (key === "orin.mobile.workspace-id.v1") return "old-workspace";
+      return pendingMarkerRead;
+    });
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "new-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify(user), { status: 200 });
+      if (path.endsWith("/tasks"))
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      throw new Error(`Unexpected URL: ${path}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const api = await import("./api");
+
+    const restoring = api.restoreSession();
+    await vi.waitFor(() => {
+      expect(SecureStore.getItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1");
+    });
+    await expect(api.login(user.email, "new-password")).resolves.toEqual(user);
+    finishMarkerRead("1");
+    await expect(restoring).resolves.toBeNull();
+    await api.request("/tasks", {}, false);
+    const taskCall = [...fetchMock.mock.calls].reverse().find(([url]) => String(url).endsWith("/tasks"));
+    expect(new Headers(taskCall?.[1]?.headers).get("Authorization")).toBe("Bearer new-token");
+  });
+
 });
