@@ -46,7 +46,10 @@ test("accepts only the reviewed high packages and their exact transitive advisor
 });
 
 test("rejects a replacement high package even if the count stays unchanged", () => {
-  const result = evaluateMobileAudit(report(["@expo/cli", "expo", "unreviewed-package"]));
+  const replacement = report(["@expo/cli", "expo", "unreviewed-package"]);
+  // The old root dependency is replaced by another high-severity dependency.
+  replacement.vulnerabilities["@expo/cli"].via = ["@expo/config", "unreviewed-package"];
+  const result = evaluateMobileAudit(replacement);
   assert.equal(result.counts.high, HIGH_BASELINE_CEILING);
   assert.deepEqual(result.unexpected, ["unreviewed-package"]);
   assert.equal(result.passed, false);
