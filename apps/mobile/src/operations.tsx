@@ -48,12 +48,14 @@ export function OperationsScreen({
   onBack,
   onLogout,
   ownerId,
+  workspaceId,
 }: {
   kind: OperationsKey;
   colors: Palette;
   onBack: () => void;
   onLogout?: () => void;
   ownerId: string;
+  workspaceId: string;
 }) {
   if (kind === "focus" || kind === "routines" || kind === "opportunities")
     return <PlanningScreen kind={kind} colors={colors} onBack={onBack} />;
@@ -76,7 +78,7 @@ export function OperationsScreen({
       {kind === "calendar" ? (
         <CalendarOperation colors={colors} onBack={onBack} />
       ) : kind === "notifications" ? (
-        <NotificationOperation colors={colors} onBack={onBack} ownerId={ownerId} />
+        <NotificationOperation colors={colors} onBack={onBack} ownerId={ownerId} workspaceId={workspaceId} />
       ) : kind === "approvals" ? (
         <ApprovalOperation colors={colors} onBack={onBack} />
       ) : (
@@ -274,10 +276,12 @@ function NotificationOperation({
   colors,
   onBack,
   ownerId,
+  workspaceId,
 }: {
   colors: Palette;
   onBack: () => void;
   ownerId: string;
+  workspaceId: string;
 }) {
   const [items, setItems] = useState<Reminder[]>([]);
   const [policy, setPolicy] = useState<NotificationPolicy | null>(null);
@@ -302,7 +306,7 @@ function NotificationOperation({
         const tasks = prefs.enabled && prefs.categories.includes("tasks")
           ? await fetchDeviceReminderTasks()
           : [];
-        await syncLocalReminders(ownerId, next, prefs, tasks);
+        await syncLocalReminders(ownerId, workspaceId, next, prefs, tasks);
       }
     } catch (cause) {
       setError(errorMessage(cause));
@@ -332,7 +336,7 @@ function NotificationOperation({
       const tasks = enabled && policy.enabled && policy.categories.includes("tasks")
         ? await fetchDeviceReminderTasks()
         : [];
-      const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy, tasks);
+      const accepted = await setLocalReminderEnabled(ownerId, workspaceId, enabled, items, policy, tasks);
       setDeviceEnabled(accepted);
       if (enabled && !accepted) {
         setError("Android notifications are blocked for Orin. Enable app and reminder-channel notifications in system settings, then try again.");
@@ -357,7 +361,7 @@ function NotificationOperation({
         const tasks = updated.enabled && updated.categories.includes("tasks")
           ? await fetchDeviceReminderTasks()
           : [];
-        await syncLocalReminders(ownerId, items, updated, tasks);
+        await syncLocalReminders(ownerId, workspaceId, items, updated, tasks);
       }
     } catch (cause) {
       setError(errorMessage(cause));

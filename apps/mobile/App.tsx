@@ -33,7 +33,7 @@ import { paletteFor } from "./src/theme";
 import type { TabKey, User, Workspace } from "./src/types";
 import { ErrorNotice, Sheet, TabBar } from "./src/ui";
 import { Icon } from "./src/icons";
-import { reconcileLocalReminderAccount, reminderOwnerForSession } from "./src/native-reminders";
+import { reconcileLocalReminderAccount, reconcileLocalReminderWorkspace, reminderOwnerForSession } from "./src/native-reminders";
 import { refreshDeviceReminders } from "./src/device-reminder-sync";
 
 export default function App() {
@@ -89,12 +89,16 @@ export default function App() {
     if (!user || !workspace) return;
     let current = true;
     const refresh = () => {
-      void refreshDeviceReminders(user.id, () => current).catch(() => {
+      void refreshDeviceReminders(user.id, workspace.id, () => current).catch(() => {
         // Preserve previously scheduled alerts on transient network failure.
         // The Notifications screen provides an explicit retry and error message.
       });
     };
-    refresh();
+    void reconcileLocalReminderWorkspace(user.id, workspace.id)
+      .then(() => { if (current) refresh(); })
+      .catch(() => {
+        Alert.alert("Device reminders", "Could not safely reconcile workspace reminders. Check Android notification settings.");
+      });
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") refresh();
     });
@@ -114,11 +118,27 @@ export default function App() {
   }, [tab, user]);
 
   const chooseWorkspace = async (next: Workspace) => {
-    await setActiveWorkspace(next.id);
-    setWorkspace(next);
-    setWorkspacePicker(false);
-    setError("");
-    setDataRevision((value) => value + 1);
+    if (!user) return;
+    if (next.id === workspace?.id) {
+      setWorkspacePicker(false);
+      return;
+    }
+    try {
+      // Invalidate old async reminder refreshes and cancel old OS alerts before
+      // changing workspace, even when the network is unavailable.
+      await reconcileLocalReminderWorkspace(user.id, next.id);
+      await setActiveWorkspace(next.id);
+      setWorkspace(next);
+      setWorkspacePicker(false);
+      setError("");
+      setDataRevision((value) => value + 1);
+    } catch (cause) {
+      setError(`Could not switch workspace safely: ${errorMessage(cause)}`);
+      if (workspace) {
+        void reconcileLocalReminderWorkspace(user.id, workspace.id).catch(() => undefined);
+        setReminderRevision((value) => value + 1);
+      }
+    }
   };
   const signOut = async () => {
     try {
