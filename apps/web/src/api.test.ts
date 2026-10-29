@@ -107,6 +107,28 @@ describe("web logout and account isolation", () => {
     expect(afterLogoutHeaders.get("X-Orin-Workspace-Id")).toBeNull();
   });
 
+  it("can revoke the cookie-backed session on retry after an offline sign-out", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockRejectedValueOnce(new TypeError("Offline"))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "renewed-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    await expect(logout()).rejects.toMatchObject({ status: 0 });
+    // The local token was cleared; retry must refresh using the surviving cookie.
+    await expect(logout()).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(String(fetchMock.mock.calls[4]?.[0])).toContain("/auth/refresh");
+    const retryHeaders = new Headers(fetchMock.mock.calls[5]?.[1]?.headers);
+    expect(retryHeaders.get("Authorization")).toBe("Bearer renewed-token");
+  });
+
   it("does not send a previous account's workspace when switching logins", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
     fetchMock
