@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { errorMessage, request } from "./api";
 import { getLocalReminderEnabled, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
+import { fetchDeviceReminderTasks } from "./device-reminder-sync";
 import type {
   Activity,
   Approval,
@@ -297,7 +298,12 @@ function NotificationOperation({
       setPolicy(prefs);
       const enabled = await getLocalReminderEnabled(ownerId);
       setDeviceEnabled(enabled);
-      if (enabled) await syncLocalReminders(ownerId, next, prefs);
+      if (enabled) {
+        const tasks = prefs.enabled && prefs.categories.includes("tasks")
+          ? await fetchDeviceReminderTasks()
+          : [];
+        await syncLocalReminders(ownerId, next, prefs, tasks);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -323,7 +329,10 @@ function NotificationOperation({
     setDeviceBusy(true);
     setError("");
     try {
-      const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy);
+      const tasks = enabled && policy.enabled && policy.categories.includes("tasks")
+        ? await fetchDeviceReminderTasks()
+        : [];
+      const accepted = await setLocalReminderEnabled(ownerId, enabled, items, policy, tasks);
       setDeviceEnabled(accepted);
       if (enabled && !accepted) {
         setError("Android notifications are blocked for Orin. Enable app and reminder-channel notifications in system settings, then try again.");
@@ -344,7 +353,12 @@ function NotificationOperation({
         body: JSON.stringify(policy),
       });
       setPolicy(updated);
-      if (deviceEnabled) await syncLocalReminders(ownerId, items, updated);
+      if (deviceEnabled) {
+        const tasks = updated.enabled && updated.categories.includes("tasks")
+          ? await fetchDeviceReminderTasks()
+          : [];
+        await syncLocalReminders(ownerId, items, updated, tasks);
+      }
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -363,9 +377,10 @@ function NotificationOperation({
       {policy && (
         <Card colors={colors}>
           <Text style={[styles.body, { color: colors.muted }]}>
-            Orin can schedule known upcoming reminders on this device when you
-            explicitly enable device alerts. New server reminders will not arrive
-            while the app is closed until push delivery is implemented. Android
+            Orin can schedule known task deadlines and inbox reminders up to
+            seven days ahead after you enable device alerts. Opening Orin
+            refreshes the schedule. Server changes made while the app is closed
+            cannot update or cancel device alerts until you reconnect. Android
             may delay alerts; silent mode and Do Not Disturb still apply.
             Future focus sessions cannot be checked while Orin is closed.
           </Text>

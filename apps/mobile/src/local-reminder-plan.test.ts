@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planLocalReminders } from "./local-reminder-plan";
-import type { NotificationPolicy, Reminder } from "./types";
+import type { NotificationPolicy, Reminder, Task } from "./types";
 
 const policy: NotificationPolicy = {
   enabled: true,
@@ -25,6 +25,13 @@ function reminder(id: string, dueAt: string): Reminder {
     repeats: 0, attention_ready: false,
   };
 }
+function task(id: string, dueAt: string | null, status: Task["status"] = "todo"): Task {
+  return {
+    id, title: "Private task", description: null, status, priority: "normal",
+    due_at: dueAt, project_id: null, created_at: new Date(now).toISOString(),
+    updated_at: new Date(now).toISOString(),
+  };
+}
 describe("local Android reminder planner", () => {
   it("schedules only upcoming unread enabled-category reminders", () => {
     const future = reminder("good", "2026-10-29T12:30:00Z");
@@ -44,6 +51,34 @@ describe("local Android reminder planner", () => {
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true }, now)).toEqual([]);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "09:00", quiet_end: "17:00" }, now)).toHaveLength(1);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "12:00", quiet_end: "12:00" }, now)).toEqual([]);
+  });
+  it("schedules future task deadlines independently of the server 30-minute inbox window", () => {
+    const due = "2026-11-02T12:00:00Z";
+    expect(planLocalReminders([], policy, now, [task("future", due)]))
+      .toEqual([{ key: `task:future:${Date.parse(due)}`, fireAt: Date.parse(due) }]);
+    expect(planLocalReminders([], policy, now, [
+      task("done", due, "done"), task("cancelled", due, "cancelled"),
+      task("undated", null), task("past", "2026-10-28T12:00:00Z"),
+    ])).toEqual([]);
+  });
+  it("replaces a task deadline with its matching server inbox reminder without duplicate alerts", () => {
+    const due = "2026-10-29T13:00:00Z";
+    const notification = { ...reminder("inbox", due), source_id: "task-1" };
+    expect(planLocalReminders([notification], policy, now, [task("task-1", due)]))
+      .toEqual([{ key: `inbox:1:${Date.parse(due)}`, fireAt: Date.parse(due) }]);
+    expect(planLocalReminders([{ ...notification, read_at: "2026-10-29T12:00:00Z" }], policy, now, [task("task-1", due)]))
+      .toEqual([]);
+    expect(planLocalReminders([notification], policy, now, [task("task-1", "2026-10-30T13:00:00Z")]))
+      .toHaveLength(2);
+  });
+  it("applies task category, quiet hours, horizon and global cap to future tasks", () => {
+    const due = "2026-10-29T23:00:00Z";
+    const candidate = task("quiet", due);
+    expect(planLocalReminders([], { ...policy, categories: ["calendar"] }, now, [candidate])).toEqual([]);
+    expect(planLocalReminders([], { ...policy, quiet_enabled: true }, now, [candidate])).toEqual([]);
+    expect(planLocalReminders([], policy, now, [task("far", "2026-11-10T12:00:00Z")])).toEqual([]);
+    const many = Array.from({ length: 40 }, (_, i) => task(String(i), new Date(now + (40 - i) * 60_000).toISOString()));
+    expect(planLocalReminders([], policy, now, many)).toHaveLength(32);
   });
   it("caps device scheduling and prioritizes earliest dates", () => {
     const items = Array.from({ length: 40 }, (_, i) => reminder(String(i), new Date(now + (40 - i) * 60_000).toISOString()));

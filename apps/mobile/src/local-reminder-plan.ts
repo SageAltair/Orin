@@ -1,4 +1,4 @@
-import type { NotificationPolicy, Reminder } from "./types";
+import type { NotificationPolicy, Reminder, Task } from "./types";
 
 export type PlannedLocalReminder = {
   key: string;
@@ -43,10 +43,16 @@ export function planLocalReminders(
   reminders: Reminder[],
   policy: NotificationPolicy,
   now = Date.now(),
+  tasks: Task[] = [],
 ): PlannedLocalReminder[] {
   if (!policy.enabled) return [];
   const categories = new Set(policy.categories);
-  return reminders.flatMap((reminder) => {
+  const coveredTaskDeadlines = new Set(
+    reminders
+      .filter((reminder) => reminder.category === "tasks" && reminder.source_id)
+      .map((reminder) => `${reminder.source_id}:${Date.parse(reminder.due_at)}`),
+  );
+  const fromInbox = reminders.flatMap((reminder) => {
     if (reminder.read_at || !categories.has(reminder.category)) return [];
     const due = Date.parse(reminder.due_at);
     const snooze = reminder.snoozed_until
@@ -60,5 +66,20 @@ export function planLocalReminders(
       inQuietHours(fireAt, policy)
     ) return [];
     return [{ key: `${reminder.id}:${reminder.revision}:${fireAt}`, fireAt }];
-  }).sort((a, b) => a.fireAt - b.fireAt).slice(0, MAX_REMINDERS);
+  });
+  const fromTasks = categories.has("tasks") ? tasks.flatMap((task) => {
+    if (!task.due_at || task.status === "done" || task.status === "cancelled") return [];
+    const fireAt = Date.parse(task.due_at);
+    if (
+      !Number.isFinite(fireAt) ||
+      fireAt < now + 10_000 ||
+      fireAt > now + MAX_HORIZON_MS ||
+      inQuietHours(fireAt, policy) ||
+      coveredTaskDeadlines.has(`${task.id}:${fireAt}`)
+    ) return [];
+    return [{ key: `task:${task.id}:${fireAt}`, fireAt }];
+  }) : [];
+  return [...fromInbox, ...fromTasks]
+    .sort((a, b) => a.fireAt - b.fireAt || a.key.localeCompare(b.key))
+    .slice(0, MAX_REMINDERS);
 }
