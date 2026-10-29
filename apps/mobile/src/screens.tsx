@@ -314,10 +314,12 @@ export function TasksScreen({
   colors,
   active,
   workspace,
+  onTasksChanged,
 }: {
   colors: Palette;
   active: boolean;
   workspace: Workspace | null;
+  onTasksChanged?: () => void;
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
@@ -356,6 +358,7 @@ export function TasksScreen({
       });
       setTitle("");
       await load();
+      onTasksChanged?.();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -372,6 +375,7 @@ export function TasksScreen({
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
+      onTasksChanged?.();
     } catch (cause) {
       setError(errorMessage(cause));
       await load();
@@ -401,6 +405,7 @@ export function TasksScreen({
       });
       setEditing(null);
       await load();
+      onTasksChanged?.();
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
