@@ -28,6 +28,7 @@ let activeWorkspaceId: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let authRevision = 0;
 let tokenWriteQueue: Promise<void> = Promise.resolve();
+let workspaceWriteQueue: Promise<void> = Promise.resolve();
 
 // Fence responses from a previous account/session, including in-flight refreshes.
 const beginAuthTransition = () => {
@@ -107,16 +108,30 @@ const persistToken = async (token: string | null, revision = authRevision) => {
 };
 
 export const hydrateSession = async () => {
-  [accessToken, activeWorkspaceId] = await Promise.all([
+  const revision = authRevision;
+  // Do not read credentials while a prior secure-storage write is unfinished.
+  await Promise.all([
+    tokenWriteQueue.catch(() => undefined),
+    workspaceWriteQueue.catch(() => undefined),
+  ]);
+  const [token, workspace] = await Promise.all([
     SecureStore.getItemAsync(TOKEN_KEY),
     SecureStore.getItemAsync(WORKSPACE_KEY),
   ]);
+  if (revision !== authRevision) return;
+  accessToken = token;
+  activeWorkspaceId = workspace;
 };
 
-export const setActiveWorkspace = async (id: string | null) => {
-  activeWorkspaceId = id;
-  if (id) await SecureStore.setItemAsync(WORKSPACE_KEY, id);
-  else await SecureStore.deleteItemAsync(WORKSPACE_KEY);
+export const setActiveWorkspace = async (id: string | null, revision = authRevision) => {
+  const write = workspaceWriteQueue.catch(() => undefined).then(async () => {
+    if (revision !== authRevision) return;
+    activeWorkspaceId = id;
+    if (id) await SecureStore.setItemAsync(WORKSPACE_KEY, id);
+    else await SecureStore.deleteItemAsync(WORKSPACE_KEY);
+  });
+  workspaceWriteQueue = write;
+  await write;
 };
 export const getActiveWorkspaceId = () => activeWorkspaceId;
 
@@ -254,7 +269,9 @@ export const register = async (
 };
 
 export const restoreSession = async () => {
+  const revision = authRevision;
   await hydrateSession();
+  if (revision !== authRevision) return null;
   // Offline logout may leave a valid HttpOnly refresh cookie on the device.
   // Never silently restore that session until the user signs in explicitly.
   if (await SecureStore.getItemAsync(LOGOUT_PENDING_KEY)) {
@@ -263,15 +280,18 @@ export const restoreSession = async () => {
     return null;
   }
   if (!accessToken && !(await refresh())) return null;
+  if (revision !== authRevision) return null;
   try {
-    return await request<User>("/auth/me", {}, false);
+    const user = await request<User>("/auth/me", {}, false);
+    return revision === authRevision ? user : null;
   } catch (cause) {
     // Retry authentication only when the API actually rejected the token.
     // Offline errors must not trigger a destructive refresh attempt.
-    if (!(cause instanceof ApiError) || cause.status !== 401) return null;
-    if (!(await refresh())) return null;
+    if (revision !== authRevision || !(cause instanceof ApiError) || cause.status !== 401) return null;
+    if (!(await refresh()) || revision !== authRevision) return null;
     try {
-      return await request<User>("/auth/me", {}, false);
+      const user = await request<User>("/auth/me", {}, false);
+      return revision === authRevision ? user : null;
     } catch {
       return null;
     }
