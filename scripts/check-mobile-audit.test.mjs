@@ -7,8 +7,8 @@ import {
   KNOWN_HIGH_PACKAGES,
 } from "./check-mobile-audit.mjs";
 
-const knownAdvisory = { url: "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5" };
-const newAdvisory = { url: "https://github.com/advisories/GHSA-new-advisory-0000" };
+const knownAdvisory = { url: "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5", severity: "high" };
+const newAdvisory = { url: "https://github.com/advisories/GHSA-new-advisory-0000", severity: "high" };
 
 function report(highNames = KNOWN_HIGH_PACKAGES, criticalNames = []) {
   const viaFor = (name) => {
@@ -20,7 +20,7 @@ function report(highNames = KNOWN_HIGH_PACKAGES, criticalNames = []) {
   const vulnerabilities = Object.fromEntries([
     ...highNames.map((name) => [name, { severity: "high", via: viaFor(name) }]),
     ...criticalNames.map((name) => [name, { severity: "critical", via: viaFor(name) }]),
-    ["deepmerge", { severity: "low", via: [{ url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4" }] }],
+    ["deepmerge", { severity: "low", via: [{ url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4", severity: "low" }] }],
   ]);
   return {
     metadata: {
@@ -46,6 +46,18 @@ test("rejects a replacement high package even if the count stays unchanged", () 
   assert.equal(result.counts.high, HIGH_BASELINE_CEILING);
   assert.deepEqual(result.unexpected, ["unreviewed-package"]);
   assert.equal(result.passed, false);
+});
+
+test("ignores low-severity advisories reachable through a high package", () => {
+  const mixed = report();
+  mixed.vulnerabilities.expo.via.push("deepmerge");
+  mixed.vulnerabilities.zod.via.push({
+    url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+    severity: "low",
+  });
+  const result = evaluateMobileAudit(mixed);
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.unexpectedAdvisories, []);
 });
 
 test("rejects a new high advisory in an existing known package", () => {
@@ -77,7 +89,7 @@ test("fails closed for missing, circular or unknown advisory chains", () => {
   assert.throws(() => evaluateMobileAudit(unresolvable), /Missing mobile audit advisory/);
 
   const unknownUrl = report();
-  unknownUrl.vulnerabilities.zod.via = [{ url: "https://example.invalid/unknown" }];
+  unknownUrl.vulnerabilities.zod.via = [{ url: "https://example.invalid/unknown", severity: "high" }];
   assert.throws(() => evaluateMobileAudit(unknownUrl), /Unrecognized mobile audit advisory URL/);
 });
 
