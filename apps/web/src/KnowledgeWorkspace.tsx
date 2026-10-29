@@ -1712,7 +1712,7 @@ export function KnowledgeWorkspace({
                 <span>{readingMinutes} min read</span>
               </div>
             </div>
-            <details className="writing-details">
+            <details key={selected.id} className="writing-details">
               <summary>Note details</summary>
               <div className="writing-details-grid">
                 <label>
