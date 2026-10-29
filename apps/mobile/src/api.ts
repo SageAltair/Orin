@@ -181,6 +181,7 @@ export async function request<T>(
       "EXPO_PUBLIC_API_BASE_URL must be an HTTPS URL in production.",
       0,
     );
+  const revision = authRevision;
   const headers = new Headers(options.headers);
   if (options.body && !headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
@@ -206,6 +207,8 @@ export async function request<T>(
       0,
     );
   }
+  if (revision !== authRevision)
+    throw new ApiError("Session changed while the request was in progress.", 0);
   if (response.status === 401 && retry && (!path.startsWith("/auth/") || path === "/auth/logout")) {
     if (await refresh()) return request<T>(path, options, false, timeoutMs);
   }
@@ -220,7 +223,10 @@ export async function request<T>(
     throw new ApiError(errorDetail(data, fallback), response.status);
   }
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const result = (await response.json()) as T;
+  if (revision !== authRevision)
+    throw new ApiError("Session changed while the request was in progress.", 0);
+  return result;
 }
 
 export const login = async (email: string, password: string) => {
