@@ -1689,7 +1689,7 @@ export default function App() {
                     onScheduleTask={scheduleTask}
                   /></div>
                 ) : (
-                  <div data-orin-control="tasks-workspace"><TaskCollection
+                  <div data-orin-control="tasks-workspace" className="focus-shell focus-embedded"><TaskCollection
                     key={activeWorkspaceId || "personal"}
                     onScheduleTask={scheduleTask}
                     onTaskSaved={(updated) => {
