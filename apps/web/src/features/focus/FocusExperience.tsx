@@ -72,7 +72,7 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
 
   const nav = useMemo(() => [
     { id: "now" as const, label: "Now" }, { id: "today" as const, label: "Today" },
-    { id: "capture" as const, label: "Capture" }, { id: "tasks" as const, label: "Browse" }, { id: "close" as const, label: "Close" },
+    { id: "capture" as const, label: "Capture" }, { id: "tasks" as const, label: "Tasks" }, { id: "close" as const, label: "Close" },
   ], []);
   const saveSettings = async (patch: Record<string, unknown>) => {
     try { await request("/focus/settings", { method: "PUT", body: JSON.stringify(patch) }); }
