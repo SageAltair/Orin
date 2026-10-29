@@ -68,8 +68,17 @@ export async function requestBlob(path: string): Promise<Blob> {
     const headers = new Headers();
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);
-    const response = await fetch(`${baseUrl}/api/v1${path}`, { headers, credentials: "include" });
-    if (response.status === 401 && retry && await refresh()) return fetchBlob(false);
+    let response: Response;
+    try {
+      response = await fetch(`${baseUrl}/api/v1${path}`, { headers, credentials: "include", signal: AbortSignal.timeout(120000) });
+    } catch {
+      throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0);
+    }
+    if (response.status === 401 && retry) {
+      if (await refresh()) return fetchBlob(false);
+      accessToken = null;
+      if (typeof window !== "undefined") window.dispatchEvent(new Event("orin:session-expired"));
+    }
     if (!response.ok) throw new ApiError(`Could not load file (${response.status}).`, response.status);
     return response.blob();
   };
