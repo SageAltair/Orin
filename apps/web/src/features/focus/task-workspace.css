@@ -215,3 +215,39 @@
 .orin-shell .focus-embedded .task-workspace-heading button.primary-button {
   min-height: 48px;
 }
+
+/* Task workspace: quiet, readable, keyboard-accessible planning surface. */
+.orin-shell .focus-embedded .focus-task-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.orin-shell .focus-embedded .focus-task-heading h1 { margin:5px 0 4px; }
+.orin-shell .focus-embedded .focus-task-heading p { color:var(--muted); margin:0; font-size:14px; }
+.orin-shell .focus-embedded .focus-task-heading .focus-primary { display:inline-flex; align-items:center; justify-content:center; gap:7px; flex-shrink:0; min-height:42px; padding:9px 15px; }
+.orin-shell .focus-embedded .focus-task-views { margin-top:28px; }
+.orin-shell .focus-embedded .focus-task-views button { display:inline-flex; align-items:center; gap:9px; min-height:40px; }
+.orin-shell .focus-embedded .focus-task-views button span { font-size:11px; opacity:.72; }
+.orin-shell .focus-embedded .focus-task-row-content { min-width:0; flex:1; display:flex; flex-direction:column; gap:5px; }
+.orin-shell .focus-embedded .focus-task-row-content strong { overflow-wrap:anywhere; }
+.orin-shell .focus-embedded .focus-task-row-content span { line-height:1.55; }
+.orin-shell .focus-embedded .focus-task-row-actions { display:flex; align-items:center; gap:7px; }
+.orin-shell .focus-embedded .focus-task-row-actions button { display:inline-flex; align-items:center; gap:6px; min-height:34px; }
+.orin-shell .focus-embedded .focus-task-editor { margin:20px 0; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--surface); display:flex; flex-direction:column; gap:9px; }
+.orin-shell .focus-embedded .focus-task-editor-heading { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.orin-shell .focus-embedded .focus-task-editor-heading h2 { margin:0; font-size:18px; }
+.orin-shell .focus-embedded .focus-task-editor-heading button { border:0; background:transparent; color:var(--muted); cursor:pointer; padding:6px; }
+.orin-shell .focus-embedded .focus-task-editor label { display:block; font-size:12px; font-weight:600; color:var(--muted); }
+.orin-shell .focus-embedded .focus-task-editor input,
+.orin-shell .focus-embedded .focus-task-editor textarea,
+.orin-shell .focus-embedded .focus-task-editor select { width:100%; box-sizing:border-box; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); font:inherit; }
+.orin-shell .focus-embedded .focus-task-editor-grid { display:grid; grid-template-columns:minmax(0,1.5fr) repeat(2,minmax(0,1fr)); gap:14px; margin-top:6px; }
+.orin-shell .focus-embedded .focus-task-editor-grid > div { min-width:0; display:flex; flex-direction:column; gap:7px; }
+.orin-shell .focus-embedded .focus-task-editor-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:7px; }
+.orin-shell .focus-embedded .focus-task-hint { color:var(--muted); font-size:12px; line-height:1.6; }
+.orin-shell .focus-embedded .focus-task-editor :focus-visible,
+.orin-shell .focus-embedded .focus-task-views button:focus-visible,
+.orin-shell .focus-embedded .focus-task-row-actions button:focus-visible { outline:2px solid var(--text); outline-offset:2px; }
+@media (max-width:760px) {
+  .orin-shell .focus-embedded .focus-task-heading { flex-wrap:wrap; }
+  .orin-shell .focus-embedded .focus-task-editor-grid { grid-template-columns:1fr; }
+  .orin-shell .focus-embedded .focus-task-editor { padding:15px; }
+  .orin-shell .focus-embedded .focus-task-list li { flex-wrap:wrap; }
+  .orin-shell .focus-embedded .focus-task-row-actions { width:100%; justify-content:flex-end; }
+}

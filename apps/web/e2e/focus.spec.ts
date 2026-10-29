@@ -47,6 +47,12 @@ async function setupFocus(page: Page) {
       return route.fulfill({ json: task });
     }
     if (pathname === "/api/v1/tasks" && method === "GET") return route.fulfill({ json: collectionTasks });
+    if (pathname === "/api/v1/tasks" && method === "POST") {
+      const input = await route.request().postDataJSON() as Record<string, unknown>;
+      const created = { id: "new-scheduled-task", status: "todo", focus_state: "inbox", created_at: timestamp, updated_at: timestamp, ...input };
+      collectionTasks.unshift(created);
+      return route.fulfill({ status: 201, json: created });
+    }
     if (/\/api\/v1\/tasks\/[^/]+$/.test(pathname) && method === "PATCH") { const item = collectionTasks.find(candidate => candidate.id === pathname.split("/").at(-1)); if (!item) return route.fulfill({ status: 404, json: { detail: "Task not found" } }); Object.assign(item, await route.request().postDataJSON()); return route.fulfill({ json: item }); }
     if (pathname === "/api/v1/focus/today/tasks" && method === "PUT") return route.fulfill({ json: plan() });
     if (pathname === "/api/v1/focus/now/start" && method === "POST") {
@@ -81,7 +87,7 @@ test("capture appears on Now and starts a timer within three taps", async ({ pag
   await setupFocus(page);
   await page.goto("/");
   await signIn(page);
-  await page.getByRole("button", { name: /Tasks/ }).click();
+  await page.locator('[data-orin-control="nav-tasks"]').click();
   await expect(page.getByRole("heading", { name: "What’s one thing on your mind?" })).toBeVisible();
   await page.getByRole("button", { name: "Add one thing" }).click();
   await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Write the first paragraph");
@@ -251,8 +257,8 @@ test("focus layout remains readable at 200 percent page zoom", async ({ page }) 
 test("the focus workspace can find inbox, today, upcoming, and completed tasks", async ({ page }) => {
   await setupFocus(page); await page.goto("/"); await signIn(page);
   const focusNav = page.getByRole("navigation", { name: "Focus navigation" });
-  await focusNav.getByRole("button", { name: "Browse" }).click();
-  await expect(page.getByRole("heading", { name: "Your tasks, in view." })).toBeVisible();
+  await focusNav.getByRole("button", { name: "Tasks" }).click();
+  await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
   await expect(page.getByText("Ask the team about the venue")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
   await expect(page.getByText("Review the project outline")).toBeVisible();
@@ -273,4 +279,24 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.screenshot({path:test.info().outputPath("tasks-mobile-dark.png")});
 
+});
+
+test("Tasks creates and edits a precisely scheduled task in the unified list", async ({ page }) => {
+  await setupFocus(page); await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const workspace = page.locator(".focus-task-collection");
+  await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
+  await workspace.getByRole("button", { name: "New task" }).click();
+  await workspace.getByLabel("Task name").fill("Scheduled notification test");
+  await workspace.getByLabel("Due date and time (local)").fill("2026-11-01T15:45");
+  await workspace.getByLabel("Priority").selectOption("high");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  await expect(workspace.getByText("Scheduled notification test")).toBeVisible();
+  await workspace.getByRole("button", { name: "Edit Scheduled notification test" }).click();
+  await expect(workspace.getByLabel("Due date and time (local)")).toHaveValue("2026-11-01T15:45");
+  await workspace.getByLabel("Task name").fill("Scheduled task updated");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  await expect(workspace.getByText("Scheduled task updated")).toBeVisible();
+  await workspace.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
+  await expect(workspace.getByText("Scheduled task updated")).toBeVisible();
 });

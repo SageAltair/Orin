@@ -1,42 +1,129 @@
-import { useEffect, useState } from "react";
-import { Check, RotateCcw } from "lucide-react";
-import { ApiError, request, type Task } from "../../api";
-import { filterTasksForView, type TaskView } from "./taskViews";
+import { useEffect, useState, type FormEvent } from "react";
+import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import { ApiError, request, type Project, type Task } from "../../api";
+import { filterTasksForView, toLocalDateTime, toUtcDueAt, type TaskView } from "./taskViews";
 
-const views: Array<[TaskView, string]> = [["all", "All"], ["inbox", "Inbox"], ["today", "Today"], ["upcoming", "Upcoming"], ["completed", "Completed"]];
+const views: Array<[TaskView, string]> = [
+  ["all", "All tasks"], ["today", "Today"], ["upcoming", "Upcoming"],
+  ["overdue", "Overdue"], ["inbox", "Inbox"], ["completed", "Completed"],
+];
+type Draft = { title: string; description: string; due: string; priority: Task["priority"]; project_id: string };
+const blankDraft = (): Draft => ({ title: "", description: "", due: "", priority: "normal", project_id: "" });
+const fromTask = (task: Task): Draft => ({
+  title: task.title, description: task.description ?? "", due: toLocalDateTime(task.due_at),
+  priority: task.priority, project_id: task.project_id ?? "",
+});
+const errorMessage = (value: unknown, fallback: string) => value instanceof ApiError ? value.message : value instanceof Error ? value.message : fallback;
+
+async function fetchAllTasks(): Promise<Task[]> {
+  const items: Task[] = [];
+  for (let page = 0; page < 50; page++) {
+    const batch = await request<Task[]>(`/tasks?limit=100&offset=${page * 100}`);
+    items.push(...batch);
+    if (batch.length < 100) return items;
+  }
+  throw new Error("More than 5,000 tasks exist. The full list could not be loaded safely.");
+}
 
 export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: string) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [view, setView] = useState<TaskView>("inbox");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [view, setView] = useState<TaskView>("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft>(blankDraft);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
   const load = async () => {
     setLoading(true); setError("");
-    try { setTasks(await request<Task[]>("/tasks?limit=100")); }
-    catch (value) { setError(value instanceof ApiError ? value.message : "Tasks could not be loaded. Try again."); }
+    try { setTasks(await fetchAllTasks()); }
+    catch (value) { setError(errorMessage(value, "Tasks could not be loaded. Try again.")); }
     finally { setLoading(false); }
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    void request<Project[]>("/projects?limit=100").then(setProjects).catch(() => { /* Tasks remain usable without the project selector. */ });
+  }, []);
+
   const visibleTasks = filterTasksForView(tasks, view, search);
-  const changeStatus = async (task: Task) => {
-    setBusyId(task.id); setError("");
+  const begin = (task?: Task) => {
+    setEditingId(task?.id ?? "new");
+    setDraft(task ? fromTask(task) : blankDraft());
+    setError(""); setNotice("");
+  };
+  const save = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!draft.title.trim() || !editingId) return;
+    setBusyId(editingId); setError(""); setNotice("");
     try {
-      const updated = await request<Task>(`/tasks/${task.id}`, { method: "PATCH", body: JSON.stringify({ status: task.status === "done" ? "todo" : "done" }) });
-      setTasks(current => current.map(item => item.id === updated.id ? updated : item));
-    } catch (value) { setError(value instanceof ApiError ? value.message : "That task could not be updated. Try again."); }
+      const payload = {
+        title: draft.title.trim(), description: draft.description.trim() || null,
+        priority: draft.priority, project_id: draft.project_id || null, due_at: toUtcDueAt(draft.due),
+      };
+      const isNew = editingId === "new";
+      const saved = await request<Task>(isNew ? "/tasks" : `/tasks/${editingId}`, {
+        method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
+      });
+      setTasks(current => isNew ? [saved, ...current] : current.map(item => item.id === saved.id ? saved : item));
+      setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
+    } catch (value) { setError(errorMessage(value, "The task could not be saved.")); }
     finally { setBusyId(""); }
   };
+  const changeStatus = async (task: Task) => {
+    setBusyId(task.id); setError(""); setNotice("");
+    try {
+      const updated = await request<Task>(`/tasks/${task.id}`, {
+        method: "PATCH", body: JSON.stringify({ status: task.status === "done" ? "todo" : "done" }),
+      });
+      setTasks(current => current.map(item => item.id === updated.id ? updated : item));
+    } catch (value) { setError(errorMessage(value, "That task could not be updated.")); }
+    finally { setBusyId(""); }
+  };
+
   return <section className="focus-card focus-task-collection" aria-labelledby="task-collection-heading">
-    <span className="focus-eyebrow">YOUR TASKS</span><h1 id="task-collection-heading">Your tasks, in view.</h1>
-    <nav className="focus-task-views" aria-label="Task views">{views.map(([id, label]) => <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>{label}<span>{filterTasksForView(tasks, id, "").length}</span></button>)}</nav>
-    <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label><input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search titles and descriptions" />
-    {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Retry</button></p>}
-    {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ? <div className="focus-task-empty"><h2>{tasks.length === 0 ? "No tasks yet" : `No ${view === "all" ? "matching" : view} tasks`}</h2><p>{view === "inbox" ? "New captures will be ready here whenever you need them." : view === "upcoming" ? "Tasks with real due dates will appear here." : view === "completed" ? "Finished work will stay searchable here." : "Try another view or search."}</p></div> : <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
-      <button type="button" className="focus-task-status" aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`} disabled={busyId === task.id} onClick={() => void changeStatus(task)}>{task.status === "done" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
-      <div><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong><span>{task.project_id ? "Project task" : task.focus_state === "inbox" ? "Inbox" : task.focus_state === "active" ? "In progress" : task.status.replace("_", " ")}{task.due_at ? ` · Due ${new Date(task.due_at).toLocaleDateString()}` : ""}</span></div>
-      {onScheduleTask && task.status !== "done" && task.status !== "cancelled" && <button type="button" className="focus-task-schedule" onClick={() => onScheduleTask(task.id)}>Schedule</button>}
-    </li>)}</ul>}
+    <div className="focus-task-heading">
+      <div><span className="focus-eyebrow">PLAN AND FOLLOW THROUGH</span><h1 id="task-collection-heading">Tasks</h1><p>Everything you need to do, in one place.</p></div>
+      <button type="button" className="focus-primary" onClick={() => begin()} disabled={Boolean(busyId)}><Plus size={17} /> New task</button>
+    </div>
+    <nav className="focus-task-views" aria-label="Task views">{views.map(([id, label]) =>
+      <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
+        {label}<span>{filterTasksForView(tasks, id, "").length}</span>
+      </button>)}</nav>
+    <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
+    <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
+    {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
+    {notice && <p role="status" className="focus-quiet-message">{notice}</p>}
+    {editingId && <form className="focus-task-editor" onSubmit={event => void save(event)} aria-label={editingId === "new" ? "Create task" : "Edit task"}>
+      <div className="focus-task-editor-heading"><h2>{editingId === "new" ? "New task" : "Edit task"}</h2><button type="button" aria-label="Close task editor" onClick={() => setEditingId(null)}><X size={17} /></button></div>
+      <label htmlFor="task-editor-title">Task name</label>
+      <input id="task-editor-title" autoFocus required maxLength={240} value={draft.title} onChange={event => setDraft(current => ({ ...current, title: event.target.value }))} placeholder="What needs to be done?" />
+      <label htmlFor="task-editor-description">Notes (optional)</label>
+      <textarea id="task-editor-description" rows={2} value={draft.description} onChange={event => setDraft(current => ({ ...current, description: event.target.value }))} placeholder="Context or next steps" />
+      <div className="focus-task-editor-grid">
+        <div><label htmlFor="task-editor-due">Due date and time (local)</label><input id="task-editor-due" type="datetime-local" value={draft.due} onChange={event => setDraft(current => ({ ...current, due: event.target.value }))} /></div>
+        <div><label htmlFor="task-editor-priority">Priority</label><select id="task-editor-priority" value={draft.priority} onChange={event => setDraft(current => ({ ...current, priority: event.target.value as Task["priority"] }))}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+        <div><label htmlFor="task-editor-project">Project</label><select id="task-editor-project" value={draft.project_id} onChange={event => setDraft(current => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
+      </div>
+      <p className="focus-task-hint">A due time schedules the task. Device notifications depend on your notification settings and delivery support.</p>
+      <div className="focus-task-editor-actions"><button type="button" className="focus-secondary" onClick={() => setEditingId(null)}>Cancel</button><button type="submit" className="focus-primary" disabled={Boolean(busyId) || !draft.title.trim()}>{busyId ? "Saving…" : "Save task"}</button></div>
+    </form>}
+    {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ?
+      <div className="focus-task-empty"><h2>{tasks.length === 0 ? "No tasks yet" : "Nothing in this view"}</h2><p>{tasks.length === 0 ? "Create your first task to start planning." : "Try another view or search."}</p></div> :
+      <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
+        <button type="button" className="focus-task-status" aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
+        <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
+          <span>{task.project_id ? projects.find(project => project.id === task.project_id)?.name ?? "Project task" : "Personal"}
+            {task.due_at ? ` · Due ${new Date(task.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : " · No due date"}
+            {task.priority !== "normal" ? ` · ${task.priority} priority` : ""}</span>
+        </div>
+        <div className="focus-task-row-actions">
+          <button type="button" className="focus-task-schedule" aria-label={`Edit ${task.title}`} disabled={Boolean(busyId)} onClick={() => begin(task)}><Pencil size={15} /> Edit</button>
+          {onScheduleTask && task.status !== "done" && task.status !== "cancelled" && <button type="button" className="focus-task-schedule" onClick={() => onScheduleTask(task.id)}>Calendar</button>}
+        </div>
+      </li>)}</ul>}
+    <p className="focus-task-hint">{loading ? "Loading…" : `Showing ${visibleTasks.length} of ${tasks.length} tasks`}</p>
   </section>;
 }
