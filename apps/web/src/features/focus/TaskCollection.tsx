@@ -3,6 +3,7 @@ import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
 import { dueAtForEdit, filterTasksForView, toLocalDateTime, type TaskView } from "./taskViews";
 import { fetchAllPages } from "./taskPagination";
+import "./task-workspace.css";
 
 const views: Array<[TaskView, string]> = [
   ["all", "All tasks"], ["today", "Today"], ["upcoming", "Upcoming"],
@@ -23,7 +24,7 @@ const fetchAllProjects = () => fetchAllPages<Project>(
   (offset, limit) => request<Project[]>(`/projects?limit=${limit}&offset=${offset}`), "projects",
 );
 
-export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: string) => void }) {
+export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
@@ -75,6 +76,7 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
       });
       setTasks(current => isNew ? [saved, ...current] : current.map(item => item.id === saved.id ? saved : item));
+      onTaskSaved?.(saved);
       setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
     } catch (value) { setError(errorMessage(value, "The task could not be saved.")); }
     finally { setBusyId(""); }
@@ -86,6 +88,7 @@ export function TaskCollection({ onScheduleTask }: { onScheduleTask?: (taskId: s
         method: "PATCH", body: JSON.stringify({ status: task.status === "done" ? "todo" : "done" }),
       });
       setTasks(current => current.map(item => item.id === updated.id ? updated : item));
+      onTaskSaved?.(updated);
     } catch (value) { setError(errorMessage(value, "That task could not be updated.")); }
     finally { setBusyId(""); }
   };
