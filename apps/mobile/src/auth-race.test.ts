@@ -210,4 +210,29 @@ describe("Android concurrent refresh and account transitions", () => {
     expect(new Headers(taskCall?.[1]?.headers).get("Authorization")).toBe("Bearer new-token");
   });
 
+  it.each(["login", "register"] as const)(
+    "does not restore the old cookie after a failed explicit %s",
+    async (operation) => {
+      const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(null, { status: 401 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const api = await oldSession();
+
+      const switching = operation === "login"
+        ? api.login(user.email, "wrong-password")
+        : api.register(user.email, "wrong-password", user.display_name);
+      await expect(switching).rejects.toMatchObject({ status: 401 });
+      expect(SecureStore.setItemAsync).toHaveBeenCalledWith("orin.mobile.logout-pending.v1", "1");
+
+      // Simulate a relaunch with a surviving old refresh cookie and stale storage.
+      vi.mocked(SecureStore.getItemAsync)
+        .mockResolvedValueOnce("old-token")
+        .mockResolvedValueOnce("old-workspace")
+        .mockResolvedValueOnce("1");
+      await expect(api.restoreSession()).resolves.toBeNull();
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
 });
