@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   BackHandler,
   Platform,
   Pressable,
@@ -33,6 +34,7 @@ import type { TabKey, User, Workspace } from "./src/types";
 import { ErrorNotice, Sheet, TabBar } from "./src/ui";
 import { Icon } from "./src/icons";
 import { reconcileLocalReminderAccount } from "./src/native-reminders";
+import { refreshDeviceReminders } from "./src/device-reminder-sync";
 
 export default function App() {
   const scheme = useColorScheme();
@@ -45,6 +47,7 @@ export default function App() {
   const [workspacePicker, setWorkspacePicker] = useState(false);
   const [error, setError] = useState("");
   const [dataRevision, setDataRevision] = useState(0);
+  const [reminderRevision, setReminderRevision] = useState(0);
 
   const loadWorkspaces = async () => {
     try {
@@ -55,8 +58,8 @@ export default function App() {
         rows.find((item) => item.id === getActiveWorkspaceId()) ??
         rows[0] ??
         null;
-      setWorkspace(preferred);
       if (preferred) await setActiveWorkspace(preferred.id);
+      setWorkspace(preferred);
     } catch (cause) {
       setError(errorMessage(cause));
     }
@@ -79,6 +82,25 @@ export default function App() {
   }, [booting, user?.id]);
 
   useEffect(() => {
+    if (!user || !workspace) return;
+    let current = true;
+    const refresh = () => {
+      void refreshDeviceReminders(user.id, () => current).catch(() => {
+        // Preserve previously scheduled alerts on transient network failure.
+        // The Notifications screen provides an explicit retry and error message.
+      });
+    };
+    refresh();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => {
+      current = false;
+      subscription.remove();
+    };
+  }, [user?.id, workspace?.id, reminderRevision]);
+
+  useEffect(() => {
     const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
       if (!user || tab === "home") return false;
       setTab("home");
@@ -88,10 +110,10 @@ export default function App() {
   }, [tab, user]);
 
   const chooseWorkspace = async (next: Workspace) => {
+    await setActiveWorkspace(next.id);
     setWorkspace(next);
     setWorkspacePicker(false);
     setError("");
-    await setActiveWorkspace(next.id);
     setDataRevision((value) => value + 1);
   };
   const signOut = async () => {
@@ -204,11 +226,19 @@ export default function App() {
             user={user}
             workspace={workspace}
             active
-            onDataChanged={() => setDataRevision((value) => value + 1)}
+            onDataChanged={() => {
+              setDataRevision((value) => value + 1);
+              setReminderRevision((value) => value + 1);
+            }}
           />
         )}
         {tab === "tasks" && (
-          <TasksScreen colors={colors} workspace={workspace} active />
+          <TasksScreen
+            colors={colors}
+            workspace={workspace}
+            active
+            onTasksChanged={() => setReminderRevision((value) => value + 1)}
+          />
         )}
         {tab === "projects" && (
           <ProjectsScreen colors={colors} workspace={workspace} active />
