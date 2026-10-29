@@ -599,7 +599,7 @@ function PreferenceSettings({
   );
 }
 
-function AuthScreen({
+export function AuthScreen({
   onAuthenticated,
   signOutWarning = "",
   onRetrySignOut,
