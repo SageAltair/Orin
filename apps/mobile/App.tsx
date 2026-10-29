@@ -75,9 +75,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (booting) return;
-    void reconcileLocalReminderAccount(user?.id ?? null).catch(() => {
-      Alert.alert("Device reminders", "Could not clear reminders from a previous session. Check Android notification settings.");
+    // A failed offline session restore is not an explicit logout. Clearing
+    // schedules here would silently discard already-opted-in future alerts
+    // whenever Orin starts without network access. signOut() clears them.
+    if (booting || !user) return;
+    void reconcileLocalReminderAccount(user.id).catch(() => {
+      Alert.alert("Device reminders", "Could not reconcile reminders from a previous account. Check Android notification settings.");
     });
   }, [booting, user?.id]);
 
