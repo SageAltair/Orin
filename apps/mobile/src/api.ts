@@ -288,7 +288,9 @@ export const restoreSession = async () => {
   if (revision !== authRevision) return null;
   // Offline logout may leave a valid HttpOnly refresh cookie on the device.
   // Never silently restore that session until the user signs in explicitly.
-  if (await SecureStore.getItemAsync(LOGOUT_PENDING_KEY)) {
+  const pendingLogout = await SecureStore.getItemAsync(LOGOUT_PENDING_KEY);
+  if (revision !== authRevision) return null;
+  if (pendingLogout) {
     accessToken = null;
     activeWorkspaceId = null;
     return null;
