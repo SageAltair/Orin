@@ -1,10 +1,10 @@
 import { expect, test } from "@playwright/test";
 
-test("rollout flag off keeps the legacy Tasks list and task actions available", async ({ page }) => {
+test("rollout flag off exposes the professional Tasks workspace and precise scheduling", async ({ page }) => {
   const now = "2026-10-10T08:00:00Z";
+  let createdPayload: Record<string, unknown> | null = null;
   let tasks: Array<Record<string, unknown>> = [
-    { id: "task-today", title: "Review the launch outline", description: null, status: "todo", priority: "normal", due_at: null, focus_state: "today", project_id: null, created_at: now, updated_at: now },
-    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", focus_state: "later", project_id: null, created_at: now, updated_at: now },
+    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: null, created_at: now, updated_at: now },
   ];
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
@@ -14,17 +14,19 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
     if (pathname.endsWith("/auth/me")) return route.fulfill({ json: { id: "user-1", email: "morgan@example.com", display_name: "Morgan", created_at: now } });
     if (pathname === "/api/v1/tasks" && method === "GET") return route.fulfill({ json: tasks });
     if (pathname === "/api/v1/tasks" && method === "POST") {
-      const input = await route.request().postDataJSON() as { title: string };
-      const task = { id: "task-1", title: input.title, description: null, status: "todo", priority: "normal", due_at: null, focus_state: "inbox", project_id: null, created_at: now, updated_at: now };
-      tasks = [task, ...tasks]; return route.fulfill({ status: 201, json: task });
+      createdPayload = await route.request().postDataJSON() as Record<string, unknown>;
+      const task = { id: "task-1", status: "todo", created_at: now, updated_at: now, ...createdPayload };
+      tasks = [task, ...tasks];
+      return route.fulfill({ status: 201, json: task });
     }
     if (pathname === "/api/v1/tasks/task-1" && method === "PATCH") {
       const patch = await route.request().postDataJSON() as Record<string, unknown>;
-      tasks = tasks.map(task => ({ ...task, ...patch }));
-      return route.fulfill({ json: tasks[0] });
+      tasks = tasks.map(task => task.id === "task-1" ? { ...task, ...patch } : task);
+      return route.fulfill({ json: tasks.find(task => task.id === "task-1") });
     }
     if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
-    if (pathname === "/api/v1/environment/preferences" || pathname.endsWith("/approvals") || pathname.endsWith("/projects") || pathname.endsWith("/conversations") || pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
+    if (pathname === "/api/v1/projects") return route.fulfill({ json: [{ id: "project-1", name: "Research", status: "active" }] });
+    if (pathname === "/api/v1/environment/preferences" || pathname.endsWith("/approvals") || pathname.endsWith("/conversations") || pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 204 });
   });
   await page.goto("/");
@@ -32,19 +34,30 @@ test("rollout flag off keeps the legacy Tasks list and task actions available", 
   await page.getByLabel("Password", { exact: true }).fill("a-secure-test-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("navigation").first().getByRole("button", { name: "Tasks" }).click();
-  await expect(page.locator("#legacy-tasks-heading")).toBeVisible();
+
+  const workspace = page.locator('[data-orin-control="tasks-workspace"]');
+  await expect(workspace.locator("#task-collection-heading")).toBeVisible();
+  await expect(workspace.locator("#legacy-tasks-heading")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toHaveCount(0);
-  await page.getByLabel("New task").fill("Keep the legacy task flow");
-  await page.getByRole("button", { name: "Add task" }).click();
-  await expect(page.getByLabel("Edit Keep the legacy task flow")).toBeVisible();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Inbox/ }).click();
-  await expect(page.getByLabel("Edit Keep the legacy task flow")).toBeVisible();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
-  await expect(page.getByLabel("Edit Review the launch outline")).toBeVisible();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
-  await expect(page.getByLabel("Edit Prepare next week's notes")).toBeVisible();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /All/ }).click();
-  await page.getByRole("button", { name: "Complete Keep the legacy task flow" }).click();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
-  await expect(page.getByRole("button", { name: "Reopen Keep the legacy task flow" })).toBeVisible();
+  await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(workspace.getByText("Prepare next week's notes")).toBeVisible();
+
+  await workspace.getByRole("button", { name: "New task" }).click();
+  await workspace.getByLabel("Task name").fill("Plan the research review");
+  await workspace.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
+  await workspace.getByLabel("Priority").selectOption("high");
+  await workspace.getByLabel("Project").selectOption("project-1");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  await expect(workspace.getByText("Plan the research review")).toBeVisible();
+  await expect.poll(() => createdPayload?.project_id).toBe("project-1");
+  expect(createdPayload?.priority).toBe("high");
+  expect(new Date(String(createdPayload?.due_at)).getTime()).toBeGreaterThan(0);
+
+  await workspace.getByRole("button", { name: "Edit Plan the research review" }).click();
+  await workspace.getByLabel("Task name").fill("Review research findings");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  await expect(workspace.getByText("Review research findings")).toBeVisible();
+  await workspace.getByRole("button", { name: "Complete Review research findings" }).click();
+  await workspace.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
+  await expect(workspace.getByRole("button", { name: "Reopen Review research findings" })).toBeVisible();
 });
