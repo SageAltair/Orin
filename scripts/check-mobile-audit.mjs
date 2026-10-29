@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export const KNOWN_HIGH_PACKAGES = ["@expo/cli", "expo", "zod"];
 export const HIGH_BASELINE_CEILING = KNOWN_HIGH_PACKAGES.length;
-export const KNOWN_HIGH_ADVISORIES = ["GHSA-mrhx-c7xc-m3w5"];
+export const KNOWN_HIGH_ADVISORIES = ["ghsa-mrhx-c7xc-m3w5"];
 
 // An unchanged vulnerable package name is not an unchanged vulnerability.
 // Trace npm audit's transitive "via" edges to the actual GHSA advisories.
