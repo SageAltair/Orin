@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App, { CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
+import App, { AuthScreen, CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
 import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
 import { OrinWorkspace } from "./OrinWorkspace";
@@ -9,6 +9,21 @@ import { GuidedMode, GUIDES } from "./GuidedMode";
 import { IntelligenceExplorer } from "./IntelligenceExplorer";
 import { SpecialistAutomation } from "./SpecialistAutomation";
 import { IntelligenceReview } from "./IntelligenceReview";
+
+describe("sign-out safety", () => {
+  it("shows the unconfirmed server revocation warning and an explicit retry action", () => {
+    const markup = renderToStaticMarkup(<AuthScreen onAuthenticated={() => undefined} signOutWarning="A session may still be active" onRetrySignOut={() => undefined} />);
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("A session may still be active");
+    expect(markup).toContain("Retry server sign-out");
+  });
+
+  it("disables authentication controls while server sign-out is pending", () => {
+    const markup = renderToStaticMarkup(<AuthScreen onAuthenticated={() => undefined} signingOut signOutWarning="Pending" onRetrySignOut={() => undefined} />);
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain("Checking server sign-out");
+  });
+});
 
 describe("capability navigation", () => {
   it("shows only capabilities enabled in the user's preferences", () => {
