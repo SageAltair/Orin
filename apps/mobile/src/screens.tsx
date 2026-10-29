@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { errorMessage, login, register, request } from "./api";
+import { fetchAllMobileTasks } from "./task-pagination";
+import { dueAtForMobileEdit, filterMobileTasks, toLocalTaskDateTime, toUtcTaskDueAt, type MobileTaskView } from "./task-planning";
 import type { Palette } from "./theme";
 import type {
   CommandResult,
@@ -323,7 +325,9 @@ export function TasksScreen({
 }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [title, setTitle] = useState("");
-  const [showDone, setShowDone] = useState(false);
+  const [createDue, setCreateDue] = useState("");
+  const [view, setView] = useState<MobileTaskView>("all");
+  const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -332,12 +336,13 @@ export function TasksScreen({
   const [editDescription, setEditDescription] = useState("");
   const [editStatus, setEditStatus] = useState<Task["status"]>("todo");
   const [editPriority, setEditPriority] = useState<Task["priority"]>("normal");
+  const [editDue, setEditDue] = useState("");
   const [saving, setSaving] = useState(false);
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      setTasks(await request<Task[]>("/tasks?limit=100"));
+      setTasks(await fetchAllMobileTasks());
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -354,9 +359,10 @@ export function TasksScreen({
     try {
       await request<Task>("/tasks", {
         method: "POST",
-        body: JSON.stringify({ title: title.trim() }),
+        body: JSON.stringify({ title: title.trim(), due_at: toUtcTaskDueAt(createDue) }),
       });
       setTitle("");
+      setCreateDue("");
       await load();
       onTasksChanged?.();
     } catch (cause) {
@@ -387,6 +393,7 @@ export function TasksScreen({
     setEditDescription(task.description ?? "");
     setEditStatus(task.status);
     setEditPriority(task.priority);
+    setEditDue(toLocalTaskDateTime(task.due_at));
     setError("");
   };
   const saveTask = async () => {
@@ -401,6 +408,7 @@ export function TasksScreen({
           description: editDescription.trim() || null,
           status: editStatus,
           priority: editPriority,
+          due_at: dueAtForMobileEdit(editDue, editing.due_at),
         }),
       });
       setEditing(null);
@@ -412,7 +420,7 @@ export function TasksScreen({
       setSaving(false);
     }
   };
-  const visible = tasks.filter((task) => showDone || task.status !== "done");
+  const visible = filterMobileTasks(tasks, view, search);
   return (
     <Screen colors={colors} refreshing={loading}>
       <View>
@@ -420,37 +428,47 @@ export function TasksScreen({
         <Text style={[local.pageTitle, { color: colors.text }]}>Tasks</Text>
       </View>
       <Card colors={colors} style={local.capture}>
-        <TextInput
-          accessibilityLabel="New task"
-          value={title}
-          onChangeText={setTitle}
-          onSubmitEditing={() => void create()}
-          returnKeyType="done"
-          placeholder="Add a task…"
-          placeholderTextColor={colors.muted}
-          style={[local.captureInput, { color: colors.text }]}
-        />
-        <PrimaryButton
-          compact
-          label={creating ? "Adding…" : "Add"}
-          onPress={() => void create()}
+        <View style={local.captureRow}>
+          <TextInput
+            accessibilityLabel="New task"
+            value={title}
+            onChangeText={setTitle}
+            onSubmitEditing={() => void create()}
+            returnKeyType="done"
+            placeholder="Add a task…"
+            placeholderTextColor={colors.muted}
+            style={[local.captureInput, { color: colors.text }]}
+          />
+          <PrimaryButton
+            compact
+            label={creating ? "Adding…" : "Add"}
+            onPress={() => void create()}
+            colors={colors}
+            disabled={creating || !title.trim()}
+          />
+        </View>
+        <Field
+          label="Due date and time (optional)"
           colors={colors}
-          disabled={creating || !title.trim()}
+          value={createDue}
+          onChangeText={setCreateDue}
+          autoCapitalize="none"
+          placeholder="YYYY-MM-DDTHH:MM"
         />
       </Card>
       <ErrorNotice message={error} colors={colors} />
+      <ChoiceRow
+        label="View"
+        values={["all", "today", "upcoming", "overdue", "completed"]}
+        selected={view}
+        onSelect={(value) => setView(value as MobileTaskView)}
+        colors={colors}
+      />
+      <Field label="Search tasks" colors={colors} value={search} onChangeText={setSearch} />
       <View style={local.filterRow}>
         <SectionTitle colors={colors}>
           {visible.length} {visible.length === 1 ? "task" : "tasks"}
         </SectionTitle>
-        <View style={local.doneToggle}>
-          <Text style={{ color: colors.muted }}>Show done</Text>
-          <Switch
-            value={showDone}
-            onValueChange={setShowDone}
-            trackColor={{ true: colors.accent }}
-          />
-        </View>
       </View>
       {visible.length ? (
         <Card colors={colors} style={local.listCard}>
@@ -482,7 +500,12 @@ export function TasksScreen({
                   {task.status === "done" && <Icon name="check" size={14} color="#FFFFFF" strokeWidth={2.4} />}
                 </View>
               </Pressable>
-              <Pressable style={local.rowCopy} onPress={() => openTask(task)}>
+              <Pressable
+                style={local.rowCopy}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${task.title}`}
+                onPress={() => openTask(task)}
+              >
                 <Text
                   style={[
                     local.rowTitle,
@@ -499,7 +522,7 @@ export function TasksScreen({
                 <Text style={[local.rowMeta, { color: colors.muted }]}>
                   {task.priority} priority · {task.status.replace("_", " ")}
                   {task.due_at
-                    ? ` · ${new Date(task.due_at).toLocaleDateString()}`
+                    ? ` · ${new Date(task.due_at).toLocaleString()}`
                     : ""}
                 </Text>
               </Pressable>
@@ -550,6 +573,14 @@ export function TasksScreen({
               onSelect={(value) => setEditPriority(value as Task["priority"])}
               colors={colors}
             />
+            <Field
+              label="Due date and time (optional)"
+              colors={colors}
+              value={editDue}
+              onChangeText={setEditDue}
+              autoCapitalize="none"
+              placeholder="YYYY-MM-DDTHH:MM"
+            />
             <ErrorNotice message={error} colors={colors} />
             <PrimaryButton
               label={saving ? "Saving…" : "Save changes"}
@@ -584,6 +615,9 @@ function ChoiceRow({
         {values.map((value) => (
           <Pressable
             key={value}
+            accessibilityRole="button"
+            accessibilityLabel={`${label}: ${value.replace("_", " ")}`}
+            accessibilityState={{ selected: selected === value }}
             onPress={() => onSelect(value)}
             style={[
               local.choice,
@@ -1490,13 +1524,8 @@ const local = StyleSheet.create({
   rowTitle: { fontSize: 15, fontWeight: "600", lineHeight: 20 },
   rowMeta: { fontSize: 11, textTransform: "capitalize" },
   taskDot: { width: 18, height: 18, borderRadius: 9, borderWidth: 2 },
-  capture: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    padding: 10,
-    paddingLeft: 16,
-  },
+  capture: { gap: 12, padding: 12 },
+  captureRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   captureInput: { flex: 1, minHeight: 42, fontSize: 16 },
   filterRow: {
     flexDirection: "row",
