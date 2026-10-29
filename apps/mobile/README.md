@@ -26,6 +26,16 @@ EXPO_PUBLIC_API_BASE_URL=http://192.168.1.20:8100
 
 The phone and computer must be on the same trusted network and the API port must be reachable. Production builds require an HTTPS `EXPO_PUBLIC_API_BASE_URL`; the client intentionally rejects plain HTTP outside development.
 
+### Troubleshooting physical-device login
+
+1. On Windows, run `ipconfig` and find the active Wi-Fi adapter's IPv4 address. Use that address, not `127.0.0.1`, `172.0.0.1`, or `10.0.2.2` (the last one is for Android emulators only).
+2. Confirm `http://<WINDOWS_LAN_IP>:8100/health/ready` responds from the phone's browser while both devices are on the same trusted network. If it does not, check the API binding, Docker port mapping, Windows Firewall, and Wi-Fi client isolation before debugging passwords.
+3. For a **development build**, set `EXPO_PUBLIC_API_BASE_URL=http://<WINDOWS_LAN_IP>:8100` in `apps/mobile/.env.local`, then restart Expo and rebuild the Android client so its configuration is included.
+4. For a **release APK**, use a reachable HTTPS API origin with a valid certificate. A production build will not accept a LAN HTTP origin; an APK built with an incorrect endpoint cannot be repaired by changing the computer's IP alone.
+5. An expired access token requires a working refresh cookie. A temporary offline or server failure now preserves locally stored credentials, but the app still needs a reachable API to authenticate.
+
+Do not expose the development API directly to the public internet or disable Android transport security to work around a bad URL.
+
 ## Current mobile surface
 
 - Sign in and registration with encrypted OS-backed access-token storage.

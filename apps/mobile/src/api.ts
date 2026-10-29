@@ -116,17 +116,17 @@ const refresh = async () => {
     )
       .then(async (response) => {
         if (!response.ok) {
-          await persistToken(null);
+          // A rejected refresh credential ends the session. Temporary server
+          // errors must not erase a still-valid token from secure storage.
+          if (response.status === 401 || response.status === 403)
+            await persistToken(null);
           return false;
         }
         const data = (await response.json()) as { access_token: string };
         await persistToken(data.access_token);
         return true;
       })
-      .catch(async () => {
-        await persistToken(null);
-        return false;
-      })
+      .catch(() => false)
       .finally(() => {
         refreshPromise = null;
       });
@@ -161,7 +161,11 @@ export async function request<T>(
     throw new ApiError(
       timedOut
         ? "Orin took too long to respond."
-        : `Could not reach Orin at ${API_BASE_URL}.`,
+        : [
+            `Could not reach Orin at ${API_BASE_URL}.`,
+            "On a physical phone, check /health/ready in its browser.",
+            "Use a reachable LAN address in development or HTTPS in release builds.",
+          ].join(" "),
       0,
     );
   }
@@ -220,9 +224,16 @@ export const restoreSession = async () => {
   if (!accessToken && !(await refresh())) return null;
   try {
     return await request<User>("/auth/me", {}, false);
-  } catch {
-    if (await refresh()) return request<User>("/auth/me", {}, false);
-    return null;
+  } catch (cause) {
+    // Retry authentication only when the API actually rejected the token.
+    // Offline errors must not trigger a destructive refresh attempt.
+    if (!(cause instanceof ApiError) || cause.status !== 401) return null;
+    if (!(await refresh())) return null;
+    try {
+      return await request<User>("/auth/me", {}, false);
+    } catch {
+      return null;
+    }
   }
 };
 

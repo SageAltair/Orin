@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   BackHandler,
   Platform,
   Pressable,
@@ -86,11 +87,20 @@ export default function App() {
     setDataRevision((value) => value + 1);
   };
   const signOut = async () => {
-    await logout();
-    setUser(null);
-    setWorkspaces([]);
-    setWorkspace(null);
-    setTab("home");
+    try {
+      await logout();
+    } catch {
+      // The API may be unreachable, but local sign-out must still complete.
+      Alert.alert(
+        "Signed out on this device",
+        "Orin could not confirm server-side session revocation. Revoke this device from account security when connected.",
+      );
+    } finally {
+      setUser(null);
+      setWorkspaces([]);
+      setWorkspace(null);
+      setTab("home");
+    }
   };
 
   const systemInset =
