@@ -1235,6 +1235,7 @@ export function MoreScreen({
         kind={operation}
         colors={colors}
         ownerId={user.id}
+        workspaceId={workspace?.id ?? ""}
         onBack={() => setOperation(null)}
         onLogout={onLogout}
       />
