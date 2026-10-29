@@ -259,3 +259,89 @@ def test_authenticated_workspace_task_lifecycle_survives_token_refresh(auth_clie
     assert client.get("/api/v1/tasks", headers={"X-Orin-Workspace-Id": personal.json()[0]["id"]}).json() == []
     assert client.post("/api/v1/auth/logout").status_code == 204
     assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_first_custom_workspace_preserves_personal_default_and_authenticated_tasks(
+    auth_client: TestClient,
+) -> None:
+    client = auth_client
+    user = register(client, "workspace-journey@example.com")
+    authenticate(client, str(login(client, user["email"])["access_token"]))
+
+    # A new account may create a named workspace before visiting the workspace list.
+    work_response = client.post("/api/v1/workspaces", json={"name": "Work"})
+    assert work_response.status_code == 201, work_response.text
+    work_id = work_response.json()["id"]
+
+    spaces_response = client.get("/api/v1/workspaces")
+    assert spaces_response.status_code == 200
+    spaces = spaces_response.json()
+    assert [space["name"] for space in spaces] == ["Personal", "Work"]
+    personal_id = spaces[0]["id"]
+    assert personal_id != work_id
+
+    personal_project = client.post("/api/v1/projects", json={"name": "Personal planning"})
+    assert personal_project.status_code == 201, personal_project.text
+    assert personal_project.json()["workspace_id"] == personal_id
+    personal_task = client.post("/api/v1/tasks", json={
+        "title": "Review the plan", "project_id": personal_project.json()["id"],
+    })
+    assert personal_task.status_code == 201, personal_task.text
+    assert personal_task.json()["workspace_id"] == personal_id
+
+    work_headers = {"X-Orin-Workspace-Id": work_id}
+    work_project = client.post(
+        "/api/v1/projects", json={"name": "Work planning"}, headers=work_headers,
+    )
+    assert work_project.status_code == 201, work_project.text
+    assert work_project.json()["workspace_id"] == work_id
+    work_task = client.post(
+        "/api/v1/tasks",
+        json={"title": "Prepare work brief", "project_id": work_project.json()["id"]},
+        headers=work_headers,
+    )
+    assert work_task.status_code == 201, work_task.text
+    assert work_task.json()["workspace_id"] == work_id
+
+    assert [row["id"] for row in client.get("/api/v1/projects").json()] == [
+        personal_project.json()["id"],
+    ]
+    assert [row["id"] for row in client.get("/api/v1/tasks").json()] == [
+        personal_task.json()["id"],
+    ]
+    assert [row["id"] for row in client.get("/api/v1/tasks", headers=work_headers).json()] == [
+        work_task.json()["id"],
+    ]
+
+    updated = client.patch(
+        f"/api/v1/tasks/{personal_task.json()['id']}", json={"status": "done"},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["status"] == "done"
+
+    # Refresh and a later login must read the same persisted workspace/task state.
+    refreshed = client.post("/api/v1/auth/refresh")
+    assert refreshed.status_code == 200, refreshed.text
+    authenticate(client, str(refreshed.json()["access_token"]))
+    assert client.get("/api/v1/auth/me").json()["id"] == user["id"]
+    assert client.post("/api/v1/auth/logout").status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401
+    authenticate(client, str(login(client, user["email"])["access_token"]))
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "done"
+    assert client.get("/api/v1/tasks", headers=work_headers).json()[0]["id"] == work_task.json()["id"]
+
+
+def test_explicit_first_personal_workspace_does_not_create_duplicate(
+    auth_client: TestClient,
+) -> None:
+    client = auth_client
+    register(client, "explicit-personal@example.com")
+    authenticate(client, str(login(client, "explicit-personal@example.com")["access_token"]))
+    personal = client.post("/api/v1/workspaces", json={"name": "Personal"})
+    assert personal.status_code == 201, personal.text
+    spaces = client.get("/api/v1/workspaces")
+    assert spaces.status_code == 200
+    assert [space["id"] for space in spaces.json()] == [personal.json()["id"]]
+    project = client.post("/api/v1/projects", json={"name": "My project"})
+    assert project.status_code == 201, project.text
+    assert project.json()["workspace_id"] == personal.json()["id"]
