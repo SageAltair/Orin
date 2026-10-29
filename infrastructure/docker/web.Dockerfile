@@ -11,5 +11,7 @@ COPY apps/web ./
 RUN sed -i 's/\r$//' ./docker-entrypoint.sh \
     && chmod +x ./docker-entrypoint.sh \
     && cp ./docker-entrypoint.sh /usr/local/bin/orin-web-entrypoint
+RUN chown -R node:node /app/apps/web
+USER node
 EXPOSE 5173
 ENTRYPOINT ["/usr/local/bin/orin-web-entrypoint"]
