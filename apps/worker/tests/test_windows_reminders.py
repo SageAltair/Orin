@@ -59,6 +59,63 @@ def ledger(tmp_path: Path) -> ReminderLedger:
     return ReminderLedger(tmp_path / "reminders.sqlite3", OWNER, WORKSPACE)
 
 
+def test_workspace_switch_preserves_attempted_reminders_and_scoped_clearing(tmp_path):
+    """A -> B -> A must not re-arm unchanged tasks, even with identical IDs."""
+    path = tmp_path / "reminders.sqlite3"
+    other_workspace = "49b9a7e6-58c8-4b64-9d5c-fdd1e9c43ec8"
+
+    first = ReminderLedger(path, OWNER, WORKSPACE)
+    first.sync({"shared-task-id": NOW + 60})
+    first.mark_attempted("shared-task-id", NOW + 60, NOW)
+    assert first.due(NOW) == []
+    first.close()
+
+    second = ReminderLedger(path, OWNER, other_workspace)
+    assert second.due(NOW) == []  # Cannot read the first workspace's queue.
+    second.sync({"shared-task-id": NOW + 60})
+    assert second.due(NOW) == [("shared-task-id", NOW + 60)]
+    second.mark_attempted("shared-task-id", NOW + 60, NOW)
+    second.close()
+
+    reopened = ReminderLedger(path, OWNER, WORKSPACE)
+    assert reopened.due(NOW) == []  # First workspace's attempt survives.
+    reopened.sync({"shared-task-id": NOW + 60})
+    assert reopened.due(NOW) == []  # Unchanged snapshot does not re-arm.
+    reopened.sync({"shared-task-id": NOW + 120})
+    assert reopened.due(NOW) == [("shared-task-id", NOW + 120)]
+    reopened.clear()  # Revoking/clearing A cannot erase B's attempt.
+    reopened.close()
+
+    second_again = ReminderLedger(path, OWNER, other_workspace)
+    assert second_again.due(NOW) == []
+    assert second_again.db.execute(
+        "SELECT COUNT(*) FROM reminders WHERE owner_id=?", (OWNER,)
+    ).fetchone() == (1,)
+    second_again.close()
+
+
+def test_switching_accounts_discards_other_owners_reminder_records(tmp_path):
+    path = tmp_path / "reminders.sqlite3"
+    other_owner = "86223e18-43e7-40ab-a3e0-36b7f9cdd5c4"
+    first = ReminderLedger(path, OWNER, WORKSPACE)
+    first.sync({"private-task": NOW + 60})
+    first.close()
+
+    other = ReminderLedger(path, other_owner, WORKSPACE)
+    assert other.db.execute(
+        "SELECT COUNT(*) FROM reminders WHERE owner_id=?", (OWNER,)
+    ).fetchone() == (0,)
+    other.sync({"other-account-task": NOW + 60})
+    other.close()
+
+    first_again = ReminderLedger(path, OWNER, WORKSPACE)
+    assert first_again.due(NOW) == []
+    assert first_again.db.execute(
+        "SELECT COUNT(*) FROM reminders"
+    ).fetchone() == (0,)
+    first_again.close()
+
+
 def test_due_timestamp_must_be_timezone_aware():
     assert _due_epoch("2026-10-29T12:00:00Z") == NOW
     with pytest.raises(ValueError, match="timezone"):
