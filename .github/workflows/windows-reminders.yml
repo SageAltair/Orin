@@ -1,0 +1,31 @@
+name: Windows reminder smoke
+
+on:
+  pull_request:
+    paths:
+      - apps/worker/src/orin_worker/windows_reminders.py
+      - apps/worker/tests/test_windows_reminders.py
+      - .github/workflows/windows-reminders.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-reminder-tests:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated worker dependencies
+        run: |
+          python -m pip install -r apps/worker/requirements.lock
+          python -m pip install pytest==9.0.2
+          python -m pip install --no-deps -e apps/worker
+      - name: Run Windows reminder regressions (mocked API and toasts)
+        run: python -m pytest apps/worker/tests/test_windows_reminders.py -q
+      - name: Resolve real Windows system PowerShell (no toast)
+        run: python -c "from orin_worker.windows_reminders import _powershell_executable; print(_powershell_executable())"
