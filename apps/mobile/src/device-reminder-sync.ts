@@ -37,7 +37,7 @@ async function scanTaskPages(now: number): Promise<TaskPageSnapshot> {
           !["todo", "in_progress", "blocked", "done", "cancelled"].includes(task.status) ||
           (task.due_at !== null && (
             typeof task.due_at !== "string" ||
-            !/(?:Z|[+-]\\d{2}:\\d{2})$/.test(task.due_at) ||
+            !/(?:Z|[+-]\d{2}:\d{2})$/.test(task.due_at) ||
             !Number.isFinite(Date.parse(task.due_at))
           ))) {
         throw new Error("Task reminder sync returned an invalid record.");
