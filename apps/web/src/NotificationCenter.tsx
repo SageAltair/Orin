@@ -38,10 +38,12 @@ export function NotificationCenter({
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
   const inFlightRefresh = useRef<Promise<void> | null>(null);
-  const refresh = (): Promise<void> => {
-    // A large inbox can take longer than the polling interval to confirm.
-    // Reuse the active scan instead of repeatedly invalidating its result.
-    if (inFlightRefresh.current) return inFlightRefresh.current;
+  const refresh = (afterMutation = false): Promise<void> => {
+    // Reuse an active polling scan, but require a fresh scan after an explicit
+    // user mutation so an older snapshot cannot restore stale read state.
+    if (inFlightRefresh.current) return afterMutation
+      ? inFlightRefresh.current.then(() => refresh())
+      : inFlightRefresh.current;
     const generation = ++inboxGeneration.current;
     const pending = fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
       request<Reminder[]>(`/notifications?limit=${limit}&offset=${offset}`))
@@ -74,7 +76,7 @@ export function NotificationCenter({
     void preferences();
     const onPreferencesChanged = () => {
       void preferences();
-      void refresh();
+      void refresh(true);
     };
     window.addEventListener("orin-notification-preferences", onPreferencesChanged);
     const timer = window.setInterval(() => {
@@ -98,7 +100,7 @@ export function NotificationCenter({
         method: "POST",
         body: JSON.stringify({ action: kind, minutes }),
       });
-      await refresh();
+      await refresh(true);
     } catch {
       setError("Could not update this reminder. Try again.");
     }
@@ -308,7 +310,7 @@ export function NotificationCenter({
                       await request(`/notifications/${item.id}/read`, {
                         method: "PATCH",
                       });
-                      await refresh();
+                      await refresh(true);
                     } catch {
                       setError("This reminder could not be marked read.");
                     }
