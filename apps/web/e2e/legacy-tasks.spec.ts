@@ -39,6 +39,13 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
     }
     if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
     if (pathname === "/api/v1/projects") return route.fulfill({ json: [{ id: "project-1", name: "Research", status: "active" }] });
+    // Project navigation must exercise the real detail view with valid API contracts.
+    if (pathname === "/api/v1/projects/project-1/context") return route.fulfill({ json: {
+      progress: { completed_tasks: 0, total_tasks: 0, percentage: null },
+      tasks: [], blockers: [], activity: [], knowledge: [], next_actions: [],
+    } });
+    if (pathname === "/api/v1/memories" || pathname === "/api/v1/focus-sessions" ||
+        pathname === "/api/v1/projects/project-1/milestones") return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname.endsWith("/approvals") || pathname.endsWith("/conversations") || pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 204 });
   });
