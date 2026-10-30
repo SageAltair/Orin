@@ -91,3 +91,26 @@ def test_priority_inventory_pagination_and_validation(client: TestClient) -> Non
     assert len({row["id"] for row in pages}) == 5
     assert client.get("/api/v1/priority/tasks", params={"limit": 101}).status_code == 422
     assert client.get("/api/v1/priority/tasks", params={"offset": -1}).status_code == 422
+
+
+def test_priority_mode_persists_without_legacy_put_reset(client: TestClient) -> None:
+    initial = client.get("/api/v1/users/me/preferences")
+    assert initial.status_code == 200
+    assert initial.json()["priority_guidance_mode"] == "balanced"
+
+    selected = client.put("/api/v1/users/me/preferences", json={
+        "priority_guidance_mode": "planning-only",
+    })
+    assert selected.status_code == 200
+    assert selected.json()["priority_guidance_mode"] == "planning-only"
+
+    # Existing clients do not know this field; unrelated updates retain it.
+    legacy = client.put("/api/v1/users/me/preferences", json={})
+    assert legacy.status_code == 200
+    assert legacy.json()["priority_guidance_mode"] == "planning-only"
+    assert client.get("/api/v1/users/me/preferences").json()["priority_guidance_mode"] == "planning-only"
+    invalid = client.put("/api/v1/users/me/preferences", json={
+        "priority_guidance_mode": "persistent",
+    })
+    assert invalid.status_code == 422
+    assert client.get("/api/v1/users/me/preferences").json()["priority_guidance_mode"] == "planning-only"
