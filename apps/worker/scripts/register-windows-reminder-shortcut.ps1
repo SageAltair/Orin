@@ -193,17 +193,23 @@ namespace Orin.Windows {
 '@
 
 New-Item -ItemType Directory -Path $programs -Force | Out-Null
+# Stage a uniquely named .lnk and move it into place without overwriting.
+# This prevents concurrent installations from replacing an unrelated shortcut
+# created after the initial existence check.
+$temporaryPath = Join-Path $programs ('.orin-reminder-' + [guid]::NewGuid().ToString('N') + '.lnk')
 try {
     Add-Type -TypeDefinition $source -Language CSharp -ErrorAction Stop
-    [Orin.Windows.ShortcutRegistration]::Create($PythonPath, $shortcutPath, $AppId)
+    [Orin.Windows.ShortcutRegistration]::Create($PythonPath, $temporaryPath, $AppId)
+    $null = Assert-OwnedShortcut -Path $temporaryPath -ExpectedId $AppId
+    [IO.File]::Move($temporaryPath, $shortcutPath) # Fails if destination now exists.
     $null = Assert-OwnedShortcut -Path $shortcutPath -ExpectedId $AppId
     Write-Output 'Orin reminder identity registered. No reminder was sent or companion started.'
     Write-Output ('ORIN_WINDOWS_REMINDERS_APP_ID=' + $AppId)
     Write-Output ('ORIN_WINDOWS_REMINDERS_SHORTCUT=' + $shortcutPath)
-} catch {
-    # This path did not exist before this invocation; clean only our own partial output.
-    if (Test-Path -LiteralPath $shortcutPath -PathType Leaf) {
-        Remove-Item -LiteralPath $shortcutPath -ErrorAction SilentlyContinue
+} finally {
+    # Never remove the final destination on error: it might belong to another
+    # process. Only our private staging file is eligible for cleanup.
+    if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+        Remove-Item -LiteralPath $temporaryPath -ErrorAction SilentlyContinue
     }
-    throw
 }
