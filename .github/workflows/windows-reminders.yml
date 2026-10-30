@@ -51,30 +51,32 @@ jobs:
           from orin_worker.windows_reminders import _powershell_executable, _toast_environment
           command = [_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command", "Write-Output subprocess-ready"]
           safe = _toast_environment()
-          os_names = {
-              "ALLUSERSPROFILE", "PROGRAMFILES", "PROGRAMFILES(X86)",
-              "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "PUBLIC",
-              "SYSTEMDRIVE", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
-              "USERNAME", "USERDOMAIN", "COMPUTERNAME", "SESSIONNAME",
-              "LOGONSERVER", "USERDNSDOMAIN", "PROGRAMW6432", "COMMONPROGRAMW6432",
-          }
-          safe_os = dict(safe)
-          safe_os.update((key, value) for key, value in os.environ.items() if key.upper() in os_names)
-          process_names = {"HOME", "CI", "GITHUB_ACTIONS", "TERM",
-                           "PSExecutionPolicyPreference", "POWERSHELL_DISTRIBUTION_CHANNEL"}
-          safe_process = dict(safe_os)
-          safe_process.update((key, value) for key, value in os.environ.items() if key.upper() in {name.upper() for name in process_names})
-          safe_psmodule = dict(safe_os)
-          safe_psmodule.update((key, value) for key, value in os.environ.items() if key.upper() == "PSMODULEPATH")
-          safe_both = dict(safe_process)
-          safe_both.update((key, value) for key, value in os.environ.items() if key.upper() == "PSMODULEPATH")
-          for label, env in (("explicit-full", dict(os.environ)), ("inherited", None)):
+          keys_in_safe = {key.upper() for key in safe}
+          extras = {key: value for key, value in os.environ.items() if key.upper() not in keys_in_safe}
+          def ready(extra):
+              env = dict(safe)
+              env.update(extra)
               try:
-                  subprocess.run(command, check=True, timeout=8, stdin=subprocess.DEVNULL,
+                  subprocess.run(command, check=True, timeout=3, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
-                  print(label + ": ready", flush=True)
-              except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as error:
-                  print(label + ": " + type(error).__name__, flush=True)
+                  return True
+              except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError):
+                  return False
+          remaining = dict(extras)
+          if not ready(remaining):
+              print("Explicit full environment did not start PowerShell.", flush=True)
+          else:
+              for key in sorted(extras):
+                  trial = dict(remaining)
+                  trial.pop(key, None)
+                  if ready(trial):
+                      remaining = trial
+              sensitive = ("TOKEN", "SECRET", "PASSWORD", "KEY", "AUTH", "CREDENTIAL",
+                           "GITHUB_", "RUNNER_", "ACTIONS_", "ORIN_", "AWS_", "AZURE_", "OPENAI_")
+              names = sorted(key for key in remaining if not any(word in key.upper() for word in sensitive))
+              print("Minimum extra non-sensitive names: " + repr(names), flush=True)
+              print("Additional redacted names count: " + str(len(remaining) - len(names)), flush=True)
+              print("Minimized environment ready: " + str(ready(remaining)), flush=True)
           '@
           $probe | python -
           $shell = New-Object -ComObject Shell.Application
