@@ -84,11 +84,14 @@ class ReminderLedger:
             "task_id TEXT NOT NULL, due_epoch INTEGER NOT NULL, "
             "attempted_epoch INTEGER, PRIMARY KEY(owner_id,workspace_id,task_id))"
         )
-        # A reused local database must never expose a previous account's queue.
+        # A reused local database must never retain a different account's queue.
+        # Preserve other workspaces of this same owner: their attempted records
+        # prevent an unchanged task from notifying twice after A -> B -> A.
+        # sync(), due(), mark_attempted() and clear() are workspace-scoped.
         with self.db:
             self.db.execute(
-                "DELETE FROM reminders WHERE owner_id != ? OR workspace_id != ?",
-                (self.owner_id, self.workspace_id),
+                "DELETE FROM reminders WHERE owner_id != ?",
+                (self.owner_id,),
             )
         # Connection-local staging avoids SQLite's bound-variable limit while
         # keeping snapshot replacement transactional. No task IDs are persisted
