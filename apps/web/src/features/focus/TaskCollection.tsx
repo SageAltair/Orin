@@ -149,7 +149,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
       <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
         {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
-    <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now} />
+    <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now} onEditTask={begin} />
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
