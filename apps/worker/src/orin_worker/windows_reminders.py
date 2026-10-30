@@ -404,9 +404,10 @@ def _windows_toast() -> None:
         raise RuntimeError("Windows toast delivery requires Windows")
     app_id, shortcut = _toast_identity()
     subprocess.run(
-        (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
+        (_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command",
          _toast_script(app_id, shortcut)),
-        check=True, capture_output=True, timeout=15, env=_toast_environment(),
+        check=True, capture_output=True, stdin=subprocess.DEVNULL,
+        timeout=15, env=_toast_environment(),
     )
 
 
@@ -421,9 +422,10 @@ def check_toast_registration() -> None:
     try:
         app_id, shortcut = _toast_identity()
         subprocess.run(
-            (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
+            (_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command",
              _shortcut_identity_script(app_id, shortcut)),
-            check=True, capture_output=True, timeout=15, env=_toast_environment(),
+            check=True, capture_output=True, stdin=subprocess.DEVNULL,
+        timeout=15, env=_toast_environment(),
         )
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise SystemExit(
