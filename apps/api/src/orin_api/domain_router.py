@@ -1513,10 +1513,7 @@ def update_task(
     for field, value in changes.items():
         setattr(task, field, value)
     if requested_status is not None:
-        if task.status == TaskStatus.DONE and requested_status != TaskStatus.DONE:
-            reopen_task(task)
-        else:
-            transition_task_status(task, requested_status)
+        transition_task_status(task, requested_status)
     else:
         touch_task(task)
     if task.status in {TaskStatus.DONE, TaskStatus.CANCELLED}:
