@@ -90,6 +90,16 @@ export function planTaskPriorities(
     byWorkspace.get(task.workspaceId)!.set(task.id, task);
   }
   const withDue = active.map(task => ({ task, due: instant(task.dueAt), effort: minutes(task.estimatedMinutes) }));
+  // Prefix sums make multi-workspace planning O(n log n), not O(n²) for
+  // accounts with thousands of tasks. Equal deadlines share the full sum.
+  const knownEffort = withDue.filter(item => item.due !== null && item.effort !== null)
+    .sort((left, right) => left.due! - right.due!);
+  const effortByDeadline = new Map<number, number>();
+  let cumulativeEffort = 0;
+  for (const item of knownEffort) {
+    cumulativeEffort += item.effort!;
+    effortByDeadline.set(item.due!, cumulativeEffort);
+  }
   return withDue.map(({ task, due, effort }) => {
     const remaining = due === null ? null : (due - now) / 60_000;
     const incompleteDependencies = (task.dependencyIds ?? []).filter(id => {
@@ -103,9 +113,7 @@ export function planTaskPriorities(
     else if (remaining !== null && effort !== null) {
       // Lower-bound feasibility check across visible workspaces. Missing effort
       // is not guessed, and no task outside the authorized view is inspected.
-      const committedEffort = withDue.reduce((sum, other) =>
-        other.due !== null && other.due <= due! && other.effort !== null
-          ? sum + other.effort : sum, 0);
+      const committedEffort = effortByDeadline.get(due) ?? 0;
       if (committedEffort > remaining) risk = "capacity";
       else if (remaining <= effort + 15) risk = "imminent";
     }
