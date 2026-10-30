@@ -82,10 +82,9 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const openTasks = async () => {
     await page.getByRole("navigation", { name: "Workspace" })
       .getByRole("button", { name: "Tasks", exact: true }).click();
-    await expect(page.locator('[data-orin-control="tasks-workspace"]')).toBeVisible();
-    const focusTasks = page.getByRole("navigation", { name: "Focus navigation" })
-      .getByRole("button", { name: "Tasks", exact: true });
-    if (await focusTasks.count()) await focusTasks.click();
+    // Personal uses embedded FocusExperience; other workspaces use TaskCollection.
+    // Both must expose All Tasks immediately from the main Tasks route.
+    await expect(page.locator(".focus-task-collection")).toBeVisible();
   };
   await openTasks();
   let workspace = page.locator(".focus-task-collection");
