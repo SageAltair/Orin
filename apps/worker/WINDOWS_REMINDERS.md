@@ -18,7 +18,8 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   Network failure fails closed without delivering cached reminders.
 - Opting out of tasks notifications clears the local queue on the next
   successful sync. Quiet hours are respected. No silent/DND bypass.
-- The server preference to respect active Focus sessions is not yet integrated with this companion. Native focus suppression is therefore a release gate.
+- When the server's `respect_focus` preference is enabled, checks the authenticated `/focus/now` state before a due alert. Active sessions suppress delivery; invalid or unavailable Focus state fails closed. This policy is covered by mocked tests, not yet by real Windows acceptance.
+- Equal quiet-hours start/end bounds mean quiet all day, matching the API policy.
 - The current Orin web logout flow does not necessarily revoke an independently
   supplied bearer token. Stop this process and revoke its token on logout or
   account change. A fully integrated session lifecycle is **not implemented**.
