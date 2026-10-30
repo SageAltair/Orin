@@ -61,7 +61,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now }: {
     // This is a read-only view. It does not authorize any alert or interruption.
     focusActive: true,
   });
-  const byId = new Map(planningTasks.map((task, index) => [
+  const byId = new Map<string, OwnedTask>(planningTasks.map((task, index): [string, OwnedTask] => [
     JSON.stringify([task.workspaceId, task.id]), source[index],
   ]));
   const workspaceNames = new Map(workspaces.map(space => [space.id, space.name]));
