@@ -3,7 +3,7 @@ export function scheduleTaskScreenRefresh(options: {
   onClock: () => void;
   onRefresh: () => void;
   isForeground: () => boolean;
-  subscribeForeground: (callback: () => void) => () => void;
+  subscribeAppState: (callback: (state: string) => void) => () => void;
 }): () => void {
   const clock = setInterval(() => {
     if (options.isForeground()) options.onClock();
@@ -11,8 +11,9 @@ export function scheduleTaskScreenRefresh(options: {
   const poll = setInterval(() => {
     if (options.isForeground()) options.onRefresh();
   }, 60_000);
-  const unsubscribe = options.subscribeForeground(() => {
-    if (!options.isForeground()) return;
+  const unsubscribe = options.subscribeAppState((state) => {
+    // The event's new state is authoritative; currentState can lag the event.
+    if (state !== "active") return;
     options.onClock();
     options.onRefresh();
   });
