@@ -5,6 +5,9 @@ import { planTaskPriorities, type PriorityGuidanceMode } from "./priorityIntelli
 
 type OwnedTask = Task & { workspace_id?: string | null };
 type Workspace = { id: string; name: string };
+// Legacy rows without a workspace must never be attributed to the first
+// returned workspace or made actionable in the current workspace.
+const unscopedWorkspaceId = "__unscoped__";
 const loadOwnerTasks = () => fetchAllPages<OwnedTask>(
   (offset, limit) => request<OwnedTask[]>(`/priority/tasks?limit=${limit}&offset=${offset}`),
   "priority tasks", 100, 50, item => item.id,
@@ -49,13 +52,12 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
     return () => { cancelled = true; };
   }, [includeAll, refreshVersion, taskRevision]);
 
-  const personalId = workspaces[0]?.id ?? activeWorkspaceId ?? "personal";
-  const currentId = activeWorkspaceId || personalId || "personal";
+  const currentId = activeWorkspaceId || "personal";
   const source: OwnedTask[] = includeAll ? remoteTasks : tasks;
-  const allowed = includeAll ? workspaces.map(space => space.id) : [currentId];
+  const allowed = includeAll ? [...workspaces.map(space => space.id), unscopedWorkspaceId] : [currentId];
   const planningTasks = source.map(task => ({
     id: task.id,
-    workspaceId: includeAll ? (task.workspace_id ?? personalId) : currentId,
+    workspaceId: includeAll ? (task.workspace_id ?? unscopedWorkspaceId) : currentId,
     priority: task.priority,
     status: task.status,
     dueAt: task.due_at,
@@ -92,7 +94,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
         if (!task) return null;
         return <li key={item.dedupeKey}>
           <div><strong>{task.title}</strong>
-            <span>{includeAll ? `${workspaceNames.get(item.workspaceId) ?? "Personal"} · ` : ""}
+            <span>{includeAll ? `${workspaceNames.get(item.workspaceId) ?? (item.workspaceId === unscopedWorkspaceId ? "Unscoped task" : "Unknown workspace")} · ` : ""}
               {task.due_at ? new Date(task.due_at).toLocaleString() : "No deadline"}
             </span></div>
           <div className="focus-priority-row-actions">
