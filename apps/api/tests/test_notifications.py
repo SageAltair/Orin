@@ -192,6 +192,29 @@ def test_daily_repeat_budget_is_shared(sessions):
         assert sum(row.repeats for row in session.scalars(select(Notification))) == 8
 
 
+def test_daily_repeat_budget_resets_at_user_local_midnight(sessions):
+    factory, owner = sessions
+    # Auckland is UTC+13 on this date: 10:34 UTC is 23:34 local.
+    now = datetime(2026, 10, 13, 10, 34, tzinfo=timezone.utc)
+    for i in range(10):
+        task(factory, owner, now, title=f"Local midnight task {i}")
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.persistent = True
+        prefs.timezone = "Pacific/Auckland"
+    tick(factory, now)
+    tick(factory, now + timedelta(minutes=16))  # 23:50 local, first day's cap
+    with factory() as session:
+        assert sum(row.repeats for row in session.scalars(select(Notification))) == 8
+        assert policy(session, owner).repeat_day.isoformat() == "2026-10-13"
+    tick(factory, now + timedelta(minutes=32))  # 00:06 local, new day's cap
+    with factory() as session:
+        assert sum(row.repeats for row in session.scalars(select(Notification))) == 16
+        prefs = policy(session, owner)
+        assert prefs.repeat_day.isoformat() == "2026-10-14"
+        assert prefs.repeats_today == 8
+
+
 def test_quiet_hours_and_active_focus_defer_interruptions(sessions):
     factory, owner = sessions
     now = datetime(2026, 10, 13, 23, 0, tzinfo=timezone.utc)
