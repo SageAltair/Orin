@@ -96,7 +96,7 @@ describe("local Android reminder planner", () => {
   it("coalesces simultaneous generic alerts after quiet hours", () => {
     const quiet = { ...policy, quiet_enabled: true };
     const due1 = "2026-10-29T22:15:00Z";
-    const due2 = "2026-10-29T23:45:00Z";
+    const due2 = "2026-10-29T23:45:30Z";
     const fireAt = Date.parse("2026-10-30T07:00:00Z");
     const result = planLocalReminders([reminder("a", due1), reminder("b", due2)],
       quiet, now, [task("c", due1)]);
