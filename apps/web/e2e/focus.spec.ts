@@ -338,6 +338,28 @@ test("personal Tasks respects the account's persisted priority guidance mode", a
   await expect(outlook.getByText("Planning-only")).toBeVisible();
 });
 
+test("priority Start explicitly marks a task in progress without starting a focus timer", async ({ page }) => {
+  await setupFocus(page); await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  const taskName = "Ask the team about the venue";
+  const start = outlook.getByRole("button", { name: `Start ${taskName}` });
+  await expect(start).toBeVisible();
+  const startPatch = page.waitForRequest(req =>
+    new URL(req.url()).pathname === "/api/v1/tasks/inbox-task" && req.method() === "PATCH");
+  await start.click();
+  expect((await startPatch).postDataJSON()).toEqual({ status: "in_progress" });
+  await expect(start).toHaveCount(0);
+  const taskRow = page.locator(".focus-task-list li").filter({ hasText: taskName });
+  await expect(taskRow).toContainText("in progress");
+  await expect(page.getByText("FOCUS MODE")).toHaveCount(0);
+  const donePatch = page.waitForRequest(req =>
+    new URL(req.url()).pathname === "/api/v1/tasks/inbox-task" && req.method() === "PATCH");
+  await outlook.getByRole("button", { name: `Mark ${taskName} done` }).click();
+  expect((await donePatch).postDataJSON()).toEqual({ status: "done" });
+  await expect(outlook.getByText(taskName)).toHaveCount(0);
+});
+
 test("all-workspace priorities revalidate after an explicit current-workspace completion", async ({ page }) => {
   await setupFocus(page);
   let completed = false;
