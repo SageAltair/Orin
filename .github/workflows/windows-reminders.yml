@@ -51,7 +51,20 @@ jobs:
           } catch {
             if ($_.Exception.Message -notlike '*different AppUserModelID*') { throw }
           }
+          if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Wrong-identity refusal removed the shortcut.' }
           & $installer -Remove -AppDataRoot $profileRoot
           if (Test-Path -LiteralPath $shortcut) { throw 'Removal left a test shortcut.' }
+          $foreign = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+          $foreign.TargetPath = $python
+          $foreign.Arguments = '-m other_module'
+          $foreign.Save()
+          try {
+            & $installer -Install -PythonPath $python -AppDataRoot $profileRoot
+            throw 'Existing unrelated shortcut was overwritten.'
+          } catch {
+            if ($_.Exception.Message -notlike '*different AppUserModelID*') { throw }
+          }
+          if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Unrelated shortcut was removed.' }
+          Remove-Item -LiteralPath $shortcut
           & $installer -Install -PythonPath $python -AppDataRoot $profileRoot -WhatIf
           if (Test-Path -LiteralPath $shortcut) { throw 'WhatIf unexpectedly created a shortcut.' }
