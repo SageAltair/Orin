@@ -17,7 +17,7 @@ from orin_api.config import Settings, get_settings
 from orin_api.domain_router import AIInterpreter
 from orin_api.database import Base, get_session
 from orin_api.main import app
-from orin_api.models import Command, User
+from orin_api.models import Command, Project, Task, User
 
 
 @pytest.fixture
@@ -52,6 +52,48 @@ def client() -> Generator[TestClient, None, None]:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_task_and_project_pagination_has_stable_unique_tie_breakers(client: TestClient) -> None:
+    # Multiple records can share identical sort timestamps (bulk imports,
+    # database precision). Offset pages must have a deterministic final key.
+    task_ids = []
+    for index in range(5):
+        response = client.post("/api/v1/tasks", json={
+            "title": f"Tied task {index}", "due_at": "2026-12-01T12:00:00Z",
+        })
+        assert response.status_code == 201
+        task_ids.append(response.json()["id"])
+    project_ids = []
+    for index in range(5):
+        response = client.post("/api/v1/projects", json={"name": f"Tied project {index}"})
+        assert response.status_code == 201
+        project_ids.append(response.json()["id"])
+
+    tied = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+    session_generator = app.dependency_overrides[get_session]()
+    session = next(session_generator)
+    try:
+        for task_id in task_ids:
+            row = session.get(Task, uuid.UUID(task_id))
+            assert row is not None
+            row.created_at = tied
+        for project_id in project_ids:
+            row = session.get(Project, uuid.UUID(project_id))
+            assert row is not None
+            row.updated_at = tied
+        session.commit()
+    finally:
+        session_generator.close()
+
+    for collection, expected in (("tasks", task_ids), ("projects", project_ids)):
+        seen = []
+        for offset in (0, 2, 4):
+            response = client.get(f"/api/v1/{collection}", params={"limit": 2, "offset": offset})
+            assert response.status_code == 200
+            seen.extend(row["id"] for row in response.json())
+        assert seen == sorted(expected)
+        assert len(set(seen)) == len(expected)
 
 
 def test_preferences_and_capabilities_use_relational_assignments(client: TestClient) -> None:
