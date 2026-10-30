@@ -4,6 +4,7 @@ import type { RoutineOccurrence } from "@orin/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { ApiError, request, type CalendarEvent, type Project, type Task, type TaskBlock } from "./api";
+import { fetchAllPages } from "./features/focus/taskPagination";
 
 type View = "month" | "week" | "day" | "agenda";
 type Draft = { id?: string; title: string; description: string; isAllDay: boolean; date: string; endDate: string; start: string; end: string; projectId: string; reminderMinutes: string };
@@ -49,6 +50,13 @@ const eventWhen = (event: Pick<CalendarEvent, "is_all_day" | "start_date" | "end
 };
 const errorMessage = (error: unknown) => error instanceof ApiError ? error.message : error instanceof Error ? error.message : "Could not load calendar events.";
 const emptyDraft = (key: string): Draft => ({ title: "", description: "", isAllDay: false, date: key, endDate: key, start: `${key}T09:00`, end: `${key}T10:00`, projectId: "", reminderMinutes: "" });
+
+// Calendar's task picker and refresh paths must include task #101 onward.
+// Reject partial/overlapping pages instead of presenting a truncated picker.
+const loadCalendarTasks = () => fetchAllPages<Task>(
+  (offset, limit) => request<Task[]>(`/tasks?limit=${limit}&offset=${offset}`),
+  "calendar tasks", 100, 50, task => task.id,
+);
 
 export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, onOpenTask }: { projects: Project[]; scheduleTaskId?: string | null; onTaskScheduled?: () => void; onOpenTask?: (taskId: string) => void }) {
   const [selectedDay, setSelectedDay] = useState(() => dateKeyForZone(new Date(), localZone()));
@@ -99,7 +107,7 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
 
   useEffect(() => { let active = true; setLoading(true); setError("");
     const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone });
-    Promise.all([request<CalendarEvent[]>(`/calendar/events?${query}`), request<TaskBlock[]>(`/calendar/schedule?${query}`), request<Task[]>("/tasks?limit=100")])
+    Promise.all([request<CalendarEvent[]>(`/calendar/events?${query}`), request<TaskBlock[]>(`/calendar/schedule?${query}`), loadCalendarTasks()])
       .then(([eventResult, blockResult, taskResult]) => { if (active) { setEvents(eventResult); setBlocks(blockResult); setTasks(taskResult); } })
       .catch(cause => { if (active) setError(errorMessage(cause)); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -190,7 +198,7 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
       await request<TaskBlock>(`/calendar/tasks/${taskDraft.taskId}/schedule`, { method: "PUT", body: JSON.stringify(payload) });
       setTaskDraft(null); setNotice("Task scheduled."); onTaskScheduled?.();
       const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone });
-      const [nextBlocks, nextTasks] = await Promise.all([request<TaskBlock[]>(`/calendar/schedule?${query}`), request<Task[]>("/tasks?limit=100")]); setBlocks(nextBlocks); setTasks(nextTasks);
+      const [nextBlocks, nextTasks] = await Promise.all([request<TaskBlock[]>(`/calendar/schedule?${query}`), loadCalendarTasks()]); setBlocks(nextBlocks); setTasks(nextTasks);
     } catch (cause) {
       const message = errorMessage(cause); setError(message);
       if (cause instanceof ApiError && cause.status === 409 && taskDraft) setTaskDraft({ ...taskDraft, allowOverlap: true });
@@ -201,7 +209,7 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
     catch (cause) { setError(errorMessage(cause)); }
   };
   const completeScheduled = async (block: TaskBlock) => {
-    try { await request<Task>(`/tasks/${block.task_id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) }); setNotice("Task completed."); const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone }); const [next, allTasks] = await Promise.all([request<TaskBlock[]>(`/calendar/schedule?${query}`), request<Task[]>("/tasks?limit=100")]); setBlocks(next); setTasks(allTasks); }
+    try { await request<Task>(`/tasks/${block.task_id}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) }); setNotice("Task completed."); const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone }); const [next, allTasks] = await Promise.all([request<TaskBlock[]>(`/calendar/schedule?${query}`), loadCalendarTasks()]); setBlocks(next); setTasks(allTasks); }
     catch (cause) { setError(errorMessage(cause)); }
   };
   const startTaskFocus = async (block: TaskBlock) => {
