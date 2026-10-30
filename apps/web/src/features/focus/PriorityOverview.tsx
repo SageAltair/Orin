@@ -77,7 +77,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now }: {
       <input type="checkbox" checked={includeAll} onChange={event => setIncludeAll(event.target.checked)} />
       Include tasks from all my workspaces
     </label>
-    {includeAll && !loading && <button type="button" className="focus-priority-refresh"
+    {includeAll && !loading && !error && <button type="button" className="focus-priority-refresh"
       onClick={() => setRefreshVersion(value => value + 1)}>Refresh priorities</button>}
     {includeAll && loading && <p role="status">Loading your workspace priorities…</p>}
     {includeAll && error && <p role="alert">{error} <button type="button" onClick={() => setRefreshVersion(value => value + 1)}>Retry</button></p>}
