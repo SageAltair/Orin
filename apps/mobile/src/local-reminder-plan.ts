@@ -112,7 +112,7 @@ export function planLocalReminders(
     return [{ key: `task:${task.id}:${fireAt}`, fireAt }];
   }) : [];
   // A quiet-hour boundary can move many reminders to the same minute.
-  // The OS message is generic, so one alert per instant is sufficient and
+  // The OS message is generic, so one alert per minute is sufficient and
   // avoids a burst of indistinguishable notifications when quiet hours end.
   const scheduledMinutes = new Set<number>();
   return [...fromInbox, ...fromTasks]
