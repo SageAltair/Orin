@@ -130,7 +130,7 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect(savedTask).toEqual(expect.objectContaining({
     status: "done", priority: "high", project_id: project.id,
   }));
-  // Compare the instant, not the API serializer\u0027s equivalent UTC offset spelling.
+  // Compare UTC instants instead of relying on the API's offset spelling.
   expect(new Date(savedTask?.due_at ?? "").toISOString()).toBe("2099-11-02T09:45:00.000Z");
 
   await expect.poll(async () => {
