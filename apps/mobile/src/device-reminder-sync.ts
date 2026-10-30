@@ -19,7 +19,10 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
       seen.add(task.id);
       if (task.status === "done" || task.status === "cancelled" || !task.due_at) continue;
       const due = Date.parse(task.due_at);
-      if (Number.isFinite(due) && due > now) upcoming.push(task);
+      // A deadline that passed during quiet hours can still have a future
+      // deferred alert. Retain a 48-hour lookback (including DST shifts);
+      // the planner rejects any deadline whose deferred time has passed.
+      if (Number.isFinite(due) && due > now - 48 * 60 * 60 * 1000) upcoming.push(task);
     }
     if (rows.length < PAGE_SIZE) return upcoming;
   }

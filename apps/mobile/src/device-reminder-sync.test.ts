@@ -30,10 +30,10 @@ beforeEach(() => {
 });
 
 describe("future task device reminder synchronization", () => {
-  it("fetches all owner-scoped API pages and excludes completed, undated and expired tasks", async () => {
+  it("fetches all owner-scoped API pages and excludes completed, undated and long-expired tasks", async () => {
     const first = Array.from({ length: 100 }, (_, i) => task(String(i), due));
     const second = [task("last", due), task("completed", due, "done"),
-      task("undated", null), task("past", "2026-10-28T12:00:00Z")];
+      task("undated", null), task("past", "2026-10-26T12:00:00Z")];
     vi.mocked(request).mockImplementation(async (path) =>
       (path.includes("offset=0") ? first : second) as never);
     const result = await fetchDeviceReminderTasks(now);
@@ -41,6 +41,15 @@ describe("future task device reminder synchronization", () => {
     expect(result.at(-1)?.id).toBe("last");
     expect(vi.mocked(request).mock.calls.map(([path]) => path))
       .toEqual(["/tasks?limit=100&offset=0", "/tasks?limit=100&offset=100"]);
+  });
+
+  it("retains recently overdue tasks so quiet-hour deferrals survive a foreground sync", async () => {
+    const quietDue = "2026-10-29T11:00:00Z";
+    vi.mocked(request).mockResolvedValueOnce([
+      task("quiet-overdue", quietDue),
+      task("expired", "2026-10-26T12:00:00Z"),
+    ] as never);
+    expect(await fetchDeviceReminderTasks(now)).toEqual([task("quiet-overdue", quietDue)]);
   });
 
   it("does not apply a partial schedule when a later page fails", async () => {
