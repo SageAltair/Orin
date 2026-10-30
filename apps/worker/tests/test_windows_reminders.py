@@ -2,6 +2,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+import os
+import subprocess
+
+import orin_worker.windows_reminders as windows_reminders
 
 import httpx
 import pytest
@@ -415,3 +419,29 @@ def test_windows_toast_script_checks_registered_identity_before_show(tmp_path):
     assert script.index("ExtendedProperty('System.AppUserModel.ID')") < script.index(".Show($toast)")
     assert "CreateToastNotifier($appId)" in script
     assert "Bearer" not in script
+
+
+
+def test_windows_toast_refuses_unconfigured_identity_before_subprocess(monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.delenv("ORIN_WINDOWS_REMINDERS_APP_ID", raising=False)
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda *args, **kwargs: pytest.fail("no subprocess without identity"))
+    with pytest.raises(RuntimeError, match="AppUserModelID"):
+        windows_reminders._windows_toast()
+
+
+def test_windows_toast_subprocess_failure_does_not_consume_reminder(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)]) as client:
+        with pytest.raises(subprocess.CalledProcessError):
+            run_once(client, queue, now=NOW, notify=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, "powershell.exe")))
+        assert queue.due(NOW) == [("a", NOW + 60)]
+        assert run_once(client, queue, now=NOW + 1, notify=lambda: None) == 1
+    queue.close()
