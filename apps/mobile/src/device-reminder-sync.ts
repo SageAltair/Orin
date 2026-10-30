@@ -7,12 +7,26 @@ const MAX_PAGES = 100;
 const INBOX_PAGE_SIZE = 200;
 const MAX_INBOX_PAGES = 50;
 
-// A malformed inbox timestamp can otherwise be silently ignored by the
-// planner, cancelling a previously scheduled OS alert on the next sync.
+// Date.parse normalizes impossible dates (e.g. February 31) and accepts
+// nonstandard timezone offsets (e.g. +15:00). Both could silently move a
+// reminder to the wrong day. Fail closed before replacing OS schedules.
 function isAwareTimestamp(value: unknown): value is string {
-  return typeof value === "string" &&
-    /(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
-    Number.isFinite(Date.parse(value));
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6] ?? "0");
+  const zone = match[8]!;
+  if (year < 1000) return false;
+  if (zone !== "Z") {
+    const hours = Number(zone.slice(1, 3)), minutes = Number(zone.slice(4, 6));
+    if (hours > 14 || minutes > 59 || (hours === 14 && minutes !== 0)) return false;
+  }
+  const wall = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+  return Number.isFinite(Date.parse(value)) &&
+    wall.getUTCFullYear() === year && wall.getUTCMonth() + 1 === month &&
+    wall.getUTCDate() === day && wall.getUTCHours() === hour &&
+    wall.getUTCMinutes() === minute && wall.getUTCSeconds() === second;
 }
 
 // The owner-scoped API has offset pagination but no date filter or total count.
@@ -35,11 +49,7 @@ async function scanTaskPages(now: number): Promise<TaskPageSnapshot> {
     for (const task of rows) {
       if (!task || typeof task.id !== "string" || !task.id ||
           !["todo", "in_progress", "blocked", "done", "cancelled"].includes(task.status) ||
-          (task.due_at !== null && (
-            typeof task.due_at !== "string" ||
-            !/(?:Z|[+-]\d{2}:\d{2})$/.test(task.due_at) ||
-            !Number.isFinite(Date.parse(task.due_at))
-          ))) {
+          (task.due_at !== null && !isAwareTimestamp(task.due_at))) {
         throw new Error("Task reminder sync returned an invalid record.");
       }
       if (signatures.has(task.id)) {
