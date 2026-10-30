@@ -89,17 +89,17 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   holdRefresh = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => refreshStarted).toBe(true);
-  await workspace.getByRole("button", { name: "Edit Review research findings" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Review research findings" }).click();
   await workspace.getByLabel("Task name").fill("Review findings after refresh");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Review findings after refresh")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Review findings after refresh")).toBeVisible();
   const staleResponse = page.waitForResponse(response =>
     response.url().includes("/api/v1/tasks?") && response.request().method() === "GET",
   );
   releaseRefresh?.();
   await staleResponse;
-  await expect(workspace.getByText("Review findings after refresh")).toBeVisible();
-  await expect(workspace.getByText("Review research findings")).toHaveCount(0);
+  await expect(workspace.locator(".focus-task-list").getByText("Review findings after refresh")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Review research findings")).toHaveCount(0);
 
   await workspace.getByRole("button", { name: "Complete Review findings after refresh" }).click();
   await taskViews.getByRole("button", { name: /Completed/ }).click();
