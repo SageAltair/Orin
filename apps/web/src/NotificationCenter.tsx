@@ -86,6 +86,10 @@ export function NotificationCenter({
     return () => {
       inboxGeneration.current++;
       policyGeneration.current++;
+      // React StrictMode replays effect setup after cleanup. Detach the
+      // cancelled scan so the next setup can fetch instead of reusing a
+      // promise whose generation is no longer allowed to publish results.
+      inFlightRefresh.current = null;
       window.clearInterval(timer);
       window.removeEventListener("orin-notification-preferences", onPreferencesChanged);
     };
