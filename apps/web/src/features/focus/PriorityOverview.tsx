@@ -10,7 +10,7 @@ const loadOwnerTasks = () => fetchAllPages<OwnedTask>(
   "priority tasks", 100, 50, item => item.id,
 );
 
-export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask, onScheduleTask, onCompleteTask, actionsBusy = false }: {
+export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask, onScheduleTask, onCompleteTask, actionsBusy = false, taskRevision = 0 }: {
   tasks: Task[];
   activeWorkspaceId: string;
   mode: PriorityGuidanceMode;
@@ -19,6 +19,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
   onScheduleTask?: (taskId: string) => void;
   onCompleteTask?: (task: Task) => void;
   actionsBusy?: boolean;
+  taskRevision?: number;
 }) {
   const [includeAll, setIncludeAll] = useState(false);
   const [remoteTasks, setRemoteTasks] = useState<OwnedTask[]>([]);
@@ -46,7 +47,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [includeAll, refreshVersion]);
+  }, [includeAll, refreshVersion, taskRevision]);
 
   const personalId = workspaces[0]?.id ?? activeWorkspaceId ?? "personal";
   const currentId = activeWorkspaceId || personalId || "personal";
