@@ -12,6 +12,7 @@ export interface UserPreferences {
   autonomyMode: "conservative" | "balanced" | "automatic" | "custom";
   customAutonomy: Record<string, "automatic" | "approval">;
   proactiveMode: "quiet" | "supportive" | "proactive" | "persistent";
+  priorityGuidanceMode: "balanced" | "proactive" | "planning-only";
 }
 
 export interface Capability {
@@ -45,6 +46,7 @@ export const defaultPreferences: UserPreferences = {
   autonomyMode: "balanced",
   customAutonomy: {},
   proactiveMode: "supportive",
+  priorityGuidanceMode: "balanced",
 };
 
 export function getNavigationCapabilities(granted: Capability[], preferences: UserPreferences): Capability[] {
@@ -73,5 +75,6 @@ export function normalizePreferences(value: unknown): UserPreferences {
     autonomyMode: candidate.autonomyMode === "conservative" || candidate.autonomyMode === "automatic" || candidate.autonomyMode === "custom" ? candidate.autonomyMode : "balanced",
     customAutonomy: candidate.customAutonomy && typeof candidate.customAutonomy === "object" ? candidate.customAutonomy as Record<string, "automatic" | "approval"> : {},
     proactiveMode: candidate.proactiveMode === "quiet" || candidate.proactiveMode === "proactive" || candidate.proactiveMode === "persistent" ? candidate.proactiveMode : "supportive",
+    priorityGuidanceMode: candidate.priorityGuidanceMode === "proactive" || candidate.priorityGuidanceMode === "planning-only" ? candidate.priorityGuidanceMode : "balanced",
   };
 }

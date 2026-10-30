@@ -56,7 +56,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await expect(workspace.locator("#legacy-tasks-heading")).toHaveCount(0);
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toHaveCount(0);
   await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
-  await expect(workspace.getByText("Prepare next week's notes")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Prepare next week's notes")).toBeVisible();
   expect(await workspace.locator(".focus-task-list li").first().evaluate(element => getComputedStyle(element).display)).toBe("flex");
   const taskViews = workspace.getByRole("navigation", { name: "Task views" });
   await expect(taskViews.getByRole("button", { name: /Overdue/ })).toContainText("0");
@@ -66,40 +66,40 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await workspace.getByRole("button", { name: "New task" }).click();
   await workspace.getByLabel("Task name").fill("Plan the research review");
   await workspace.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
-  await workspace.getByLabel("Priority").selectOption("high");
+  await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
   await workspace.getByLabel("Project").selectOption("project-1");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Plan the research review")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Plan the research review")).toBeVisible();
   await expect.poll(() => createdPayload?.project_id).toBe("project-1");
   expect(createdPayload?.priority).toBe("high");
   expect(new Date(String(createdPayload?.due_at)).getTime()).toBeGreaterThan(0);
 
-  await workspace.getByRole("button", { name: "Edit Plan the research review" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Plan the research review" }).click();
   await workspace.getByLabel("Task name").fill("Review research findings");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Review research findings")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Review research findings")).toBeVisible();
 
   // Returning to a visible workspace must retrieve changes from another client.
   tasks.push({ id: "external", title: "Added on another device", description: null, status: "todo", priority: "normal", due_at: null, project_id: null, created_at: now, updated_at: now });
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(workspace.getByText("Added on another device")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Added on another device")).toBeVisible();
 
   // A slower, older refresh must not overwrite a newer locally saved edit.
   await page.clock.fastForward(2_000);
   holdRefresh = true;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(() => refreshStarted).toBe(true);
-  await workspace.getByRole("button", { name: "Edit Review research findings" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Review research findings" }).click();
   await workspace.getByLabel("Task name").fill("Review findings after refresh");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Review findings after refresh")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Review findings after refresh")).toBeVisible();
   const staleResponse = page.waitForResponse(response =>
     response.url().includes("/api/v1/tasks?") && response.request().method() === "GET",
   );
   releaseRefresh?.();
   await staleResponse;
-  await expect(workspace.getByText("Review findings after refresh")).toBeVisible();
-  await expect(workspace.getByText("Review research findings")).toHaveCount(0);
+  await expect(workspace.locator(".focus-task-list").getByText("Review findings after refresh")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Review research findings")).toHaveCount(0);
 
   await workspace.getByRole("button", { name: "Complete Review findings after refresh" }).click();
   await taskViews.getByRole("button", { name: /Completed/ }).click();

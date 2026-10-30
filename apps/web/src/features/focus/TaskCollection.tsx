@@ -4,6 +4,8 @@ import { ApiError, request, type Project, type Task } from "../../api";
 import { filterTasksForView, type TaskView } from "./taskViews";
 import { blankTaskDraft, draftFromTask, nextTaskStatus, taskPayload, type TaskDraft } from "./taskEditor";
 import { fetchAllPages } from "./taskPagination";
+import { PriorityOverview } from "./PriorityOverview";
+import type { PriorityGuidanceMode } from "./priorityIntelligence";
 import "./task-workspace.css";
 
 const views: Array<[TaskView, string]> = [
@@ -21,7 +23,7 @@ const fetchAllProjects = () => fetchAllPages<Project>(
   100, 50, (project) => project.id,
 );
 
-export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void }) {
+export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
@@ -147,6 +149,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
       <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
         {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
+    <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now} onEditTask={begin} />
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
@@ -161,6 +164,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
         <div><label htmlFor="task-editor-due">Due date and time (local)</label><input id="task-editor-due" type="datetime-local" value={draft.due} onChange={event => setDraft(current => ({ ...current, due: event.target.value }))} /></div>
         <div><label htmlFor="task-editor-status">Status</label><select id="task-editor-status" value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value as Task["status"] }))}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="done">Completed</option><option value="cancelled">Cancelled</option></select></div>
         <div><label htmlFor="task-editor-priority">Priority</label><select id="task-editor-priority" value={draft.priority} onChange={event => setDraft(current => ({ ...current, priority: event.target.value as Task["priority"] }))}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+        <div><label htmlFor="task-editor-estimate">Estimated duration (minutes)</label><input id="task-editor-estimate" type="number" min="1" max="1440" step="1" value={draft.estimated_minutes} onChange={event => setDraft(current => ({ ...current, estimated_minutes: event.target.value }))} placeholder="Optional" /></div>
         <div><label htmlFor="task-editor-project">Project</label><select id="task-editor-project" value={draft.project_id} disabled={Boolean(projectError)} onChange={event => setDraft(current => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{draft.project_id && !projects.some(project => project.id === draft.project_id) && <option value={draft.project_id}>Current project (not loaded)</option>}{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
       </div>
       {projectError && <p role="alert" className="focus-error">Project choices unavailable: {projectError} Existing task links will be preserved. <button type="button" className="focus-text-button" onClick={() => void loadProjects()}>Retry projects</button></p>}

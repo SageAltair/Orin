@@ -259,14 +259,14 @@ test("the focus workspace can find inbox, today, upcoming, and completed tasks",
   const focusNav = page.getByRole("navigation", { name: "Focus navigation" });
   await focusNav.getByRole("button", { name: "Tasks" }).click();
   await expect(page.getByRole("heading", { name: "Tasks", exact: true })).toBeVisible();
-  await expect(page.getByText("Ask the team about the venue")).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Ask the team about the venue")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Today/ }).click();
-  await expect(page.getByText("Review the project outline")).toBeVisible();
-  await expect(page.getByText("Ask the team about the venue")).toHaveCount(0);
+  await expect(page.locator(".focus-task-list").getByText("Review the project outline")).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Ask the team about the venue")).toHaveCount(0);
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
-  await expect(page.getByText("Prepare next week's notes")).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Prepare next week's notes")).toBeVisible();
   await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
-  await expect(page.getByText("Send the approved update")).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Send the approved update")).toBeVisible();
   await expect(page.locator(".task-workspace-heading")).toHaveCount(0);
   await expect(focusNav).toBeVisible();
   expect(await focusNav.evaluate(el => getComputedStyle(el).position)).toBe("static");
@@ -318,14 +318,38 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await workspace.getByRole("button", { name: "New task" }).click();
   await workspace.getByLabel("Task name").fill("Scheduled notification test");
   await workspace.getByLabel("Due date and time (local)").fill("2026-11-01T15:45");
-  await workspace.getByLabel("Priority").selectOption("high");
+  await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Scheduled notification test")).toBeVisible();
-  await workspace.getByRole("button", { name: "Edit Scheduled notification test" }).click();
+  await expect(workspace.locator(".focus-task-list").getByText("Scheduled notification test")).toBeVisible();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Scheduled notification test" }).click();
   await expect(workspace.getByLabel("Due date and time (local)")).toHaveValue("2026-11-01T15:45");
   await workspace.getByLabel("Task name").fill("Scheduled task updated");
   await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Scheduled task updated")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
   await workspace.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
-  await expect(workspace.getByText("Scheduled task updated")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
+});
+
+test("priority outlook requires explicit cross-workspace opt-in and can return to private scope", async ({ page }) => {
+  await setupFocus(page);
+  await page.route("**/api/v1/priority/tasks?*", route => route.fulfill({ json: [{
+    id: "work-deadline", title: "Work-only deadline", description: null, status: "todo",
+    priority: "urgent", due_at: "2099-10-13T14:00:00Z", project_id: null,
+    workspace_id: "work", created_at: timestamp, updated_at: timestamp,
+  }] }));
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [
+    { id: "personal", name: "Personal" }, { id: "work", name: "Work" },
+  ] }));
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  const optIn = outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" });
+  await expect(optIn).not.toBeChecked();
+  await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
+  await optIn.check();
+  await expect(outlook.getByText("Work-only deadline")).toBeVisible();
+  await expect(outlook.locator(".focus-priority-list")).toContainText("Work");
+  await optIn.uncheck();
+  await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
+  await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
 });

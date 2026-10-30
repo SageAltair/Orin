@@ -15,7 +15,7 @@ describe("professional task editor status and persistence", () => {
     expect(draft.status).toBe("todo");
     expect(taskPayload({ ...draft, title: "  Write brief  " })).toEqual({
       title: "Write brief", description: null, priority: "normal",
-      status: "todo", project_id: null, due_at: null,
+      status: "todo", project_id: null, due_at: null, estimated_minutes: null,
     });
   });
 
@@ -61,6 +61,23 @@ describe("professional task editor status and persistence", () => {
     expect(taskPayload({
       ...draftFromTask(existing), due: "", project_id: "",
     }, existing)).toEqual({ due_at: null, project_id: null });
+  });
+
+  it("saves estimated minutes without overwriting unrelated task fields", () => {
+    const existing = task({ estimated_minutes: 45 });
+    const draft = draftFromTask(existing);
+    expect(draft.estimated_minutes).toBe("45");
+    expect(taskPayload(draft, existing)).toEqual({});
+    expect(taskPayload({ ...draft, estimated_minutes: "60" }, existing)).toEqual({
+      estimated_minutes: 60,
+    });
+    expect(taskPayload({ ...draft, estimated_minutes: "" }, existing)).toEqual({
+      estimated_minutes: null,
+    });
+    expect(taskPayload({ ...blankTaskDraft(), title: "Plan", estimated_minutes: "30" })).toHaveProperty("estimated_minutes", 30);
+    expect(() => taskPayload({ ...draft, estimated_minutes: "-1" }, existing)).toThrow("Estimated duration");
+    expect(() => taskPayload({ ...draft, estimated_minutes: "3.5" }, existing)).toThrow("Estimated duration");
+    expect(() => taskPayload({ ...draft, estimated_minutes: "1441" }, existing)).toThrow("Estimated duration");
   });
 
   it("reopens cancelled and completed tasks rather than completing them again", () => {

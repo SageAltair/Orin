@@ -476,6 +476,16 @@ function PreferenceSettings({
             </select>
           </label>
           <label>
+            Priority guidance
+            <select aria-label="Priority guidance" value={preferences.priorityGuidanceMode}
+              onChange={(event) => onChange({ ...preferences, priorityGuidanceMode: event.target.value as UserPreferences["priorityGuidanceMode"] })}>
+              <option value="balanced">Balanced - prioritize important commitments</option>
+              <option value="proactive">Proactive - prepare more at-risk guidance</option>
+              <option value="planning-only">Planning-only - rank tasks without interruptions</option>
+            </select>
+          </label>
+          <p>Priority outlook currently provides suggestions only. Automatic priority interventions are not yet enabled and will remain subject to focus, quiet hours, snooze and device permissions.</p>
+          <label>
             Autonomy mode
             <select
               value={preferences.autonomyMode}
@@ -945,6 +955,7 @@ export default function App() {
           autonomyMode: prefs.autonomy_mode,
           customAutonomy: prefs.custom_autonomy,
           proactiveMode: prefs.proactive_mode,
+          priorityGuidanceMode: prefs.priority_guidance_mode,
         });
         setPreferences({
           ...normalized,
@@ -1084,6 +1095,7 @@ export default function App() {
           autonomy_mode: next.autonomyMode,
           custom_autonomy: next.customAutonomy,
           proactive_mode: next.proactiveMode,
+          priority_guidance_mode: next.priorityGuidanceMode,
         }),
       });
       setPreferences({
@@ -1095,6 +1107,7 @@ export default function App() {
           autonomyMode: saved.autonomy_mode,
           customAutonomy: saved.custom_autonomy,
           proactiveMode: saved.proactive_mode,
+          priorityGuidanceMode: saved.priority_guidance_mode,
         }),
         minimizedCapabilities: next.minimizedCapabilities,
       });
@@ -1206,6 +1219,7 @@ export default function App() {
           autonomyMode: prefs.autonomy_mode,
           customAutonomy: prefs.custom_autonomy,
           proactiveMode: prefs.proactive_mode,
+          priorityGuidanceMode: prefs.priority_guidance_mode,
         });
         setPreferences({
           ...normalized,
@@ -1691,6 +1705,8 @@ export default function App() {
                 ) : (
                   <div data-orin-control="tasks-workspace" className="focus-shell focus-embedded"><TaskCollection
                     key={activeWorkspaceId || "personal"}
+                    activeWorkspaceId={activeWorkspaceId}
+                    priorityGuidanceMode={preferences.priorityGuidanceMode}
                     onScheduleTask={scheduleTask}
                     onTaskSaved={(updated) => {
                       // An old workspace's in-flight save must never populate

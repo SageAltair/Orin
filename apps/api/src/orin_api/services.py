@@ -117,6 +117,7 @@ def preference_view(session: Session, user: User, preferences: UserPreferences) 
         "autonomy_mode": preferences.autonomy_mode,
         "custom_autonomy": preferences.custom_autonomy,
         "proactive_mode": preferences.proactive_mode,
+        "priority_guidance_mode": preferences.priority_guidance_mode,
     }
 
 
@@ -155,6 +156,10 @@ def update_preferences(session: Session, user: User, data: PreferencesUpdate) ->
     preferences.autonomy_mode = data.autonomy_mode
     preferences.custom_autonomy = data.custom_autonomy
     preferences.proactive_mode = data.proactive_mode
+    # Older clients omit this new field; their unrelated preference saves must
+    # not silently reset a previously selected priority mode.
+    if data.priority_guidance_mode is not None:
+        preferences.priority_guidance_mode = data.priority_guidance_mode
     notification_preferences = session.get(NotificationPreferences, user.id)
     if notification_preferences is not None:
         notification_preferences.persistent = data.proactive_mode == "persistent"
