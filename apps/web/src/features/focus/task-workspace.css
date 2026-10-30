@@ -227,6 +227,8 @@
 .orin-shell .focus-embedded .focus-task-row-content { min-width:0; flex:1; display:flex; flex-direction:column; gap:5px; }
 .orin-shell .focus-embedded .focus-task-row-content strong { overflow-wrap:anywhere; }
 .orin-shell .focus-embedded .focus-task-row-content span { line-height:1.55; }
+.orin-shell .focus-embedded .focus-task-project-link { display:inline-flex; align-items:center; min-height:36px; padding:0 2px; border:0; background:transparent; color:var(--text); font:inherit; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
+.orin-shell .focus-embedded .focus-task-project-link:focus-visible { outline:2px solid var(--text); outline-offset:2px; border-radius:2px; }
 .orin-shell .focus-embedded .focus-task-row-actions { display:flex; align-items:center; gap:7px; }
 .orin-shell .focus-embedded .focus-task-row-actions button { display:inline-flex; align-items:center; gap:6px; min-height:34px; }
 .orin-shell .focus-embedded .focus-task-editor { margin:20px 0; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--surface); display:flex; flex-direction:column; gap:9px; }
