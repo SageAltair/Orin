@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AppState,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
 import { errorMessage, login, register, request } from "./api";
 import { fetchAllMobileTasks, fetchAllMobileProjects, fetchAllMobileProjectTasks } from "./task-pagination";
 import { TaskProjectPicker } from "./task-project-picker";
+import { scheduleTaskScreenRefresh } from "./task-screen-refresh";
 import { dueAtForMobileEdit, filterMobileTasks, toLocalTaskDateTime, toUtcTaskDueAt, type MobileTaskView } from "./task-planning";
 import type { Palette } from "./theme";
 import type {
@@ -332,6 +334,9 @@ export function TasksScreen({
   const [editProjectId, setEditProjectId] = useState<string | null>(null);
   const taskLoadVersion = useRef(0);
   const projectLoadVersion = useRef(0);
+  const mutationVersion = useRef(0);
+  const activeMutations = useRef(0);
+  const [now, setNow] = useState(() => new Date());
   const [title, setTitle] = useState("");
   const [createDue, setCreateDue] = useState("");
   const [view, setView] = useState<MobileTaskView>("all");
@@ -346,18 +351,34 @@ export function TasksScreen({
   const [editPriority, setEditPriority] = useState<Task["priority"]>("normal");
   const [editDue, setEditDue] = useState("");
   const [saving, setSaving] = useState(false);
-  const load = async () => {
+  const load = async (silent = false) => {
     const version = ++taskLoadVersion.current;
-    setLoading(true);
-    setError("");
+    const mutationAtStart = mutationVersion.current;
+    if (!silent) {
+      setLoading(true);
+      setError("");
+    }
     try {
       const next = await fetchAllMobileTasks();
-      if (version === taskLoadVersion.current) setTasks(next);
+      if (version === taskLoadVersion.current && mutationAtStart === mutationVersion.current) {
+        setTasks(next);
+        if (silent) setError("");
+      }
     } catch (cause) {
-      if (version === taskLoadVersion.current) setError(errorMessage(cause));
+      if (version === taskLoadVersion.current && mutationAtStart === mutationVersion.current) {
+        setError(errorMessage(cause));
+      }
     } finally {
       if (version === taskLoadVersion.current) setLoading(false);
     }
+  };
+  const beginMutation = () => {
+    activeMutations.current += 1;
+    mutationVersion.current += 1;
+  };
+  const finishMutation = () => {
+    activeMutations.current = Math.max(0, activeMutations.current - 1);
+    mutationVersion.current += 1;
   };
   const loadProjects = async () => {
     const version = ++projectLoadVersion.current;
@@ -383,17 +404,33 @@ export function TasksScreen({
     setEditing(null);
     setCreateProjectId(null);
     setEditProjectId(null);
+    setNow(new Date());
     if (active) {
       void load();
       void loadProjects();
     }
+    const stopRefresh = active ? scheduleTaskScreenRefresh({
+      onClock: () => setNow(new Date()),
+      onRefresh: () => {
+        if (activeMutations.current === 0) void load(true);
+      },
+      isForeground: () => AppState.currentState === "active",
+      subscribeForeground: (callback) => {
+        const subscription = AppState.addEventListener("change", (state) => {
+          if (state === "active") callback();
+        });
+        return () => subscription.remove();
+      },
+    }) : null;
     return () => {
+      stopRefresh?.();
       taskLoadVersion.current += 1;
       projectLoadVersion.current += 1;
     };
   }, [active, workspace?.id]);
   const create = async () => {
     if (!title.trim()) return;
+    beginMutation();
     setCreating(true);
     setError("");
     try {
@@ -413,10 +450,12 @@ export function TasksScreen({
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
+      finishMutation();
       setCreating(false);
     }
   };
   const toggle = async (task: Task) => {
+    beginMutation();
     const status = task.status === "done" ? "todo" : "done";
     setTasks((current) =>
       current.map((item) => (item.id === task.id ? { ...item, status } : item)),
@@ -430,6 +469,8 @@ export function TasksScreen({
     } catch (cause) {
       setError(errorMessage(cause));
       await load();
+    } finally {
+      finishMutation();
     }
   };
   const openTask = (task: Task) => {
@@ -444,6 +485,7 @@ export function TasksScreen({
   };
   const saveTask = async () => {
     if (!editing || !editTitle.trim()) return;
+    beginMutation();
     setSaving(true);
     setError("");
     try {
@@ -464,10 +506,11 @@ export function TasksScreen({
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
+      finishMutation();
       setSaving(false);
     }
   };
-  const visible = filterMobileTasks(tasks, view, search);
+  const visible = filterMobileTasks(tasks, view, search, now);
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   return (
     <Screen colors={colors} refreshing={loading}>
