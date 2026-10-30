@@ -1701,6 +1701,7 @@ export default function App() {
                     onSignOut={() => { void handleSignOut(); }}
                     embedded
                     onScheduleTask={scheduleTask}
+                    activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                   /></div>
                 ) : (
