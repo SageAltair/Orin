@@ -97,18 +97,20 @@ export function planLocalReminders(
       ? Date.parse(reminder.snoozed_until)
       : 0;
     const originalAt = Math.max(due, snooze);
-    if (!Number.isFinite(originalAt) || originalAt < now + 10_000) return [];
+    if (!Number.isFinite(originalAt)) return [];
     const fireAt = afterQuietHours(originalAt, policy);
-    if (fireAt === null || fireAt > now + MAX_HORIZON_MS) return [];
+    // A reminder that became due during quiet hours still needs its
+    // deferred alert when the app resumes before the quiet interval ends.
+    if (fireAt === null || fireAt < now + 10_000 || fireAt > now + MAX_HORIZON_MS) return [];
     return [{ key: `${reminder.id}:${reminder.revision}:${fireAt}`, fireAt }];
   });
   const fromTasks = categories.has("tasks") ? tasks.flatMap((task) => {
     if (!task.due_at || task.status === "done" || task.status === "cancelled") return [];
     const dueAt = Date.parse(task.due_at);
-    if (!Number.isFinite(dueAt) || dueAt < now + 10_000 ||
+    if (!Number.isFinite(dueAt) ||
         coveredTaskDeadlines.has(`${task.id}:${dueAt}`)) return [];
     const fireAt = afterQuietHours(dueAt, policy);
-    if (fireAt === null || fireAt > now + MAX_HORIZON_MS) return [];
+    if (fireAt === null || fireAt < now + 10_000 || fireAt > now + MAX_HORIZON_MS) return [];
     return [{ key: `task:${task.id}:${fireAt}`, fireAt }];
   }) : [];
   // A quiet-hour boundary can move many reminders to the same minute.
