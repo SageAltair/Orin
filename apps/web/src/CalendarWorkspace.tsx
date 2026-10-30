@@ -20,7 +20,7 @@ const zoneDateTime = (date: Date, zone: string) => {
   const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
 };
-const instantFromZoneInput = (value: string, zone: string) => {
+export const instantFromZoneInput = (value: string, zone: string) => {
   const [datePart, timePart] = value.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
   const [hour, minute] = timePart.split(":").map(Number);
@@ -35,6 +35,24 @@ const instantFromZoneInput = (value: string, zone: string) => {
   }
   const instant = new Date(guess);
   if (zoneDateTime(instant, zone) !== value) throw new Error("That local time does not exist because of a daylight saving change.");
+  // A fall-back transition can represent the same wall time at two different
+  // UTC instants. Do not silently choose the earlier/later occurrence.
+  // Check offsets around the selected instant, including half-hour DST zones.
+  const offsetAt = (epoch: number) => {
+    const [date, time] = zoneDateTime(new Date(epoch), zone).split("T");
+    const [y, m, d] = date.split("-").map(Number);
+    const [h, min] = time.split(":").map(Number);
+    return (Date.UTC(y, m - 1, d, h, min) - Math.floor(epoch / 60_000) * 60_000) / 60_000;
+  };
+  const selectedOffset = offsetAt(guess);
+  for (const hours of [-48, -24, 24, 48]) {
+    const nearbyOffset = offsetAt(guess + hours * 60 * 60_000);
+    if (nearbyOffset === selectedOffset) continue;
+    const alternative = guess + (selectedOffset - nearbyOffset) * 60_000;
+    if (alternative !== guess && zoneDateTime(new Date(alternative), zone) === value) {
+      throw new Error("This time occurs twice when clocks change. Choose another time.");
+    }
+  }
   return instant.toISOString();
 };
 const eventStartDay = (event: CalendarEvent, zone: string) => event.is_all_day ? event.start_date! : new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(event.start_at!));
