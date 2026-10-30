@@ -97,6 +97,23 @@ def test_due_timestamp_accepts_leap_day_precision_and_legal_offsets():
     )
 
 
+
+@pytest.mark.parametrize("bad_due", [
+    "2026-10-29T12:00:00+15:00",
+    "2026-02-31T12:00:00Z",
+])
+def test_invalid_due_snapshot_preserves_existing_queue_and_never_toasts(tmp_path, bad_due):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    invalid = task("bad", NOW + 60)
+    invalid["due_at"] = bad_due
+    with api([invalid]) as client:
+        with pytest.raises(ValueError, match="Invalid"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert queue.due(NOW) == [("previous", NOW + 60)]
+    queue.close()
+
+
 def test_api_must_be_tls_except_loopback():
     assert _secure_api("https://orin.example")
     assert _secure_api("http://127.0.0.1:8100")
