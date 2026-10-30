@@ -67,7 +67,6 @@ def test_due_timestamp_must_be_timezone_aware():
         _due_epoch("not-a-date")
 
 
-
 @pytest.mark.parametrize("raw", [
     "2026-02-31T12:00:00Z",
     "2025-02-29T12:00:00Z",
@@ -95,7 +94,6 @@ def test_due_timestamp_accepts_leap_day_precision_and_legal_offsets():
     assert _due_epoch("2024-02-29T12:00-14:00") == int(
         datetime(2024, 3, 1, 2, 0, tzinfo=timezone.utc).timestamp()
     )
-
 
 
 @pytest.mark.parametrize("bad_due", [
