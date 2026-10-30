@@ -57,19 +57,17 @@ def transition_task_status(task: Task, status: TaskStatus, *, now: datetime | No
         task.status = TaskStatus.DONE
         task.focus_state = None
         task.completed_at = instant
+        task.released_at = None
     elif status == TaskStatus.CANCELLED:
         release_task(task, now=instant)
         return
-    elif task.status in {TaskStatus.DONE, TaskStatus.CANCELLED}:
-        # Reopening a finished task always restores a safe Later state.
-        task.status = TaskStatus.TODO
-        task.focus_state = FocusState.LATER
-        task.completed_at = None
-        task.released_at = None
     else:
+        # An explicit edit from Done/Cancelled to In progress or Blocked must
+        # honor the requested state, not silently downgrade it to To do.
         task.status = status
         task.focus_state = FocusState.ACTIVE if status == TaskStatus.IN_PROGRESS else FocusState.LATER
         task.completed_at = None
+        task.released_at = None
     touch_task(task, now=instant)
 
 

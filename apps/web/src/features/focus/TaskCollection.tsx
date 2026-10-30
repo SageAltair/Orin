@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
-import { dueAtForEdit, filterTasksForView, toLocalDateTime, type TaskView } from "./taskViews";
+import { filterTasksForView, type TaskView } from "./taskViews";
+import { blankTaskDraft, draftFromTask, nextTaskStatus, taskPayload, type TaskDraft } from "./taskEditor";
 import { fetchAllPages } from "./taskPagination";
 import "./task-workspace.css";
 
@@ -9,12 +10,6 @@ const views: Array<[TaskView, string]> = [
   ["all", "All tasks"], ["today", "Today"], ["upcoming", "Upcoming"],
   ["overdue", "Overdue"], ["inbox", "Inbox"], ["completed", "Completed"],
 ];
-type Draft = { title: string; description: string; due: string; priority: Task["priority"]; project_id: string };
-const blankDraft = (): Draft => ({ title: "", description: "", due: "", priority: "normal", project_id: "" });
-const fromTask = (task: Task): Draft => ({
-  title: task.title, description: task.description ?? "", due: toLocalDateTime(task.due_at),
-  priority: task.priority, project_id: task.project_id ?? "",
-});
 const errorMessage = (value: unknown, fallback: string) => value instanceof ApiError ? value.message : value instanceof Error ? value.message : fallback;
 
 const fetchAllTasks = () => fetchAllPages<Task>(
@@ -34,7 +29,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft>(blankDraft);
+  const [draft, setDraft] = useState<TaskDraft>(blankTaskDraft);
   const [error, setError] = useState("");
   const [projectError, setProjectError] = useState("");
   const [notice, setNotice] = useState("");
@@ -42,6 +37,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
   const loadVersion = useRef(0);
   const mutationVersion = useRef(0);
   const mutationActive = useRef(false);
+  const editingBaseline = useRef<Task | null>(null);
 
   const loadProjects = async () => {
     setProjectError("");
@@ -102,8 +98,9 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
   const begin = (task?: Task) => {
+    editingBaseline.current = task ?? null;
     setEditingId(task?.id ?? "new");
-    setDraft(task ? fromTask(task) : blankDraft());
+    setDraft(task ? draftFromTask(task) : blankTaskDraft());
     setError(""); setNotice("");
   };
   const save = async (event: FormEvent<HTMLFormElement>) => {
@@ -113,13 +110,11 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     ++mutationVersion.current;
     setBusyId(editingId); setError(""); setNotice("");
     try {
-      const original = tasks.find(item => item.id === editingId);
-      const payload = {
-        title: draft.title.trim(), description: draft.description.trim() || null,
-        priority: draft.priority, project_id: draft.project_id || null,
-        due_at: dueAtForEdit(draft.due, original?.due_at ?? null),
-      };
       const isNew = editingId === "new";
+      const payload = taskPayload(draft, isNew ? undefined : editingBaseline.current ?? undefined);
+      if (!isNew && Object.keys(payload).length === 0) {
+        setEditingId(null); setNotice("No changes to save."); return;
+      }
       const saved = await request<Task>(isNew ? "/tasks" : `/tasks/${editingId}`, {
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
       });
@@ -135,7 +130,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     setBusyId(task.id); setError(""); setNotice("");
     try {
       const updated = await request<Task>(`/tasks/${task.id}`, {
-        method: "PATCH", body: JSON.stringify({ status: task.status === "done" ? "todo" : "done" }),
+        method: "PATCH", body: JSON.stringify({ status: nextTaskStatus(task) }),
       });
       setTasks(current => current.map(item => item.id === updated.id ? updated : item));
       onTaskSaved?.(updated);
@@ -164,6 +159,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
       <textarea id="task-editor-description" rows={2} value={draft.description} onChange={event => setDraft(current => ({ ...current, description: event.target.value }))} placeholder="Context or next steps" />
       <div className="focus-task-editor-grid">
         <div><label htmlFor="task-editor-due">Due date and time (local)</label><input id="task-editor-due" type="datetime-local" value={draft.due} onChange={event => setDraft(current => ({ ...current, due: event.target.value }))} /></div>
+        <div><label htmlFor="task-editor-status">Status</label><select id="task-editor-status" value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value as Task["status"] }))}><option value="todo">To do</option><option value="in_progress">In progress</option><option value="blocked">Blocked</option><option value="done">Completed</option><option value="cancelled">Cancelled</option></select></div>
         <div><label htmlFor="task-editor-priority">Priority</label><select id="task-editor-priority" value={draft.priority} onChange={event => setDraft(current => ({ ...current, priority: event.target.value as Task["priority"] }))}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
         <div><label htmlFor="task-editor-project">Project</label><select id="task-editor-project" value={draft.project_id} disabled={Boolean(projectError)} onChange={event => setDraft(current => ({ ...current, project_id: event.target.value }))}><option value="">No project</option>{draft.project_id && !projects.some(project => project.id === draft.project_id) && <option value={draft.project_id}>Current project (not loaded)</option>}{projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}</select></div>
       </div>
@@ -174,11 +170,12 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ?
       <div className="focus-task-empty"><h2>{tasks.length === 0 ? "No tasks yet" : "Nothing in this view"}</h2><p>{tasks.length === 0 ? "Create your first task to start planning." : "Try another view or search."}</p></div> :
       <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
-        <button type="button" className="focus-task-status" aria-label={`${task.status === "done" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
+        <button type="button" className="focus-task-status" aria-label={`${task.status === "done" || task.status === "cancelled" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" || task.status === "cancelled" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
         <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
           <span>{task.project_id ? projects.find(project => project.id === task.project_id)?.name ?? "Project task" : "Personal"}
             {task.due_at ? ` · Due ${new Date(task.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : " · No due date"}
-            {task.priority !== "normal" ? ` · ${task.priority} priority` : ""}</span>
+            {task.priority !== "normal" ? ` · ${task.priority} priority` : ""}
+            {task.status !== "todo" ? ` · ${task.status.replace("_", " ")}` : ""}</span>
         </div>
         <div className="focus-task-row-actions">
           <button type="button" className="focus-task-schedule" aria-label={`Edit ${task.title}`} disabled={Boolean(busyId)} onClick={() => begin(task)}><Pencil size={15} /> Edit</button>

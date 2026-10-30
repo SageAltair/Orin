@@ -1,0 +1,55 @@
+import type { Task } from "../../api";
+import { toLocalDateTime, toUtcDueAt } from "./taskViews";
+
+export type TaskDraft = {
+  title: string;
+  description: string;
+  due: string;
+  priority: Task["priority"];
+  status: Task["status"];
+  project_id: string;
+};
+
+export const blankTaskDraft = (): TaskDraft => ({
+  title: "", description: "", due: "", priority: "normal", status: "todo", project_id: "",
+});
+
+export const draftFromTask = (task: Task): TaskDraft => ({
+  title: task.title,
+  description: task.description ?? "",
+  due: toLocalDateTime(task.due_at),
+  priority: task.priority,
+  status: task.status,
+  project_id: task.project_id ?? "",
+});
+
+type EditableTask = Pick<Task, "title" | "description" | "priority" | "status" | "project_id" | "due_at">;
+
+/** PATCH only fields changed since opening the editor.
+
+    Unrelated server-side edits from another device must not be overwritten
+    by stale status, due date, project, priority or description values.
+*/
+export function taskPayload(draft: TaskDraft, original?: EditableTask) {
+  const title = draft.title.trim();
+  const description = draft.description.trim() || null;
+  const projectId = draft.project_id || null;
+  if (!original) {
+    return {
+      title, description, priority: draft.priority, status: draft.status,
+      project_id: projectId, due_at: toUtcDueAt(draft.due),
+    };
+  }
+  return {
+    ...(title !== original.title ? { title } : {}),
+    ...(description !== original.description ? { description } : {}),
+    ...(draft.priority !== original.priority ? { priority: draft.priority } : {}),
+    ...(draft.status !== original.status ? { status: draft.status } : {}),
+    ...(projectId !== original.project_id ? { project_id: projectId } : {}),
+    ...(draft.due !== toLocalDateTime(original.due_at) ? { due_at: toUtcDueAt(draft.due) } : {}),
+  };
+}
+
+/** Cancelled and completed tasks are reopened, not accidentally completed again. */
+export const nextTaskStatus = (task: Task): Task["status"] =>
+  task.status === "done" || task.status === "cancelled" ? "todo" : "done";
