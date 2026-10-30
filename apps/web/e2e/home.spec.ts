@@ -1024,4 +1024,11 @@ test("home dashboard counts completed tasks beyond the first API page", async ({
   await expect(page.locator(".home-right-rail .focus-summary strong")).toContainText("5/12");
   expect(offsets).toContain(0);
   expect(offsets).toContain(100);
+
+  // A completed command refreshes the same full inventory, not the API default of 50.
+  const secondPagesBeforeCommand = offsets.filter(offset => offset === 100).length;
+  await page.getByRole("textbox", { name: "Home command" }).fill("hey");
+  await page.getByRole("button", { name: "Send to Orin" }).click();
+  await expect.poll(() => offsets.filter(offset => offset === 100).length)
+    .toBeGreaterThan(secondPagesBeforeCommand);
 });
