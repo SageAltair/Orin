@@ -113,7 +113,7 @@ export function planTaskPriorities(
     else if (remaining !== null && effort !== null) {
       // Lower-bound feasibility check across visible workspaces. Missing effort
       // is not guessed, and no task outside the authorized view is inspected.
-      const committedEffort = effortByDeadline.get(due) ?? 0;
+      const committedEffort = effortByDeadline.get(due!) ?? 0;
       if (committedEffort > remaining) risk = "capacity";
       else if (remaining <= effort + 15) risk = "imminent";
     }
