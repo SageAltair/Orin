@@ -45,7 +45,7 @@ export function NotificationCenter({
       ? inFlightRefresh.current.then(() => refresh())
       : inFlightRefresh.current;
     const generation = ++inboxGeneration.current;
-    const pending = fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
+    const pending: Promise<void> = fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
       request<Reminder[]>(`/notifications?limit=${limit}&offset=${offset}`))
       .then((rows) => {
         if (generation !== inboxGeneration.current) return;
