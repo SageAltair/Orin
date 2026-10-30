@@ -537,7 +537,7 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     monkeypatch.setattr(windows_reminders, "_toast_identity",
                         lambda: ("Orin.Desktop", tmp_path / "Orin.lnk"))
     monkeypatch.setattr(windows_reminders, "_powershell_executable",
-                        lambda: r"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+                        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
     monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TOKEN", "secret-bearer-token")
     calls = []
     monkeypatch.setattr(windows_reminders.subprocess, "run",
@@ -545,7 +545,7 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     windows_reminders._windows_toast()
     assert len(calls) == 1
     args, kwargs = calls[0]
-    assert args[0].endswith(r"WindowsPowerShell\\v1.0\\powershell.exe")
+    assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
     assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "secret-bearer-token" not in str(args)
