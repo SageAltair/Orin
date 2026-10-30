@@ -294,3 +294,25 @@
   .orin-shell .focus-embedded .focus-task-list li { align-items:flex-start; }
   .orin-shell .focus-embedded .focus-task-row-actions { flex-basis:100%; }
 }
+
+
+/* Priority outlook: a compact editorial list, not another dashboard of cards. */
+.focus-priority-overview { margin: 22px 0; padding: 18px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.focus-priority-overview-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.focus-priority-overview-heading h2 { margin: 0 0 5px !important; font-size: 16px; }
+.focus-priority-overview-heading p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.focus-priority-overview-heading > span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.focus-priority-scope { display: inline-flex; align-items: center; gap: 9px; margin: 14px 0 4px; font-size: 12px; color: var(--text); cursor: pointer; }
+.focus-priority-scope input { accent-color: var(--accent-fill); }
+.focus-priority-list { list-style: decimal; padding: 0 0 0 22px; margin: 12px 0 0; }
+.focus-priority-list li { padding: 10px 4px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+.focus-priority-list li > div { display: flex; flex-direction: column; min-width: 0; gap: 3px; }
+.focus-priority-list strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.focus-priority-list span, .focus-priority-list small { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.focus-priority-list small { text-align: right; max-width: 24ch; }
+.focus-priority-overview [role="alert"] { font-size: 12px; color: var(--text); }
+.focus-priority-overview [role="alert"] button { text-decoration: underline; }
+@media (max-width: 600px) {
+  .focus-priority-overview-heading, .focus-priority-list li { flex-direction: column; align-items: flex-start; gap: 7px; }
+  .focus-priority-list small { max-width: none; text-align: left; }
+}
