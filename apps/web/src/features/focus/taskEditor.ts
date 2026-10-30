@@ -37,7 +37,7 @@ export function taskPayload(draft: TaskDraft, original?: EditableTask) {
   const description = draft.description.trim() || null;
   const projectId = draft.project_id || null;
   const rawEstimate = draft.estimated_minutes.trim();
-  if (rawEstimate && (!/^\\d+$/.test(rawEstimate) || Number(rawEstimate) < 1 || Number(rawEstimate) > 1440)) {
+  if (rawEstimate && (!/^\d+$/.test(rawEstimate) || Number(rawEstimate) < 1 || Number(rawEstimate) > 1440)) {
     throw new Error("Estimated duration must be between 1 and 1440 whole minutes.");
   }
   const estimatedMinutes = rawEstimate ? Number(rawEstimate) : null;
