@@ -37,6 +37,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
   const loadVersion = useRef(0);
   const mutationVersion = useRef(0);
   const mutationActive = useRef(false);
+  const editingBaseline = useRef<Task | null>(null);
 
   const loadProjects = async () => {
     setProjectError("");
@@ -97,6 +98,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
   const begin = (task?: Task) => {
+    editingBaseline.current = task ?? null;
     setEditingId(task?.id ?? "new");
     setDraft(task ? draftFromTask(task) : blankTaskDraft());
     setError(""); setNotice("");
@@ -108,9 +110,11 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     ++mutationVersion.current;
     setBusyId(editingId); setError(""); setNotice("");
     try {
-      const original = tasks.find(item => item.id === editingId);
-      const payload = taskPayload(draft, original?.due_at ?? null, original?.status);
       const isNew = editingId === "new";
+      const payload = taskPayload(draft, isNew ? undefined : editingBaseline.current ?? undefined);
+      if (!isNew && Object.keys(payload).length === 0) {
+        setEditingId(null); setNotice("No changes to save."); return;
+      }
       const saved = await request<Task>(isNew ? "/tasks" : `/tasks/${editingId}`, {
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
       });
