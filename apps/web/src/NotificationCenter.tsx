@@ -104,9 +104,9 @@ export function NotificationCenter({
     }
   };
   useEffect(() => {
-    if (!policy.browser_alerts && !policy.sound) return;
+    if (!policy.enabled || (!policy.browser_alerts && !policy.sound)) return;
     const pending = items
-      .filter((i) => i.attention_ready && !i.read_at)
+      .filter((i) => policy.categories.includes(i.category) && i.attention_ready && !i.read_at)
       .filter((i) => {
         try {
           return !sessionStorage.getItem(`orin:alert:${i.id}:${i.revision}`);
@@ -145,11 +145,11 @@ export function NotificationCenter({
         /* Inbox remains available. */
       }
     }
-  }, [items, policy.browser_alerts, policy.sound]);
+  }, [items, policy.enabled, policy.categories, policy.browser_alerts, policy.sound]);
   // The API orders newest due date first. Surface the oldest ready
   // commitment rather than letting a future-heavy first page hide it.
-  const urgent = policy.persistent
-    ? [...items].reverse().find((i) => i.attention_ready && !i.read_at)
+  const urgent = policy.enabled && policy.persistent
+    ? [...items].reverse().find((i) => policy.categories.includes(i.category) && i.attention_ready && !i.read_at)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
