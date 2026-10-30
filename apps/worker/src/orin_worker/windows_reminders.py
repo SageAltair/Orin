@@ -460,9 +460,27 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     if not due_tasks:
         return 0
 
-    # Task pagination can take time. Revalidate the owner and suppression
-    # policy immediately before attempting a toast, not just before the scan.
-    # A mid-scan logout/revocation or opt-out must never deliver an old alert.
+    # The initial task snapshot can become stale while other requests run.
+    # Confirm that every due task is still active at the same deadline
+    # immediately before delivery. A failure leaves reminders retryable.
+    # This is a best-effort final read, not a transactional server snapshot.
+    try:
+        current_tasks, _, _ = _scan_task_pages(
+            client, ledger.owner_id, ledger.workspace_id, now,
+        )
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code in {401, 403}:
+            ledger.clear()
+        raise
+    except PermissionError:
+        ledger.clear()
+        raise
+    if any(current_tasks.get(task_id) != due for task_id, due in due_tasks):
+        raise ValueError("Tasks changed before reminder delivery; retry next poll")
+
+    # Revalidate the owner and suppression policy AFTER the final task scan,
+    # immediately before delivery. A focus session, quiet-hours change, or
+    # opt-out during that scan must suppress the pending toast.
     try:
         live_prefs = _fetch_live_policy(client, ledger.owner_id)
     except httpx.HTTPStatusError as error:
@@ -485,24 +503,6 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
             if error.response.status_code in {401, 403}:
                 ledger.clear()
             raise
-    # The initial task snapshot can become stale while policy and Focus are
-    # checked. Confirm that every due task is still active at the same deadline
-    # immediately before delivery. A failure leaves reminders retryable.
-    # This is a best-effort final read, not a transactional server snapshot.
-    try:
-        current_tasks, _, _ = _scan_task_pages(
-            client, ledger.owner_id, ledger.workspace_id, now,
-        )
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code in {401, 403}:
-            ledger.clear()
-        raise
-    except PermissionError:
-        ledger.clear()
-        raise
-    if any(current_tasks.get(task_id) != due for task_id, due in due_tasks):
-        raise ValueError("Tasks changed before reminder delivery; retry next poll")
-
     # A long task scan can cross into quiet hours after the poll-start
     # timestamp. Re-evaluate the *current* local clock immediately before
     # delivery. Tests may inject a deterministic clock; production supplies
