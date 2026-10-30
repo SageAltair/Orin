@@ -16,6 +16,14 @@ test("web reminders include older unread records and show the oldest eligible fo
       close() {}
     }
     Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
+    // Simulate autoplay blocking the sound fallback without touching real audio.
+    class BlockedAudioContext {
+      constructor() {
+        sessionStorage.setItem("test:audio-blocked", "yes");
+        throw new Error("Audio playback requires a user gesture");
+      }
+    }
+    Object.defineProperty(window, "AudioContext", { configurable: true, value: BlockedAudioContext });
   });
   const now = "2026-10-30T12:00:00Z";
   const reminders = Array.from({ length: 225 }, (_, index) => ({
@@ -53,7 +61,7 @@ test("web reminders include older unread records and show the oldest eligible fo
       enabled: true, categories: ["tasks"], persistent: true, repeat_minutes: 15,
       max_repeats: 3, timezone: "UTC", quiet_enabled: false,
       quiet_start: "22:00", quiet_end: "07:00", respect_focus: true,
-      browser_alerts: true, sound: false,
+      browser_alerts: true, sound: true,
     } });
     if (pathname === "/api/v1/notifications") {
       const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -77,6 +85,7 @@ test("web reminders include older unread records and show the oldest eligible fo
   await expect(bell).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Persistent follow-up" })
     .getByText("Reminder 224", { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("test:audio-blocked"))).toBe("yes");
   expect(await page.evaluate(() => sessionStorage.getItem("orin:alert:reminder-224:1"))).toBeNull();
   expect(await page.evaluate(() => sessionStorage.getItem("test:notifications-shown"))).toBeNull();
   await page.evaluate(() => {
