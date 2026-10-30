@@ -74,7 +74,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   expect(createdPayload?.priority).toBe("high");
   expect(new Date(String(createdPayload?.due_at)).getTime()).toBeGreaterThan(0);
 
-  await workspace.getByRole("button", { name: "Edit Plan the research review" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Plan the research review" }).click();
   await workspace.getByLabel("Task name").fill("Review research findings");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Review research findings")).toBeVisible();
