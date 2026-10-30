@@ -321,7 +321,7 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled notification test")).toBeVisible();
-  await workspace.getByRole("button", { name: "Edit Scheduled notification test" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Scheduled notification test" }).click();
   await expect(workspace.getByLabel("Due date and time (local)")).toHaveValue("2026-11-01T15:45");
   await workspace.getByLabel("Task name").fill("Scheduled task updated");
   await workspace.getByRole("button", { name: "Save task" }).click();
