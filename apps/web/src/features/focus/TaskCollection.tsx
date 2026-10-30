@@ -19,9 +19,11 @@ const errorMessage = (value: unknown, fallback: string) => value instanceof ApiE
 
 const fetchAllTasks = () => fetchAllPages<Task>(
   (offset, limit) => request<Task[]>(`/tasks?limit=${limit}&offset=${offset}`), "tasks",
+  100, 50, (task) => task.id,
 );
 const fetchAllProjects = () => fetchAllPages<Project>(
   (offset, limit) => request<Project[]>(`/projects?limit=${limit}&offset=${offset}`), "projects",
+  100, 50, (project) => project.id,
 );
 
 export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void }) {
