@@ -404,7 +404,7 @@ def check_toast_registration() -> None:
              _shortcut_identity_script(app_id, shortcut)),
             check=True, capture_output=True, timeout=15, env=_toast_environment(),
         )
-    except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise SystemExit(
             "Orin toast registration check failed. Verify the existing Start Menu "
             "shortcut and matching AppUserModelID; no changes were made."
