@@ -37,6 +37,17 @@ type Memory = { id: string; type: string; title: string; content: string; source
 type Context = { progress: { completed_tasks: number; total_tasks: number; percentage: number | null }; tasks: Array<{ id: string; title: string; status: string }>; blockers: Array<{ id: string; title: string }>; activity: Array<{ id: string; summary: string; created_at: string }>; knowledge: Memory[]; next_actions: Array<{ id: string; title: string }> };
 type Focus = { id: string; project_id: string; objective: string; duration_minutes: number; ends_at: string; status: string };
 
+/** Reject incomplete API responses before storing them in render state. */
+export function isValidProjectContext(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<Context>;
+  const progress = data.progress;
+  return !!progress && Number.isFinite(progress.total_tasks) && Number.isFinite(progress.completed_tasks) &&
+    (progress.percentage === null || (typeof progress.percentage === "number" && Number.isFinite(progress.percentage))) &&
+    Array.isArray(data.tasks) && Array.isArray(data.blockers) &&
+    Array.isArray(data.activity) && Array.isArray(data.next_actions);
+}
+
 type TaskPlanningChanges = Pick<Task, "first_step" | "estimated_minutes" | "verification_criteria">;
 type ReturnPoint = { id: string; created_at: string; kind: "return_point"; accomplished: string | null; stopped_at: string | null; next_action: string | null; references: string | null; blocker: string | null };
 
@@ -106,6 +117,10 @@ export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { pr
         request<Milestone[]>(`/projects/${id}/milestones`),
       ]);
       if (!projectLoadGate.current.isCurrent(ticket) || selectedRef.current !== id) return;
+      if (!isValidProjectContext(data) || !Array.isArray(memories) || !Array.isArray(sessions) ||
+          !Array.isArray(projectTasks) || !Array.isArray(projectMilestones)) {
+        throw new Error("Project details are incomplete. Please retry.");
+      }
       setContext({ ...data, knowledge: memories });
       setTasks(projectTasks);
       setMilestones(projectMilestones);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterProjectTasks, sortProjectTasks, taskDueDateBoundary, taskDueDateValue } from "./ProjectWorkspace";
+import { filterProjectTasks, isValidProjectContext, sortProjectTasks, taskDueDateBoundary, taskDueDateValue } from "./ProjectWorkspace";
 import type { Task } from "./api";
 
 const task = (title: string, status: Task["status"]): Task => ({
@@ -46,5 +46,26 @@ describe("project task filtering", () => {
     expect(sortProjectTasks(ordered, "due").map(item => item.title)).toEqual(["Middle", "Alpha", "Zulu"]);
     expect(sortProjectTasks(ordered, "recent").map(item => item.title)).toEqual(["Alpha", "Zulu", "Middle"]);
     expect(ordered.map(item => item.title)).toEqual(["Zulu", "Alpha", "Middle"]);
+  });
+});
+
+
+describe("project context response safety", () => {
+  const valid = {
+    progress: { completed_tasks: 1, total_tasks: 2, percentage: 50 },
+    tasks: [], blockers: [], activity: [], next_actions: [],
+  };
+
+  it("accepts a complete project context", () => {
+    expect(isValidProjectContext(valid)).toBe(true);
+    expect(isValidProjectContext({ ...valid, progress: { completed_tasks: 0, total_tasks: 0, percentage: null } })).toBe(true);
+  });
+
+  it("rejects missing or malformed data before the project detail can render", () => {
+    expect(isValidProjectContext(undefined)).toBe(false);
+    expect(isValidProjectContext({})).toBe(false);
+    expect(isValidProjectContext({ ...valid, progress: undefined })).toBe(false);
+    expect(isValidProjectContext({ ...valid, progress: { completed_tasks: 0, total_tasks: "bad", percentage: null } })).toBe(false);
+    expect(isValidProjectContext({ ...valid, next_actions: undefined })).toBe(false);
   });
 });
