@@ -36,6 +36,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
   const [projectError, setProjectError] = useState("");
   const [notice, setNotice] = useState("");
   const [now, setNow] = useState(() => new Date());
+  const [taskRevision, setTaskRevision] = useState(0);
   const loadVersion = useRef(0);
   const mutationVersion = useRef(0);
   const mutationActive = useRef(false);
@@ -122,6 +123,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
       });
       setTasks(current => isNew ? [saved, ...current] : current.map(item => item.id === saved.id ? saved : item));
       onTaskSaved?.(saved);
+      setTaskRevision(value => value + 1);
       setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
     } catch (value) { setError(errorMessage(value, "The task could not be saved.")); }
     finally { ++mutationVersion.current; mutationActive.current = false; setBusyId(""); }
@@ -136,6 +138,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
       });
       setTasks(current => current.map(item => item.id === updated.id ? updated : item));
       onTaskSaved?.(updated);
+      setTaskRevision(value => value + 1);
     } catch (value) { setError(errorMessage(value, "That task could not be updated.")); }
     finally { ++mutationVersion.current; mutationActive.current = false; setBusyId(""); }
   };
@@ -151,7 +154,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
       </button>)}</nav>
     <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now}
       onEditTask={begin} onScheduleTask={onScheduleTask} onCompleteTask={task => { void changeStatus(task); }}
-      actionsBusy={Boolean(busyId)} />
+      actionsBusy={Boolean(busyId)} taskRevision={taskRevision} />
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
