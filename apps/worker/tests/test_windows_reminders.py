@@ -749,3 +749,103 @@ def test_registration_diagnostic_fails_closed_without_modifying_shortcut(tmp_pat
                         lambda *args, **kwargs: pytest.fail("no process without shortcut"))
     with pytest.raises(SystemExit, match="no changes were made"):
         check_toast_registration()
+
+
+@pytest.mark.parametrize("change", ["completed", "cancelled", "rescheduled", "deleted"])
+def test_late_task_state_change_cannot_emit_stale_windows_toast(tmp_path, change):
+    """A task can change after the initial snapshot and live policy recheck."""
+    queue = ledger(tmp_path)
+    reads = 0
+    alerts = []
+    initial = task("a", NOW + 60)
+    changed = dict(initial)
+    if change in {"completed", "cancelled"}:
+        changed["status"] = "done" if change == "completed" else "cancelled"
+    elif change == "rescheduled":
+        changed["due_at"] = task("a", NOW + 3600)["due_at"]
+
+    def handler(request):
+        nonlocal reads
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            assert request.headers["X-Orin-Workspace-Id"] == WORKSPACE
+            reads += 1
+            return httpx.Response(200, json=[initial] if reads == 1 else (
+                [] if change == "deleted" else [changed]
+            ))
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="Tasks changed before reminder delivery"):
+            run_once(client, queue, now=NOW, notify=lambda: alerts.append("toast"))
+    assert reads == 2
+    assert alerts == []
+    assert queue.due(NOW) == [("a", NOW + 60)]
+    queue.close()
+
+
+def test_late_task_revalidation_failure_does_not_consume_reminder(tmp_path):
+    queue = ledger(tmp_path)
+    reads = 0
+
+    def handler(request):
+        nonlocal reads
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            reads += 1
+            return httpx.Response(200, json=[task("a", NOW + 60)]) if reads == 1 else httpx.Response(503)
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no stale toast"))
+    assert reads == 2
+    assert queue.due(NOW) == [("a", NOW + 60)]
+    queue.close()
+
+
+def test_late_task_revalidation_allows_unchanged_due_task(tmp_path):
+    queue = ledger(tmp_path)
+    reads = 0
+    alerts = []
+    initial = [task("a", NOW + 60), task("b", NOW + 3600)]
+    changed = [initial[0], task("b", NOW + 3600, "done")]
+
+    def handler(request):
+        nonlocal reads
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            reads += 1
+            return httpx.Response(200, json=initial if reads == 1 else changed)
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: alerts.append("toast")) == 1
+    assert reads == 2
+    assert alerts == ["toast"]
+    assert queue.due(NOW) == []
+    queue.close()
