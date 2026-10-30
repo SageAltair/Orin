@@ -28,9 +28,12 @@ const timeGreeting = () => {
 
 export function HomeDashboard(props: Props) {
   const openTasks = props.tasks.filter(task => !["done", "cancelled"].includes(task.status)).slice(0, 5);
-  const completed = props.tasks.filter(task => task.status === "done").length;
-  const focusTotal = Math.max(5, Math.min(12, props.tasks.length || 5));
-  const focusDone = Math.min(focusTotal, completed);
+  // Report actual completion, not an arbitrary 5–12 goal quota that can
+  // claim 100% progress while most of the owner's tasks remain unfinished.
+  const countableTasks = props.tasks.filter(task => task.status !== "cancelled");
+  const completed = countableTasks.filter(task => task.status === "done").length;
+  const focusTotal = countableTasks.length;
+  const focusPercent = focusTotal ? Math.round(completed / focusTotal * 100) : 0;
   const activeProjects = props.projects.filter(project => project.status === "active").slice(0, 5);
   const quickPrompt = (prompt: string) => { props.setCommand(prompt); props.openAssistant(prompt); };
   return <div className="orin-home">
@@ -80,7 +83,7 @@ export function HomeDashboard(props: Props) {
 
       <aside className="home-right-rail">
         <section className="dashboard-card assistant-card"><header><div><Sparkles size={20} /><h2>AI Assistant</h2></div></header><p>Your thinking partner, always here.</p>{["Help me plan my week", "Write a social media post", "Summarize this document", "Explain this in simple terms"].map(prompt => <button key={prompt} onClick={() => quickPrompt(prompt)}>{prompt}<ChevronRight size={15} /></button>)}<button className="rail-ask" onClick={() => props.openAssistant()}>Ask Orin anything…<ArrowRight size={16} /></button></section>
-        <section className="dashboard-card focus-card"><header><div><Target size={20} /><h2>Focus</h2></div></header><p>You’re making progress!</p><div className="focus-summary"><div className="focus-ring" style={{ "--progress": `${Math.max(10, focusDone / focusTotal * 100)}%` } as CSSProperties}><span /></div><strong>{focusDone}/{focusTotal}<small>key goals completed</small></strong></div><button onClick={() => props.openPage("tasks")}>View goals <ArrowRight size={15} /></button></section>
+        <section className="dashboard-card focus-card"><header><div><Target size={20} /><h2>Focus</h2></div></header><p>Task completion across your workspace.</p><div className="focus-summary"><div className="focus-ring" style={{ "--progress": `${focusPercent}%` } as CSSProperties}><span /></div><strong>{completed}/{focusTotal}<small>tasks completed</small></strong></div><button onClick={() => props.openPage("tasks")}>View goals <ArrowRight size={15} /></button></section>
         <section className="dashboard-card files-card"><header><div><FileText size={18} /><h2>Recent Files</h2></div><button onClick={props.capture}>Add</button></header>{props.files.slice(0, 5).map(file => <button key={file.id} onClick={() => props.openAssistant()}><FileText size={16} /><span><strong>{file.filename}</strong><small>{file.media_type}</small></span></button>)}{!props.files.length && <p className="dashboard-empty">Files shared with Orin will appear here.</p>}</section>
       </aside>
     </div>
