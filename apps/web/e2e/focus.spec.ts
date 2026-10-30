@@ -349,7 +349,12 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
   await optIn.check();
   await expect(outlook.getByText("Work-only deadline")).toBeVisible();
   await expect(outlook.locator(".focus-priority-list")).toContainText("Work");
+  const otherWorkspace = outlook.locator(".focus-priority-list li").filter({ hasText: "Work-only deadline" });
+  await expect(otherWorkspace.getByRole("button")).toHaveCount(0);
   await optIn.uncheck();
   await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
   await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
+  await expect(outlook.getByRole("button", { name: "Schedule Ask the team about the venue" })).toBeVisible();
+  await outlook.getByRole("button", { name: "Mark Ask the team about the venue done" }).click();
+  await expect(outlook.getByText("Ask the team about the venue")).toHaveCount(0);
 });
