@@ -180,18 +180,21 @@ def _validate_notification_policy(prefs: dict[str, object]) -> None:
 
 
 def _focus_active(client: httpx.Client) -> bool:
-    """Fail closed if the authenticated Focus state cannot be validated."""
-    response = client.get("/focus/now")
+    """Use all authenticated Focus sessions, including those without a task.
+
+    /focus/now selects only sessions attached to unfinished tasks. A standalone
+    active Focus session would be invisible there, bypassing respect_focus.
+    /focus-sessions includes all owner sessions and expires elapsed sessions.
+    """
+    response = client.get("/focus-sessions")
     response.raise_for_status()
-    state = response.json()
-    if not isinstance(state, dict) or "focus_session" not in state:
-        raise ValueError("Invalid Focus state")
-    focus = state["focus_session"]
-    if focus is None:
-        return False
-    if not isinstance(focus, dict) or focus.get("status") != "active":
-        raise ValueError("Invalid active Focus session")
-    return True
+    sessions = response.json()
+    if not isinstance(sessions, list) or len(sessions) > 50:
+        raise ValueError("Invalid Focus sessions")
+    statuses = {"active", "paused", "completed", "cancelled", "expired"}
+    if any(not isinstance(item, dict) or item.get("status") not in statuses for item in sessions):
+        raise ValueError("Invalid Focus session record")
+    return any(item["status"] == "active" for item in sessions)
 
 
 def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
