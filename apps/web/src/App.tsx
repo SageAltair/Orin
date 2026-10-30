@@ -99,6 +99,7 @@ import { GitHubSettings } from "./GitHubSettings";
 import { FocusExperience } from "./features/focus/FocusExperience";
 import { TaskCollection } from "./features/focus/TaskCollection";
 import { fetchAllPages } from "./features/focus/taskPagination";
+import { loadAppTaskInventory } from "./appTaskInventory";
 import { QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { FocusSessions } from "./FocusSessions";
 import { CalendarWorkspace } from "./CalendarWorkspace";
@@ -942,7 +943,7 @@ export default function App() {
       },
     }).catch(() => undefined);
     Promise.all([
-      request<Task[]>("/tasks?limit=100"),
+      loadAppTaskInventory(),
       fetchWorkspaceProjects(),
       request<Preferences>("/users/me/preferences"),
       request<Approval[]>("/approvals"),
@@ -1210,7 +1211,7 @@ export default function App() {
       }
       if (result.status === "completed") {
         const [t, p, prefs, environment] = await Promise.all([
-          request<Task[]>("/tasks"),
+          loadAppTaskInventory(),
           fetchWorkspaceProjects(),
           request<Preferences>("/users/me/preferences"),
           request<EnvironmentPreference[]>("/environment/preferences"),
