@@ -61,6 +61,52 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
+  it("rejects overlapping task pages before replacing any scheduled alerts", async () => {
+    const first = Array.from({ length: 100 }, (_, i) => task(String(i), due));
+    vi.mocked(request).mockImplementation(async (path) =>
+      (path.includes("offset=0") ? first : [task("99", due)]) as never);
+    await expect(fetchDeviceReminderTasks(now)).rejects.toThrow("Overlapping");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed task records, naive dates and oversized pages", async () => {
+    for (const bad of [
+      [{ ...task("bad", due), id: null }],
+      [{ ...task("bad", due), status: "unknown" }],
+      [task("bad", "2026-11-02T12:00:00")],
+      [task("bad", "invalidZ")],
+      Array.from({ length: 101 }, (_, i) => task(String(i), due)),
+    ]) {
+      vi.mocked(request).mockReset().mockResolvedValueOnce(bad as never);
+      await expect(fetchDeviceReminderTasks(now)).rejects.toThrow(/invalid (record|page)/);
+    }
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("accepts exactly 10,000 tasks only after an empty boundary probe", async () => {
+    vi.mocked(request).mockImplementation(async (path) => {
+      const params = new URLSearchParams(path.split("?")[1]);
+      const offset = Number(params.get("offset"));
+      const limit = Number(params.get("limit"));
+      return (offset === 10_000 ? [] :
+        Array.from({ length: limit }, (_, i) => task(String(offset + i), due))) as never;
+    });
+    expect(await fetchDeviceReminderTasks(now)).toHaveLength(10_000);
+    expect(vi.mocked(request)).toHaveBeenCalledTimes(101);
+    expect(vi.mocked(request).mock.calls.at(-1)?.[0]).toBe("/tasks?limit=1&offset=10000");
+  });
+
+  it("rejects more than 10,000 tasks without replacing device schedules", async () => {
+    vi.mocked(request).mockImplementation(async (path) => {
+      const params = new URLSearchParams(path.split("?")[1]);
+      const offset = Number(params.get("offset"));
+      const limit = Number(params.get("limit"));
+      return Array.from({ length: limit }, (_, i) => task(String(offset + i), due)) as never;
+    });
+    await expect(fetchDeviceReminderTasks(now)).rejects.toThrow("exceeds 10,000");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
   it("requires explicit opt-in and fences a stale account or workspace response", async () => {
     vi.mocked(getLocalReminderEnabled).mockResolvedValueOnce(false);
     await refreshDeviceReminders("alice", "workspace-a");
