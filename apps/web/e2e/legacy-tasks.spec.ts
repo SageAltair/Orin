@@ -9,8 +9,12 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   let createdPayload: Record<string, unknown> | null = null;
   let tasks: Array<Record<string, unknown>> = [
     { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: "missing-project", created_at: now, updated_at: now },
+    { id: "task-deep-project", title: "Plan deep project", description: null, status: "todo", priority: "normal", due_at: null, project_id: "project-104", created_at: now, updated_at: now },
     { id: "task-deadline", title: "Deadline crossing", description: null, status: "todo", priority: "normal", due_at: "2026-10-10T08:00:20Z", project_id: null, created_at: now, updated_at: now },
   ];
+  const projects = Array.from({ length: 105 }, (_, index) => ({
+    id: `project-${index}`, name: index === 1 ? "Research" : `Project ${index}`, status: "active",
+  }));
   await page.route("**/api/v1/**", async route => {
     const { pathname } = new URL(route.request().url());
     const method = route.request().method();
@@ -38,14 +42,19 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
       return route.fulfill({ json: tasks.find(task => task.id === "task-1") });
     }
     if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
-    if (pathname === "/api/v1/projects") return route.fulfill({ json: [{ id: "project-1", name: "Research", status: "active" }] });
+    if (pathname === "/api/v1/projects") {
+      const params = new URL(route.request().url()).searchParams;
+      const offset = Number(params.get("offset") ?? 0);
+      const limit = Number(params.get("limit") ?? 50);
+      return route.fulfill({ json: projects.slice(offset, offset + limit) });
+    }
     // Project navigation must exercise the real detail view with valid API contracts.
-    if (pathname === "/api/v1/projects/project-1/context") return route.fulfill({ json: {
+    if (/^\/api\/v1\/projects\/project-\d+\/context$/.test(pathname)) return route.fulfill({ json: {
       progress: { completed_tasks: 0, total_tasks: 0, percentage: null },
       tasks: [], blockers: [], activity: [], knowledge: [], next_actions: [],
     } });
     if (pathname === "/api/v1/memories" || pathname === "/api/v1/focus-sessions" ||
-        pathname === "/api/v1/projects/project-1/milestones") return route.fulfill({ json: [] });
+        /^\/api\/v1\/projects\/project-\d+\/milestones$/.test(pathname)) return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname.endsWith("/approvals") || pathname.endsWith("/conversations") || pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 204 });
   });
@@ -77,7 +86,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await workspace.getByLabel("Task name").fill("Plan the research review");
   await workspace.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
   await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
-  await workspace.getByLabel("Project").selectOption("project-1");
+  await workspace.getByLabel("Project", { exact: true }).selectOption("project-1");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Plan the research review")).toBeVisible();
   await expect.poll(() => createdPayload?.project_id).toBe("project-1");
@@ -118,4 +127,9 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   // A task's project association is navigable, not just an inert label.
   await workspace.locator(".focus-task-list").getByRole("button", { name: "Open project Research" }).click();
   await expect(page.locator('[data-orin-control="projects-workspace"]')).toBeVisible();
+
+  // Project #105 must be selectable even though the API defaults to 50 rows.
+  await page.getByRole("navigation").first().getByRole("button", { name: "Tasks" }).click();
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Open project Project 104" }).click();
+  await expect(page.getByRole("combobox", { name: "Select project" })).toHaveValue("project-104");
 });

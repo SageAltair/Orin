@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterProjectTasks, isValidProjectContext, sortProjectTasks, taskDueDateBoundary, taskDueDateValue } from "./ProjectWorkspace";
+import { filterProjectTasks, isValidProjectContext, loadProjectTaskPages, sortProjectTasks, taskDueDateBoundary, taskDueDateValue } from "./ProjectWorkspace";
 import type { Task } from "./api";
 
 const task = (title: string, status: Task["status"]): Task => ({
@@ -67,5 +67,24 @@ describe("project context response safety", () => {
     expect(isValidProjectContext({ ...valid, progress: undefined })).toBe(false);
     expect(isValidProjectContext({ ...valid, progress: { completed_tasks: 0, total_tasks: "bad", percentage: null } })).toBe(false);
     expect(isValidProjectContext({ ...valid, next_actions: undefined })).toBe(false);
+  });
+});
+
+
+describe("project task pagination", () => {
+  it("loads every project task beyond the first hundred", async () => {
+    const tasks = Array.from({ length: 205 }, (_, index) => task(`Task ${index}`, "todo"));
+    const offsets: number[] = [];
+    const loaded = await loadProjectTaskPages("project-1", async path => {
+      const params = new URL(path, "https://orin.invalid").searchParams;
+      const offset = Number(params.get("offset"));
+      const limit = Number(params.get("limit"));
+      expect(params.get("project_id")).toBe("project-1");
+      offsets.push(offset);
+      return tasks.slice(offset, offset + limit);
+    });
+    expect(loaded).toHaveLength(205);
+    expect(loaded.at(-1)?.title).toBe("Task 204");
+    expect(offsets).toEqual([0, 100, 200]);
   });
 });

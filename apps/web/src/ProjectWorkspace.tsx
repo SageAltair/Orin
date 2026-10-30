@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createProjectLoadGate } from "./projectLoadGate";
+import { fetchAllPages } from "./features/focus/taskPagination";
 import { ApiError, request, type Milestone, type Task } from "./api";
 import "./ProjectWorkspace.css";
 
@@ -30,6 +31,14 @@ export function taskDueDateBoundary(date: string): string | null {
   if (!date) return null;
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year, month - 1, day, 23, 59, 0, 0).toISOString();
+}
+
+/** Read every task associated with a project, not just the first API page. */
+export function loadProjectTaskPages(projectId: string, fetchPage: (path: string) => Promise<Task[]> = path => request<Task[]>(path)) {
+  return fetchAllPages<Task>(
+    (offset, limit) => fetchPage(`/tasks?project_id=${encodeURIComponent(projectId)}&limit=${limit}&offset=${offset}`),
+    "project tasks", 100, 50, task => task.id,
+  );
 }
 
 type Project = { id: string; name: string; description: string | null; objective?: string | null; status: string; priority: "low" | "normal" | "high" | "urgent"; target_date: string | null; created_at: string; updated_at: string };
@@ -113,7 +122,7 @@ export function ProjectWorkspace({ projects, onChanged, initialProjectId }: { pr
         request<Context>(`/projects/${id}/context`),
         request<Memory[]>(`/memories?project_id=${id}`),
         request<Focus[]>("/focus-sessions"),
-        request<Task[]>(`/tasks?project_id=${id}&limit=100`),
+        loadProjectTaskPages(id),
         request<Milestone[]>(`/projects/${id}/milestones`),
       ]);
       if (!projectLoadGate.current.isCurrent(ticket) || selectedRef.current !== id) return;
