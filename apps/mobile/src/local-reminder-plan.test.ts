@@ -129,6 +129,30 @@ describe("local Android reminder planner", () => {
     expect(planLocalReminders([reminder("fall", fallDue)], eastern, fallNow))
       .toEqual([{ key: `fall:1:${fallEnd}`, fireAt: fallEnd }]);
   });
+  it("finds narrow allowed windows across DST transitions instead of skipping a day", () => {
+    // At the fall-back, 01:27 EDT is quiet but the repeated 01:00 EST
+    // briefly becomes allowed before the configured 01:13 quiet start.
+    const fallNow = Date.parse("2026-11-01T05:20:00Z");
+    const fallDue = "2026-11-01T05:27:00Z";
+    const fallPolicy = {
+      ...policy, quiet_enabled: true, timezone: "America/New_York",
+      quiet_start: "01:13", quiet_end: "23:07",
+    };
+    const fallEnd = Date.parse("2026-11-01T06:00:00Z");
+    expect(planLocalReminders([reminder("fold", fallDue)], fallPolicy, fallNow))
+      .toEqual([{ key: `fold:1:${fallEnd}`, fireAt: fallEnd }]);
+    // Spring-forward shifts a seven-minute allowed window an hour earlier
+    // in UTC; the initial fixed-offset estimate falls back into quiet hours.
+    const springNow = Date.parse("2026-03-08T03:00:00Z");
+    const springDue = "2026-03-08T03:14:00Z";
+    const springPolicy = {
+      ...policy, quiet_enabled: true, timezone: "America/New_York",
+      quiet_start: "21:31", quiet_end: "21:24",
+    };
+    const springEnd = Date.parse("2026-03-09T01:24:00Z");
+    expect(planLocalReminders([reminder("gap", springDue)], springPolicy, springNow))
+      .toEqual([{ key: `gap:1:${springEnd}`, fireAt: springEnd }]);
+  });
   it("fails closed on invalid quiet settings and does not defer beyond horizon", () => {
     const due = "2026-10-29T23:00:00Z";
     expect(planLocalReminders([reminder("invalid", due)],
