@@ -501,3 +501,52 @@ def test_windows_toast_subprocess_failure_does_not_consume_reminder(tmp_path):
         assert queue.due(NOW) == [("a", NOW + 60)]
         assert run_once(client, queue, now=NOW + 1, notify=lambda: None) == 1
     queue.close()
+
+
+def test_toast_resolves_system_powershell_without_searching_path(tmp_path, monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+
+    system = tmp_path / "System32"
+    executable = system / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"test-only executable placeholder")
+    (tmp_path / "powershell.exe").write_bytes(b"untrusted PATH candidate")
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    class Kernel32:
+        @staticmethod
+        def GetSystemDirectoryW(buffer, size):
+            buffer.value = str(system)
+            return len(buffer.value)
+
+    monkeypatch.setattr(ctypes, "windll", SimpleNamespace(kernel32=Kernel32()), raising=False)
+    assert windows_reminders._powershell_executable() == str(executable)
+    executable.unlink()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        windows_reminders._powershell_executable()
+
+
+def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.setattr(windows_reminders, "_toast_identity",
+                        lambda: ("Orin.Desktop", tmp_path / "Orin.lnk"))
+    monkeypatch.setattr(windows_reminders, "_powershell_executable",
+                        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TOKEN", "secret-bearer-token")
+    calls = []
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda args, **kwargs: calls.append((args, kwargs)))
+    windows_reminders._windows_toast()
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
+    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
+    assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
+    assert "secret-bearer-token" not in str(args)
+    assert kwargs["check"] is True
