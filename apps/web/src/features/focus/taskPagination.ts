@@ -36,3 +36,28 @@ export async function fetchAllPages<T>(
   if (next.length === 0) return items;
   throw new Error(`More than ${maxPages * pageSize} ${collection} exist. The full list could not be loaded safely.`);
 }
+
+
+/**
+ * Best-effort protection against offset shifts that omit an item without
+ * producing an overlapping ID. The API has no cursor/snapshot token, so
+ * confirm the identity set on a second full pass before exposing multi-page
+ * Tasks or project choices. This is not a transactional database snapshot.
+ */
+export async function fetchAllPagesWithIdentityCheck<T>(
+  fetchPage: (offset: number, limit: number) => Promise<T[]>,
+  collection: string,
+  getId: (row: T) => string,
+  pageSize = 100,
+  maxPages = 50,
+): Promise<T[]> {
+  const initial = await fetchAllPages(fetchPage, collection, pageSize, maxPages, getId);
+  if (initial.length <= pageSize) return initial;
+  const confirmed = await fetchAllPages(fetchPage, collection, pageSize, maxPages, getId);
+  const initialIds = new Set(initial.map(getId));
+  if (initial.length !== confirmed.length ||
+      confirmed.some((row) => !initialIds.has(getId(row)))) {
+    throw new Error(collection + " changed during pagination; retry to load the complete list.");
+  }
+  return confirmed;
+}
