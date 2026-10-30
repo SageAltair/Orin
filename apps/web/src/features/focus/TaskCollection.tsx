@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
 import { dueAtForEdit, filterTasksForView, toLocalDateTime, type TaskView } from "./taskViews";
@@ -36,6 +36,10 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
   const [error, setError] = useState("");
   const [projectError, setProjectError] = useState("");
   const [notice, setNotice] = useState("");
+  const [now, setNow] = useState(() => new Date());
+  const loadVersion = useRef(0);
+  const mutationVersion = useRef(0);
+  const mutationActive = useRef(false);
 
   const loadProjects = async () => {
     setProjectError("");
@@ -43,18 +47,58 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     catch (value) { setProjectError(errorMessage(value, "Project choices could not be loaded.")); }
   };
 
-  const load = async () => {
-    setLoading(true); setError("");
-    try { setTasks(await fetchAllTasks()); }
-    catch (value) { setError(errorMessage(value, "Tasks could not be loaded. Try again.")); }
-    finally { setLoading(false); }
+  const load = async (silent = false) => {
+    const version = ++loadVersion.current;
+    const mutationAtStart = mutationVersion.current;
+    if (!silent) { setLoading(true); setError(""); }
+    try {
+      const next = await fetchAllTasks();
+      // An older poll must never overwrite a newer poll or a locally saved edit.
+      if (version === loadVersion.current && mutationAtStart === mutationVersion.current) {
+        setTasks(next);
+        if (silent) setError("");
+      }
+    } catch (value) {
+      if (version === loadVersion.current && mutationAtStart === mutationVersion.current) {
+        setError(errorMessage(value, "Tasks could not be loaded. Try again."));
+      }
+    } finally {
+      if (version === loadVersion.current) setLoading(false);
+    }
   };
   useEffect(() => {
     void load();
     void loadProjects();
+    let lastForegroundRefresh = 0;
+    const revalidate = () => {
+      if (document.visibilityState !== "visible") return;
+      setNow(new Date());
+      if (mutationActive.current) return;
+      // Focus and visibilitychange commonly arrive together.
+      const stamp = Date.now();
+      if (stamp - lastForegroundRefresh < 1000) return;
+      lastForegroundRefresh = stamp;
+      void load(true);
+    };
+    // Refresh due-state without requiring a click; only poll the API while visible.
+    const clock = window.setInterval(() => {
+      if (document.visibilityState === "visible") setNow(new Date());
+    }, 15_000);
+    const poll = window.setInterval(() => {
+      if (document.visibilityState === "visible" && !mutationActive.current) void load(true);
+    }, 60_000);
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => {
+      ++loadVersion.current;
+      window.clearInterval(clock);
+      window.clearInterval(poll);
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
+    };
   }, []);
 
-  const visibleTasks = filterTasksForView(tasks, view, search);
+  const visibleTasks = filterTasksForView(tasks, view, search, now);
   const begin = (task?: Task) => {
     setEditingId(task?.id ?? "new");
     setDraft(task ? fromTask(task) : blankDraft());
@@ -63,6 +107,8 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft.title.trim() || !editingId) return;
+    mutationActive.current = true;
+    ++mutationVersion.current;
     setBusyId(editingId); setError(""); setNotice("");
     try {
       const original = tasks.find(item => item.id === editingId);
@@ -79,9 +125,11 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
       onTaskSaved?.(saved);
       setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
     } catch (value) { setError(errorMessage(value, "The task could not be saved.")); }
-    finally { setBusyId(""); }
+    finally { ++mutationVersion.current; mutationActive.current = false; setBusyId(""); }
   };
   const changeStatus = async (task: Task) => {
+    mutationActive.current = true;
+    ++mutationVersion.current;
     setBusyId(task.id); setError(""); setNotice("");
     try {
       const updated = await request<Task>(`/tasks/${task.id}`, {
@@ -90,7 +138,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
       setTasks(current => current.map(item => item.id === updated.id ? updated : item));
       onTaskSaved?.(updated);
     } catch (value) { setError(errorMessage(value, "That task could not be updated.")); }
-    finally { setBusyId(""); }
+    finally { ++mutationVersion.current; mutationActive.current = false; setBusyId(""); }
   };
 
   return <section className="focus-card focus-task-collection" aria-labelledby="task-collection-heading">
@@ -100,7 +148,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     </div>
     <nav className="focus-task-views" aria-label="Task views">{views.map(([id, label]) =>
       <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
-        {label}<span>{filterTasksForView(tasks, id, "").length}</span>
+        {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
