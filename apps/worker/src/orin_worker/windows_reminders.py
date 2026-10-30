@@ -155,10 +155,14 @@ def _validate_notification_policy(prefs: dict[str, object]) -> None:
     """Reject malformed policy rather than silently bypassing quiet/Focus rules."""
     if type(prefs.get("enabled")) is not bool:
         raise ValueError("Invalid notification enabled preference")
+    # Explicit opt-out always clears the queue, even if other policy fields
+    # are malformed. No toast is possible in the disabled state.
+    if not prefs["enabled"]:
+        return
     categories = prefs.get("categories")
     if not isinstance(categories, list) or any(type(item) is not str for item in categories):
         raise ValueError("Invalid notification categories")
-    if not prefs["enabled"] or "tasks" not in categories:
+    if "tasks" not in categories:
         return
     if type(prefs.get("quiet_enabled")) is not bool or type(prefs.get("respect_focus")) is not bool:
         raise ValueError("Invalid notification suppression preferences")
