@@ -27,7 +27,7 @@ pydantic==2.14.1
 pydantic-settings==2.15.0
 pydantic_core==2.50.1
 PyJWT==2.15.1
-pypdf==6.21.2
+pypdf==6.21.3
 python-dotenv==1.2.4
 python-multipart==0.0.32
 SQLAlchemy==2.1.4
