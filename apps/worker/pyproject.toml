@@ -11,6 +11,7 @@ dependencies = ["httpx>=0.28,<1.0", "pydantic>=2.7,<3.0", "tzdata>=2025.2; sys_p
 [project.scripts]
 orin-worker = "orin_worker.main:main"
 orin-windows-reminders = "orin_worker.windows_reminders:main"
+orin-windows-reminders-check = "orin_worker.windows_reminders:check_toast_registration"
 
 [tool.setuptools.packages.find]
 where = ["src"]
