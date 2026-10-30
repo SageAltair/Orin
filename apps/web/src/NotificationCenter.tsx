@@ -120,6 +120,22 @@ export function NotificationCenter({
         }
       });
     if (!pending.length) return;
+    // Only suppress repeats after a browser channel actually accepts the
+    // alert. Permission denial, unsupported APIs and blocked audio must not
+    // silently consume the reminder's one-time interruption attempt.
+    const rememberAccepted = () => {
+      for (const item of pending) {
+        try {
+          sessionStorage.setItem(
+            `orin:alert:${item.id}:${item.revision}`,
+            "seen",
+          );
+        } catch {
+          /* Inbox remains available. */
+        }
+      }
+    };
+    let browserAccepted = false;
     if (
       policy.browser_alerts &&
       "Notification" in window &&
@@ -135,20 +151,16 @@ export function NotificationCenter({
           setOpen(true);
           alert.close();
         };
+        browserAccepted = true;
       } catch {
         /* Some browsers require service-worker delivery. */
       }
     }
-    if (policy.sound) void playReminderSound().catch(() => undefined);
-    for (const item of pending) {
-      try {
-        sessionStorage.setItem(
-          `orin:alert:${item.id}:${item.revision}`,
-          "seen",
-        );
-      } catch {
-        /* Inbox remains available. */
-      }
+    if (browserAccepted) rememberAccepted();
+    if (policy.sound) {
+      void playReminderSound()
+        .then(() => { if (!browserAccepted) rememberAccepted(); })
+        .catch(() => undefined);
     }
   }, [items, policy.enabled, policy.categories, policy.browser_alerts, policy.sound]);
   // The API orders newest due date first; the last eligible record is
