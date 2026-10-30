@@ -1,6 +1,30 @@
 import { expect, test } from "@playwright/test";
 
 test("web reminders include older unread records and show the oldest eligible follow-up", async ({ page }) => {
+  // Permission denial must not consume the only interruption attempt.
+  // Use a fake Notification API to avoid real browser/OS notifications.
+  await page.addInitScript(() => {
+    class FakeNotification {
+      static get permission() {
+        return sessionStorage.getItem("test:notification-permission") ?? "denied";
+      }
+      onclick: (() => void) | null = null;
+      constructor() {
+        const previous = Number(sessionStorage.getItem("test:notifications-shown") ?? "0");
+        sessionStorage.setItem("test:notifications-shown", String(previous + 1));
+      }
+      close() {}
+    }
+    Object.defineProperty(window, "Notification", { configurable: true, value: FakeNotification });
+    // Simulate autoplay blocking the sound fallback without touching real audio.
+    class BlockedAudioContext {
+      constructor() {
+        sessionStorage.setItem("test:audio-blocked", "yes");
+        throw new Error("Audio playback requires a user gesture");
+      }
+    }
+    Object.defineProperty(window, "AudioContext", { configurable: true, value: BlockedAudioContext });
+  });
   const now = "2026-10-30T12:00:00Z";
   const reminders = Array.from({ length: 225 }, (_, index) => ({
     id: `reminder-${index}`,
@@ -37,7 +61,7 @@ test("web reminders include older unread records and show the oldest eligible fo
       enabled: true, categories: ["tasks"], persistent: true, repeat_minutes: 15,
       max_repeats: 3, timezone: "UTC", quiet_enabled: false,
       quiet_start: "22:00", quiet_end: "07:00", respect_focus: true,
-      browser_alerts: false, sound: false,
+      browser_alerts: true, sound: true,
     } });
     if (pathname === "/api/v1/notifications") {
       const offset = Number(url.searchParams.get("offset") ?? 0);
@@ -61,6 +85,16 @@ test("web reminders include older unread records and show the oldest eligible fo
   await expect(bell).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Persistent follow-up" })
     .getByText("Reminder 224", { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("test:audio-blocked"))).toBe("yes");
+  expect(await page.evaluate(() => sessionStorage.getItem("orin:alert:reminder-224:1"))).toBeNull();
+  expect(await page.evaluate(() => sessionStorage.getItem("test:notifications-shown"))).toBeNull();
+  await page.evaluate(() => {
+    sessionStorage.setItem("test:notification-permission", "granted");
+    window.dispatchEvent(new Event("orin-notification-preferences"));
+  });
+  await expect.poll(() => page.evaluate(() =>
+    sessionStorage.getItem("orin:alert:reminder-224:1"))).toBe("seen");
+  expect(await page.evaluate(() => sessionStorage.getItem("test:notifications-shown"))).toBe("1");
   await bell.click();
   const panel = page.getByRole("region", { name: "Your reminders" });
   await expect(panel.getByText("Reminder 224", { exact: true })).toHaveCount(0);
