@@ -327,5 +327,5 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
   await workspace.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
-  await expect(workspace.getByText("Scheduled task updated")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
 });
