@@ -30,7 +30,8 @@ def api(tasks: list[dict[str, object]], *, enabled=True, categories=None, owner=
         status=200, prefs_extra=None, focus_session=None, focus_status=200,
         focus_payload=None) -> httpx.Client:
     prefs = {"enabled": enabled, "categories": categories if categories is not None else ["tasks"],
-             "quiet_enabled": False, "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00"}
+             "quiet_enabled": False, "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00",
+             "respect_focus": True}
     prefs.update(prefs_extra or {})
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -150,6 +151,37 @@ def test_durable_queue_and_account_isolation(tmp_path):
     other = ReminderLedger(path, "98ab1b6f-1d12-47c0-8f5a-4f70c9329e9c", WORKSPACE)
     assert other.db.execute("SELECT count(*) FROM reminders").fetchone()[0] == 0
     other.close()
+
+
+@pytest.mark.parametrize("override", [
+    {"enabled": "true"},
+    {"categories": "tasks"},
+    {"categories": [1, "tasks"]},
+    {"respect_focus": None},
+    {"respect_focus": "false"},
+    {"quiet_enabled": "false"},
+    {"quiet_start": "99:00"},
+    {"quiet_end": "12:99"},
+    {"timezone": "Not/A_Timezone"},
+])
+def test_malformed_notification_policy_fails_closed_without_queue_mutation(tmp_path, override):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    with api([task("a", NOW + 60)], prefs_extra=override) as client:
+        with pytest.raises(ValueError, match="Invalid notification"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert queue.due(NOW) == [("previous", NOW + 60)]
+    queue.close()
+
+
+def test_disabled_policy_does_not_require_suppression_fields(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], enabled=False, prefs_extra={
+        "respect_focus": None, "quiet_start": None, "categories": "malformed",
+    }) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast")) == 0
+    assert queue.due(NOW) == []
+    queue.close()
 
 
 def test_disabled_preferences_clear_stale_alerts(tmp_path):
@@ -343,7 +375,10 @@ def test_overlapping_task_pages_abort_before_delivery(tmp_path):
         if request.url.path.endswith("/auth/me"):
             return httpx.Response(200, json={"id": OWNER})
         if request.url.path.endswith("/notifications/preferences"):
-            return httpx.Response(200, json={"enabled": True, "categories": ["tasks"]})
+            return httpx.Response(200, json={"enabled": True, "categories": ["tasks"],
+                                            "respect_focus": True, "quiet_enabled": False,
+                                            "timezone": "UTC", "quiet_start": "22:00",
+                                            "quiet_end": "07:00"})
         return httpx.Response(200, json=first if request.url.params["offset"] == "0" else second)
     with httpx.Client(base_url="https://orin.example/api/v1", transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ValueError, match="Overlapping"):
