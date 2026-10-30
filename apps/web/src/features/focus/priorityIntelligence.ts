@@ -48,11 +48,25 @@ export interface PriorityRecommendation {
 const weights: Record<PriorityLevel, number> = { low: 0, normal: 20, high: 40, urgent: 60 };
 const finished = (status: PriorityTaskStatus) => status === "done" || status === "cancelled";
 const instant = (value: string | null | undefined): number | null => {
-  // Require a timezone-bearing instant; never interpret a server wall time in
-  // the browser's local timezone, which varies between devices and DST rules.
-  if (!value || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  // Require an explicit offset. Accept microseconds from the Python API but
+  // reject calendar rollover, invalid offsets and device-local wall times.
+  const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})$/);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction, zone] = match;
+  const [year, month, day, hour, minute, second] =
+    [yearText, monthText, dayText, hourText, minuteText, secondText ?? "0"].map(Number);
+  if (year < 1000) return null;
+  const wall = Date.UTC(year, month - 1, day, hour, minute, second, Number((fraction ?? "").slice(0, 3).padEnd(3, "0")));
+  const check = new Date(wall);
+  if (check.getUTCFullYear() !== year || check.getUTCMonth() + 1 !== month ||
+      check.getUTCDate() !== day || check.getUTCHours() !== hour ||
+      check.getUTCMinutes() !== minute || check.getUTCSeconds() !== second) return null;
+  if (zone === "Z") return wall;
+  const hours = Number(zone.slice(1, 3));
+  const mins = Number(zone.slice(4, 6));
+  if (hours > 14 || mins > 59 || (hours === 14 && mins !== 0)) return null;
+  const offset = (zone[0] === "+" ? 1 : -1) * (hours * 60 + mins) * 60_000;
+  return wall - offset;
 };
 const minutes = (value: number | null | undefined): number | null =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
