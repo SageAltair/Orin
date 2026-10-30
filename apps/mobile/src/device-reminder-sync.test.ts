@@ -109,12 +109,25 @@ describe("future task device reminder synchronization", () => {
       [{ ...task("bad", due), status: "unknown" }],
       [task("bad", "2026-11-02T12:00:00")],
       [task("bad", "invalidZ")],
+      [task("bad", "2026-02-31T12:00:00Z")],
+      [task("bad", "2027-02-29T12:00:00Z")],
+      [task("bad", "2026-10-30T12:00:00+15:00")],
       Array.from({ length: 101 }, (_, i) => task(String(i), due)),
     ]) {
       vi.mocked(request).mockReset().mockResolvedValueOnce(bad as never);
       await expect(fetchDeviceReminderTasks(now)).rejects.toThrow(/invalid (record|page)/);
     }
     expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("accepts valid leap days, server microseconds and legal timezone offsets", async () => {
+    const valid = [
+      task("leap", "2028-02-29T12:00:00Z"),
+      task("offset", "2026-10-30T15:00:00.123456+03:00"),
+      task("max-offset", "2026-11-02T12:00:00+14:00"),
+    ];
+    vi.mocked(request).mockResolvedValueOnce(valid as never);
+    expect(await fetchDeviceReminderTasks(now)).toEqual(valid);
   });
 
   it("accepts exactly 10,000 tasks only after an empty boundary probe", async () => {
@@ -390,8 +403,12 @@ describe("paginated device notification inbox", () => {
       { ...valid, revision: 1.5 },
       { ...valid, due_at: "2026-11-02T12:00:00" },
       { ...valid, due_at: "invalidZ" },
+      { ...valid, due_at: "2026-02-31T12:00:00Z" },
+      { ...valid, due_at: "2026-10-30T12:00:00+15:00" },
       { ...valid, read_at: "not-a-date" },
+      { ...valid, read_at: "2026-04-31T12:00:00Z" },
       { ...valid, snoozed_until: "2026-11-02T12:00:00" },
+      { ...valid, snoozed_until: "2027-02-29T12:00:00Z" },
       { ...valid, source_id: 123 },
     ]) {
       vi.mocked(request).mockReset().mockImplementation(async (path) => {
@@ -408,7 +425,7 @@ describe("paginated device notification inbox", () => {
   it("accepts timezone-aware inbox dates and optional timestamps", async () => {
     const valid = {
       ...reminder("valid"),
-      due_at: "2026-11-02T15:00:00+03:00",
+      due_at: "2026-11-02T15:00:00.123456+03:00",
       read_at: "2026-10-29T12:00:00Z",
       snoozed_until: "2026-11-03T15:00:00+03:00",
     };
