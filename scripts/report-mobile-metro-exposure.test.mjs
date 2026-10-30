@@ -18,6 +18,8 @@ test("reports watched packages without claiming a clean runtime", () => {
     assert.equal(report.audited_packages[name].observed_in_js_graph, true);
     assert.equal(report.audited_packages[name].source_occurrences, 1);
   }
+  assert.deepEqual(report.audited_packages["@expo/cli"].sample_package_paths, ["@expo/cli/build/index.js"]);
+  assert.deepEqual(report.audited_packages.deepmerge.sample_package_paths, ["deepmerge/index.js"]);
   assert.match(report.limitation, /not proof/);
 });
 
@@ -27,6 +29,7 @@ test("handles indexed maps and Windows-style paths", () => {
     { map: { sources: ["src/App.tsx"] } },
   ] }]);
   assert.equal(report.audited_packages.zod.source_occurrences, 1);
+  assert.deepEqual(report.audited_packages.zod.sample_package_paths, ["zod/v4/index.ts"]);
   assert.equal(report.audited_packages.deepmerge.observed_in_js_graph, false);
 });
 
