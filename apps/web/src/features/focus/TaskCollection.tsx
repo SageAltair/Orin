@@ -3,7 +3,7 @@ import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
 import { filterTasksForView, type TaskView } from "./taskViews";
 import { blankTaskDraft, draftFromTask, nextTaskStatus, taskPayload, type TaskDraft } from "./taskEditor";
-import { fetchAllPages } from "./taskPagination";
+import { fetchAllPagesWithIdentityCheck } from "./taskPagination";
 import { PriorityOverview } from "./PriorityOverview";
 import type { PriorityGuidanceMode } from "./priorityIntelligence";
 import "./task-workspace.css";
@@ -14,13 +14,13 @@ const views: Array<[TaskView, string]> = [
 ];
 const errorMessage = (value: unknown, fallback: string) => value instanceof ApiError ? value.message : value instanceof Error ? value.message : fallback;
 
-const fetchAllTasks = () => fetchAllPages<Task>(
+const fetchAllTasks = () => fetchAllPagesWithIdentityCheck<Task>(
   (offset, limit) => request<Task[]>(`/tasks?limit=${limit}&offset=${offset}`), "tasks",
-  100, 50, (task) => task.id,
+  (task) => task.id,
 );
-const fetchAllProjects = () => fetchAllPages<Project>(
+const fetchAllProjects = () => fetchAllPagesWithIdentityCheck<Project>(
   (offset, limit) => request<Project[]>(`/projects?limit=${limit}&offset=${offset}`), "projects",
-  100, 50, (project) => project.id,
+  (project) => project.id,
 );
 
 export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
