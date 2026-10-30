@@ -822,13 +822,13 @@ def test_registration_diagnostic_fails_closed_without_modifying_shortcut(tmp_pat
     monkeypatch.setattr(windows_reminders.subprocess, "run",
                         lambda *args, **kwargs: (_ for _ in ()).throw(
                             subprocess.CalledProcessError(1, "powershell.exe")))
-    with pytest.raises(SystemExit, match="no changes were made"):
+    with pytest.raises(SystemExit, match=r"CalledProcessError.*no changes were made"):
         check_toast_registration()
     monkeypatch.setattr(windows_reminders, "_toast_identity",
                         lambda: (_ for _ in ()).throw(RuntimeError("missing shortcut")))
     monkeypatch.setattr(windows_reminders.subprocess, "run",
                         lambda *args, **kwargs: pytest.fail("no process without shortcut"))
-    with pytest.raises(SystemExit, match="no changes were made"):
+    with pytest.raises(SystemExit, match=r"RuntimeError.*no changes were made"):
         check_toast_registration()
 
 
