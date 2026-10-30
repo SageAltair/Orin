@@ -25,7 +25,7 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   many offset-pagination shifts caused by concurrent edits or deletions, but
   cannot provide a database snapshot or guarantee against all races. A changed
   read fails closed and retries on the next poll without consuming reminders.
-  Large lists require additional API requests.
+  Large lists require additional API requests. Before each due toast, another authenticated scan verifies that due tasks remain active with unchanged deadlines. This is a best-effort check, not an atomic guarantee against edits after the scan.
 - Opting out of tasks notifications clears the local queue on the next
   successful sync. Quiet hours are respected. No silent/DND bypass.
 - When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions/active` endpoint before a due alert. Unlike the 50-row Focus history, this owner-scoped endpoint includes older active sessions, even without an associated task, and expires elapsed sessions. Active sessions suppress delivery; missing, malformed or unavailable Focus state fails closed. This requires an API version with the active-state endpoint. Tests do not establish real Windows acceptance.
