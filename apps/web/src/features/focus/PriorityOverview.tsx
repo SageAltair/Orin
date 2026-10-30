@@ -10,12 +10,15 @@ const loadOwnerTasks = () => fetchAllPages<OwnedTask>(
   "priority tasks", 100, 50, item => item.id,
 );
 
-export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask }: {
+export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask, onScheduleTask, onCompleteTask, actionsBusy = false }: {
   tasks: Task[];
   activeWorkspaceId: string;
   mode: PriorityGuidanceMode;
   now: Date;
   onEditTask?: (task: Task) => void;
+  onScheduleTask?: (taskId: string) => void;
+  onCompleteTask?: (task: Task) => void;
+  actionsBusy?: boolean;
 }) {
   const [includeAll, setIncludeAll] = useState(false);
   const [remoteTasks, setRemoteTasks] = useState<OwnedTask[]>([]);
@@ -93,8 +96,14 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
             </span></div>
           <div className="focus-priority-row-actions">
             <small>{item.reasons[0] ?? (task.priority === "urgent" ? "Marked urgent" : task.priority === "high" ? "Marked high priority" : "For planning")}</small>
-            {onEditTask && item.workspaceId === currentId && <button type="button"
-              aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)}>Edit task</button>}
+            {item.workspaceId === currentId && <>
+              {onEditTask && <button type="button" disabled={actionsBusy}
+                aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)}>Edit task</button>}
+              {onScheduleTask && <button type="button" disabled={actionsBusy}
+                aria-label={`Schedule ${task.title}`} onClick={() => onScheduleTask(task.id)}>Schedule</button>}
+              {onCompleteTask && <button type="button" disabled={actionsBusy}
+                aria-label={`Mark ${task.title} done`} onClick={() => onCompleteTask(task)}>Mark done</button>}
+            </>}
           </div>
         </li>;
       })}
