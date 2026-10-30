@@ -7,6 +7,14 @@ const MAX_PAGES = 100;
 const INBOX_PAGE_SIZE = 200;
 const MAX_INBOX_PAGES = 50;
 
+// A malformed inbox timestamp can otherwise be silently ignored by the
+// planner, cancelling a previously scheduled OS alert on the next sync.
+function isAwareTimestamp(value: unknown): value is string {
+  return typeof value === "string" &&
+    /(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) &&
+    Number.isFinite(Date.parse(value));
+}
+
 // The owner-scoped API has offset pagination but no date filter or total count.
 // Fetch every page before touching OS schedules so a network failure cannot
 // silently cancel previously scheduled reminders.
@@ -63,7 +71,13 @@ export async function fetchDeviceReminderInbox(): Promise<Reminder[]> {
       throw new Error("Notification inbox returned an invalid page.");
     }
     for (const reminder of rows) {
-      if (!reminder || typeof reminder.id !== "string") {
+      if (!reminder || typeof reminder.id !== "string" || !reminder.id ||
+          typeof reminder.category !== "string" || !reminder.category ||
+          !Number.isInteger(reminder.revision) || reminder.revision < 0 ||
+          !isAwareTimestamp(reminder.due_at) ||
+          (reminder.read_at !== null && !isAwareTimestamp(reminder.read_at)) ||
+          (reminder.snoozed_until !== null && !isAwareTimestamp(reminder.snoozed_until)) ||
+          (reminder.source_id !== null && typeof reminder.source_id !== "string")) {
         throw new Error("Notification inbox returned an invalid record.");
       }
       if (seen.has(reminder.id)) {
