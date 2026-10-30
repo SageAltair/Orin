@@ -140,7 +140,7 @@ export function NotificationCenter({
   // The API orders newest due date first. Surface the oldest ready
   // commitment rather than letting a future-heavy first page hide it.
   const urgent = policy.persistent
-    ? items.findLast((i) => i.attention_ready && !i.read_at)
+    ? [...items].reverse().find((i) => i.attention_ready && !i.read_at)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
