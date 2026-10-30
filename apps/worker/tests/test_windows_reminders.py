@@ -389,6 +389,56 @@ def test_live_policy_recheck_prevents_toast_after_mid_scan_change(tmp_path, chan
     queue.close()
 
 
+@pytest.mark.parametrize("change", ["disabled", "focus_started", "quiet_started"])
+def test_final_task_scan_suppression_change_never_emits_stale_toast(tmp_path, change):
+    """A policy or Focus change during the final task read must win over toast."""
+    queue = ledger(tmp_path)
+    state = {"enabled": True, "focus_active": False, "quiet_enabled": False}
+    requests = {"tasks": 0, "preferences": 0, "focus": 0}
+    alerts = []
+
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            requests["preferences"] += 1
+            return httpx.Response(200, json={
+                "enabled": state["enabled"], "categories": ["tasks"],
+                "quiet_enabled": state["quiet_enabled"],
+                "timezone": "UTC", "quiet_start": "11:00", "quiet_end": "13:00",
+                "respect_focus": True,
+            })
+        if request.url.path.endswith("/tasks"):
+            requests["tasks"] += 1
+            if requests["tasks"] == 2:
+                # The initial scan succeeded; policy changes before delivery.
+                if change == "disabled":
+                    state["enabled"] = False
+                elif change == "focus_started":
+                    state["focus_active"] = True
+                else:
+                    state["quiet_enabled"] = True
+            return httpx.Response(200, json=[task("a", NOW + 60)])
+        if request.url.path.endswith("/focus-sessions/active"):
+            requests["focus"] += 1
+            return httpx.Response(200, json={"active": state["focus_active"]})
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        assert run_once(client, queue, now=NOW,
+                        notify=lambda: alerts.append("toast")) == 0
+    assert requests["tasks"] == 2
+    assert requests["preferences"] == 2
+    assert requests["focus"] == (1 if change == "focus_started" else 0)
+    assert alerts == []
+    if change == "disabled":
+        assert queue.due(NOW) == []
+    else:
+        assert queue.due(NOW) == [("a", NOW + 60)]
+    queue.close()
+
+
 @pytest.mark.parametrize("auth_change", ["revoked", "wrong_owner"])
 def test_live_auth_recheck_clears_queue_after_mid_scan_session_change(tmp_path, auth_change):
     queue = ledger(tmp_path)
