@@ -197,22 +197,15 @@ def _focus_active(client: httpx.Client) -> bool:
     return any(item["status"] == "active" for item in sessions)
 
 
-def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
-    identity = client.get("/auth/me")
-    identity.raise_for_status()
-    account = identity.json()
-    if not isinstance(account, dict) or account.get("id") != owner_id:
-        raise PermissionError("Authenticated owner differs from the configured owner")
-    response = client.get("/notifications/preferences")
-    response.raise_for_status()
-    prefs = response.json()
-    if not isinstance(prefs, dict):
-        raise ValueError("Invalid notification preferences")
-    _validate_notification_policy(prefs)
-    if not prefs["enabled"] or "tasks" not in prefs["categories"]:
-        return {}, prefs
+def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, tuple[object, object]], int]:
+    """Read every task page, including identities of completed tasks.
 
+    Signatures let a second scan detect deletions or updates that shift offset
+    pages without producing an overlapping ID. This is best-effort consistency,
+    not a database snapshot or a guarantee against simultaneous identical edits.
+    """
     tasks: dict[str, int] = {}
+    signatures: dict[str, tuple[object, object]] = {}
     seen: set[str] = set()
     for page in range(1000):
         response = client.get(
@@ -234,14 +227,39 @@ def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now:
             if item["id"] in seen:
                 raise ValueError("Overlapping task pages")
             seen.add(item["id"])
+            signatures[item["id"]] = (item["status"], item.get("due_at"))
             if item.get("status") in {"done", "cancelled"} or item.get("due_at") is None:
                 continue
             due = _due_epoch(item["due_at"])
             if due >= now - MAX_AGE_SECONDS:
                 tasks[item["id"]] = due
         if len(items) < PAGE_SIZE:
-            return tasks, prefs
+            return tasks, signatures, page + 1
     raise ValueError("Task pagination limit reached")
+
+def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
+    identity = client.get("/auth/me")
+    identity.raise_for_status()
+    account = identity.json()
+    if not isinstance(account, dict) or account.get("id") != owner_id:
+        raise PermissionError("Authenticated owner differs from the configured owner")
+    response = client.get("/notifications/preferences")
+    response.raise_for_status()
+    prefs = response.json()
+    if not isinstance(prefs, dict):
+        raise ValueError("Invalid notification preferences")
+    _validate_notification_policy(prefs)
+    if not prefs["enabled"] or "tasks" not in prefs["categories"]:
+        return {}, prefs
+
+    tasks, signatures, pages = _scan_task_pages(client, owner_id, workspace_id, now)
+    if pages > 1:
+        # An offset shift can omit a task without repeating an ID. Confirm the
+        # full identity/status/deadline set before replacing durable reminders.
+        _, confirmed, _ = _scan_task_pages(client, owner_id, workspace_id, now)
+        if signatures != confirmed:
+            raise ValueError("Tasks changed during pagination; retry before scheduling")
+    return tasks, prefs
 
 
 @contextmanager
