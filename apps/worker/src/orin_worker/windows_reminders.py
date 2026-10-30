@@ -308,7 +308,13 @@ def single_instance(path: Path):
 
 def _toast_environment() -> dict[str, str]:
     # Do not inherit the user's bearer token into the PowerShell toast process.
-    allowed = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}
+    # Shell.Application COM shortcut lookup needs the interactive Windows profile.
+    # Keep only OS/profile paths, never bearer tokens or arbitrary app settings.
+    allowed = {
+        "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC",
+        "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+        "PROGRAMDATA",
+    }
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
