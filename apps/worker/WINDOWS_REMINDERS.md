@@ -48,10 +48,48 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   `System.AppUserModel.ID` before calling `Show`. It resolves Windows PowerShell
   from the OS-reported system directory instead of searching `PATH`, and fails
   closed if the system executable is unavailable. It does not install or
-  register a shortcut. These guards are covered only by isolated tests.
+  register a shortcut. An explicitly invoked, opt-in registration utility
+  is now available; it never runs automatically.
 - Toast transport still requires an interactive user session and OS acceptance.
   It has **not** been verified on a real Windows desktop. Do not treat subprocess
   success as visible delivery.
+
+## Explicit per-user shortcut registration (opt-in only)
+
+On the signed-in Windows desktop, activate the **isolated worker virtual
+environment** and choose its actual Python executable. Preview or install the
+Orin-owned shortcut (no elevation, no service, no scheduled task, no API token):
+
+~~~powershell
+$python = (Get-Command python).Source
+.\apps\worker\scripts\register-windows-reminder-shortcut.ps1 -Install -PythonPath $python -WhatIf
+.\apps\worker\scripts\register-windows-reminder-shortcut.ps1 -Install -PythonPath $python
+~~~
+
+The script creates only the current user's
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Orin Task Reminders.lnk
+with the Oddly.Orin.Reminders AppUserModelID. Its target is the chosen Python
+executable and its arguments are only -m orin_worker.windows_reminders.
+No credentials, environment secrets, auto-start entry, service or scheduled
+task are written. It will not replace an existing unrelated or differently
+configured shortcut. Repeating installation is a no-op if identity, target
+and arguments already match. To remove **only** a matching Orin shortcut:
+
+~~~powershell
+.\apps\worker\scripts\register-windows-reminder-shortcut.ps1 -Remove
+~~~
+
+After installation, configure ORIN_WINDOWS_REMINDERS_APP_ID=Oddly.Orin.Reminders
+and ORIN_WINDOWS_REMINDERS_SHORTCUT to the absolute path shown by the script,
+then run orin-windows-reminders-check. This confirms the shortcut metadata,
+**not** visible delivery. The foreground companion still needs explicit opt-in,
+a short-lived token and real interactive acceptance; do not run it merely
+because the shortcut exists.
+
+Windows CI verifies creation, identity, idempotence, wrong-identity refusal,
+removal and -WhatIf **only inside a disposable runner profile**, never the
+runner's real Start Menu. It sends no toast. This does not establish behavior
+on the original Windows device.
 
 ## Read-only Windows shortcut diagnostic
 
@@ -87,7 +125,7 @@ Install the worker in a virtual environment and launch
 The shortcut must already exist in the current-user or all-users Start Menu
 Programs directory and expose that exact AppUserModelID. Missing, mismatched,
 or unregistered identity fails without marking any reminder as attempted.
-Do not create or install a shortcut during automated tests.
+Do not create or install a shortcut in a real user's Start Menu during automated tests; CI uses only a disposable runner profile.
 Use an HTTPS API, or loopback HTTP for local development. Do not put bearer
 tokens into tracked scripts, PowerShell history, screenshots, or logs.
 
