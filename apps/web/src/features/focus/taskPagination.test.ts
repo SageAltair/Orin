@@ -28,4 +28,19 @@ describe("task workspace pagination", () => {
     });
     await expect(fetchAllPages(fetchPage, "projects")).rejects.toThrow("Network unavailable");
   });
+
+  it("rejects overlapping task identities after an offset page shifts", async () => {
+    const first = [{ id: "a" }, { id: "b" }];
+    const fetchPage = vi.fn(async (offset: number) => offset === 0 ? first : [{ id: "b" }]);
+    await expect(fetchAllPages(fetchPage, "tasks", 2, 5, (row) => row.id))
+      .rejects.toThrow("Overlapping tasks pages");
+  });
+
+  it("rejects invalid project identities and malformed pages", async () => {
+    const badId = vi.fn(async () => [{ id: "" }]);
+    await expect(fetchAllPages(badId, "projects", 2, 5, (row) => row.id))
+      .rejects.toThrow("Invalid projects record");
+    const badPage = vi.fn(async () => ({ unexpected: true } as never));
+    await expect(fetchAllPages(badPage, "tasks")).rejects.toThrow("Invalid tasks page");
+  });
 });

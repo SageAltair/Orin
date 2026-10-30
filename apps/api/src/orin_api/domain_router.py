@@ -1258,7 +1258,7 @@ def list_projects(
     statement = select(Project).where(Project.owner_id == user.id, workspace_scope)
     if status_filter is not None:
         statement = statement.where(Project.status == status_filter)
-    return list(session.scalars(statement.order_by(Project.updated_at.desc()).limit(limit).offset(offset)).all())
+    return list(session.scalars(statement.order_by(Project.updated_at.desc(), Project.id.asc()).limit(limit).offset(offset)).all())
 
 
 @router.post("/projects", response_model=ProjectRead, status_code=status.HTTP_201_CREATED)
@@ -1367,7 +1367,7 @@ def list_tasks(
         statement = statement.where(Task.status == status_filter)
     if project_id is not None:
         statement = statement.where(Task.project_id == project_id)
-    return list(session.scalars(statement.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc()).limit(limit).offset(offset)).all())
+    return list(session.scalars(statement.order_by(Task.due_at.asc().nulls_last(), Task.created_at.desc(), Task.id.asc()).limit(limit).offset(offset)).all())
 
 
 def validate_task_links(session: Session, user_id: uuid.UUID, project_id: uuid.UUID | None, assignee_id: uuid.UUID | None, milestone_id: uuid.UUID | None = None) -> None:
