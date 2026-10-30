@@ -34,9 +34,10 @@ describe("priority outlook", () => {
       onEditTask={() => undefined} onScheduleTask={() => undefined}
       onCompleteTask={() => undefined} actionsBusy
     />);
-    expect(html).toContain('disabled="" aria-label="Edit Busy commitment"');
-    expect(html).toContain('disabled="" aria-label="Schedule Busy commitment"');
-    expect(html).toContain('disabled="" aria-label="Mark Busy commitment done"');
+    for (const label of ["Edit Busy commitment", "Schedule Busy commitment", "Mark Busy commitment done"]) {
+      const button = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))?.[0];
+      expect(button).toContain('disabled=""');
+    }
   });
 
   it("labels planning-only without promising device alerts", () => {
