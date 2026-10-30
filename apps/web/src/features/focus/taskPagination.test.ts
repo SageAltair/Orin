@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchAllPages } from "./taskPagination";
+import { fetchAllPages, fetchAllPagesWithIdentityCheck } from "./taskPagination";
 
 describe("task workspace pagination", () => {
   it("loads every page, including project choices beyond the first hundred", async () => {
@@ -34,6 +34,54 @@ describe("task workspace pagination", () => {
     const fetchPage = vi.fn(async (offset: number) => offset === 0 ? first : [{ id: "b" }]);
     await expect(fetchAllPages(fetchPage, "tasks", 2, 5, (row) => row.id))
       .rejects.toThrow("Overlapping tasks pages");
+  });
+
+  it("confirms the complete identity set for a stable multi-page inventory", async () => {
+    const records = Array.from({ length: 217 }, (_, index) => ({ id: "task-" + index }));
+    const fetchPage = vi.fn(async (offset: number, limit: number) => records.slice(offset, offset + limit));
+    expect(await fetchAllPagesWithIdentityCheck(fetchPage, "tasks", (row) => row.id))
+      .toEqual(records);
+    expect(fetchPage).toHaveBeenCalledTimes(6);
+  });
+
+  it("rejects a missing identity after a concurrent deletion shifts offsets", async () => {
+    const afterDeletion = ["b", "c", "d", "e"].map((id) => ({ id }));
+    let firstPage = true;
+    const fetchPage = vi.fn(async (offset: number, limit: number) => {
+      if (firstPage) {
+        firstPage = false;
+        return [{ id: "a" }, { id: "b" }];
+      }
+      return afterDeletion.slice(offset, offset + limit);
+    });
+    // First pass returns a,b,d,e with no overlap, silently omitting c.
+    // Second pass returns b,c,d,e, so the loader must reject the snapshot.
+    await expect(fetchAllPagesWithIdentityCheck(fetchPage, "tasks", (row) => row.id, 2, 5))
+      .rejects.toThrow("tasks changed during pagination");
+  });
+
+
+  it("confirms an exact full-page boundary after a deletion shift", async () => {
+    const afterDeletion = [{ id: "b" }, { id: "c" }];
+    let firstPage = true;
+    const fetchPage = vi.fn(async (offset: number, limit: number) => {
+      if (firstPage) {
+        firstPage = false;
+        return [{ id: "a" }, { id: "b" }];
+      }
+      return afterDeletion.slice(offset, offset + limit);
+    });
+    // The first page is full, but the deletion makes the boundary probe
+    // empty and hides c unless we confirm the full-page identity set.
+    await expect(fetchAllPagesWithIdentityCheck(fetchPage, "tasks", (row) => row.id, 2, 5))
+      .rejects.toThrow("tasks changed during pagination");
+  });
+
+  it("avoids a second scan for a single-page collection", async () => {
+    const fetchPage = vi.fn(async () => [{ id: "one" }]);
+    expect(await fetchAllPagesWithIdentityCheck(fetchPage, "projects", (row) => row.id))
+      .toEqual([{ id: "one" }]);
+    expect(fetchPage).toHaveBeenCalledTimes(1);
   });
 
   it("rejects invalid project identities and malformed pages", async () => {
