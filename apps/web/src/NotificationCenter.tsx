@@ -37,9 +37,13 @@ export function NotificationCenter({
   const [error, setError] = useState("");
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
+  const inFlightRefresh = useRef<Promise<void> | null>(null);
   const refresh = (): Promise<void> => {
+    // A large inbox can take longer than the polling interval to confirm.
+    // Reuse the active scan instead of repeatedly invalidating its result.
+    if (inFlightRefresh.current) return inFlightRefresh.current;
     const generation = ++inboxGeneration.current;
-    return fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
+    const pending = fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
       request<Reminder[]>(`/notifications?limit=${limit}&offset=${offset}`))
       .then((rows) => {
         if (generation !== inboxGeneration.current) return;
@@ -49,7 +53,12 @@ export function NotificationCenter({
       .catch(() => {
         if (generation === inboxGeneration.current)
           setError("Reminders could not be refreshed.");
+      })
+      .finally(() => {
+        if (inFlightRefresh.current === pending) inFlightRefresh.current = null;
       });
+    inFlightRefresh.current = pending;
+    return pending;
   };
   useEffect(() => {
     void refresh();
