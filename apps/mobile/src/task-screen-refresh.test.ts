@@ -7,7 +7,7 @@ afterEach(() => vi.useRealTimers());
 describe("mobile Tasks foreground refresh", () => {
   it("updates the clock, polls only in the foreground, refreshes on resume and cleans up", () => {
     let foreground = true;
-    let resume = () => {};
+    let emitState = (_state: string) => {};
     const unsubscribe = vi.fn();
     const onClock = vi.fn();
     const onRefresh = vi.fn();
@@ -15,8 +15,8 @@ describe("mobile Tasks foreground refresh", () => {
       onClock,
       onRefresh,
       isForeground: () => foreground,
-      subscribeForeground: (callback) => {
-        resume = callback;
+      subscribeAppState: (callback) => {
+        emitState = callback;
         return unsubscribe;
       },
     });
@@ -30,12 +30,12 @@ describe("mobile Tasks foreground refresh", () => {
 
     foreground = false;
     vi.advanceTimersByTime(60_000);
-    resume();
+    emitState("background");
     expect(onClock).toHaveBeenCalledTimes(4);
     expect(onRefresh).toHaveBeenCalledTimes(1);
 
     foreground = true;
-    resume();
+    emitState("active");
     expect(onClock).toHaveBeenCalledTimes(5);
     expect(onRefresh).toHaveBeenCalledTimes(2);
 
