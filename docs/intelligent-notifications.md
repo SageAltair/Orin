@@ -27,15 +27,45 @@ Stubborn mode is off by default and requires an explicit saved choice. It adds a
 
 Browser alerts and sound are separate opt-ins. Browser permission is requested only on a user click. Alerts are grouped into one generic preview per refresh; task/note text is not copied into OS previews. A short optional in-app tone is subject to audio availability and autoplay rules. Browser alerts are best effort and require a supported browser with Orin open. The browser caches delivered revisions for the session to reduce duplicate alerts.
 
-## Platform limits
+## Platform delivery and limits
 
-The web app cannot override device mute, silent mode, Do Not Disturb or browser/OS notification settings. This release does not implement background web push, email, SMS, native alarm services, escalation calls or accountability contacts. No messages are sent to other people.
+**Browser:** In-app banners, optional sound and browser notification previews remain
+best-effort and require a supported browser with Orin open. They cannot override
+device mute, silent mode, Do Not Disturb or OS notification permissions. This
+release does not provide background web push, SMS, escalation calls or messages
+to accountability contacts.
 
-A native delivery layer would be separate work. Apple critical alerts require an Apple-issued entitlement and user authorization; approval for a productivity app cannot be assumed. Android notification-channel/DND exceptions depend on user settings, OS version and permitted native capabilities. Neither platform justifies a blanket promise of sound through every mute setting. The current UI states these limitations explicitly.
+**Android (opt-in local OS scheduling):** The mobile app can schedule generic
+local notifications through `expo-notifications` for the signed-in owner and
+active workspace after explicit device permission and an enabled notification
+channel. It plans at most 32 local alerts within the next seven days, refreshes
+from authenticated task and inbox snapshots, and clears stale scoped schedules
+on account/workspace changes or opt-out. It is not remote push delivery: new
+tasks created while the app stays closed may not be scheduled until a successful
+refresh. Device power, OS scheduling policy, channel settings and DND can delay
+or suppress alerts. **Physical Android delivery has not been accepted on a
+real device; no phone installation is authorized by this documentation.**
+
+**Windows (experimental foreground companion):** An explicitly opted-in
+foreground process can poll the authenticated API and attempt generic Windows
+toasts for due tasks. It requires a matching registered Start Menu shortcut and
+AppUserModelID, a current interactive user session, and valid owner/workspace
+credentials. It is **not** a background service or auto-start installation.
+The independently supplied token is not automatically revoked by browser
+logout, so the companion must be stopped on account change. CI verifies
+synthetic reminder logic and disposable shortcut registration, **not visible
+delivery on the original Windows computer**. See
+[Windows reminder acceptance](../apps/worker/WINDOWS_REMINDERS.md).
+
+Neither native path guarantees sound or visibility through silent/DND modes,
+a powered-off device, expired permissions or OS restrictions. Apple critical
+alerts require an Apple-issued entitlement and user authorization; no such
+entitlement or iOS critical-alert capability is claimed.
 
 Official platform references:
 - https://developer.apple.com/documentation/usernotifications/unauthorizationoptions/criticalalert
 - https://developer.android.com/develop/ui/views/notifications
+- https://learn.microsoft.com/en-us/windows/win32/shell/enable-desktop-toast-with-appusermodelid
 
 ## Operations and privacy
 
