@@ -43,7 +43,15 @@ jobs:
           $env:APPDATA = $profileRoot
           $env:ORIN_WINDOWS_REMINDERS_APP_ID = 'Oddly.Orin.Reminders'
           $env:ORIN_WINDOWS_REMINDERS_SHORTCUT = $shortcut
+          # Distinguish sanitized subprocess startup from COM shortcut probing.
+          python -c "from orin_worker.windows_reminders import _powershell_executable, _toast_environment; import subprocess; subprocess.run([_powershell_executable(), '-NoProfile', '-NonInteractive', '-Command', 'Write-Output subprocess-ready'], check=True, timeout=10, env=_toast_environment())"
+          $shell = New-Object -ComObject Shell.Application
+          $folder = $shell.Namespace((Split-Path -Parent $shortcut))
+          $registered = [string]$folder.ParseName((Split-Path -Leaf $shortcut)).ExtendedProperty('System.AppUserModel.ID')
+          if ($registered -cne 'Oddly.Orin.Reminders') { throw 'In-process registered AUMID mismatch.' }
+          Write-Output 'In-process shortcut AUMID verified in disposable profile.'
           orin-windows-reminders-check
+          if ($LASTEXITCODE -ne 0) { throw 'Python shortcut diagnostic failed.' }
           & $installer -Install -PythonPath $python -AppDataRoot $profileRoot
           try {
             & $installer -Remove -AppId 'Other.App.Identity' -AppDataRoot $profileRoot
