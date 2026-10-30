@@ -71,7 +71,7 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
   return <section className="focus-priority-overview" aria-labelledby="priority-overview-title">
     <div className="focus-priority-overview-heading">
       <div><h2 id="priority-overview-title">Priority outlook</h2>
-        <p>Suggested order based on importance, deadlines and known effort. Read-only, no alerts sent.</p></div>
+        <p>Suggested order based on importance, deadlines and known effort. Suggestions only. No automatic changes or alerts.</p></div>
       <span>{mode === "planning-only" ? "Planning-only" : mode === "proactive" ? "Proactive" : "Balanced"}</span>
     </div>
     <label className="focus-priority-scope">
