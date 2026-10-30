@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const timestamp = "2026-10-10T08:00:00Z";
 
-async function setupFocus(page: Page) {
+async function setupFocus(page: Page, priorityMode: "balanced" | "proactive" | "planning-only" = "balanced") {
   let task: Record<string, unknown> | null = null;
   let session: Record<string, unknown> | null = null;
   const collectionTasks: Record<string, unknown>[] = [
@@ -61,7 +61,7 @@ async function setupFocus(page: Page) {
     }
     if (pathname === "/api/v1/focus/now/drift" && method === "POST") return route.fulfill({ status: 201, json: { id: "drift-1" } });
     if (pathname === "/api/v1/focus/now/complete" && method === "POST") { task = null; session = null; return route.fulfill({ json: { task: null, focus_session: null, day_key: "2026-10-10", energy_level: "medium", empty_state: true } }); }
-    if (pathname === "/api/v1/users/me/preferences") { if (method === "PUT" || method === "PATCH") workspaceTheme = (await route.request().postDataJSON()).theme ?? workspaceTheme; return route.fulfill({ json: { density: "comfortable", theme: workspaceTheme, locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } }); }
+    if (pathname === "/api/v1/users/me/preferences") { if (method === "PUT" || method === "PATCH") workspaceTheme = (await route.request().postDataJSON()).theme ?? workspaceTheme; return route.fulfill({ json: { density: "comfortable", theme: workspaceTheme, locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {}, priority_guidance_mode: priorityMode } }); }
     if (pathname.endsWith("/tasks") || pathname.endsWith("/projects") || pathname.endsWith("/commands") || pathname.endsWith("/conversations")) return route.fulfill({ json: [] });
     if (pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname === "/api/v1/memories" || pathname === "/api/v1/approvals" || pathname === "/api/v1/devices") return route.fulfill({ json: [] });
@@ -330,12 +330,58 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
 });
 
+test("personal Tasks respects the account's persisted priority guidance mode", async ({ page }) => {
+  await setupFocus(page, "planning-only");
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  await expect(outlook.getByText("Planning-only")).toBeVisible();
+});
+
+test("all-workspace priorities revalidate after an explicit current-workspace completion", async ({ page }) => {
+  await setupFocus(page);
+  let completed = false;
+  let inventoryReads = 0;
+  await page.route("**/api/v1/priority/tasks?*", route => {
+    inventoryReads += 1;
+    return route.fulfill({ json: completed ? [] : [{
+      id: "inbox-task", title: "Ask the team about the venue", description: null,
+      status: "todo", priority: "normal", due_at: null, project_id: null,
+      workspace_id: "personal", created_at: timestamp, updated_at: timestamp,
+    }] });
+  });
+  await page.route("**/api/v1/workspaces", route => route.fulfill({
+    json: [{ id: "personal", name: "Personal" }],
+  }));
+  await page.route("**/api/v1/tasks/inbox-task", route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    completed = true;
+    return route.fulfill({ json: {
+      id: "inbox-task", title: "Ask the team about the venue", description: null,
+      status: "done", priority: "normal", due_at: null, project_id: null,
+      created_at: timestamp, updated_at: timestamp,
+    } });
+  });
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  await outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" }).check();
+  await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
+  await outlook.getByRole("button", { name: "Mark Ask the team about the venue done" }).click();
+  await expect(outlook.getByText("Ask the team about the venue")).toHaveCount(0);
+  expect(inventoryReads).toBeGreaterThanOrEqual(2);
+});
+
 test("priority outlook requires explicit cross-workspace opt-in and can return to private scope", async ({ page }) => {
   await setupFocus(page);
   await page.route("**/api/v1/priority/tasks?*", route => route.fulfill({ json: [{
     id: "work-deadline", title: "Work-only deadline", description: null, status: "todo",
     priority: "urgent", due_at: "2099-10-13T14:00:00Z", project_id: null,
     workspace_id: "work", created_at: timestamp, updated_at: timestamp,
+  }, {
+    id: "unscoped-deadline", title: "Legacy unscoped deadline", description: null,
+    status: "todo", priority: "high", due_at: "2099-10-13T14:00:00Z",
+    project_id: null, workspace_id: null, created_at: timestamp, updated_at: timestamp,
   }] }));
   await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [
     { id: "personal", name: "Personal" }, { id: "work", name: "Work" },
@@ -349,7 +395,15 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
   await optIn.check();
   await expect(outlook.getByText("Work-only deadline")).toBeVisible();
   await expect(outlook.locator(".focus-priority-list")).toContainText("Work");
+  const otherWorkspace = outlook.locator(".focus-priority-list li").filter({ hasText: "Work-only deadline" });
+  await expect(otherWorkspace.getByRole("button")).toHaveCount(0);
+  const unscoped = outlook.locator(".focus-priority-list li").filter({ hasText: "Legacy unscoped deadline" });
+  await expect(unscoped).toContainText("Unscoped task");
+  await expect(unscoped.getByRole("button")).toHaveCount(0);
   await optIn.uncheck();
   await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
   await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
+  await expect(outlook.getByRole("button", { name: "Schedule Ask the team about the venue" })).toBeVisible();
+  await outlook.getByRole("button", { name: "Mark Ask the team about the venue done" }).click();
+  await expect(outlook.getByText("Ask the team about the venue")).toHaveCount(0);
 });

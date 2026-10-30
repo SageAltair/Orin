@@ -1701,6 +1701,8 @@ export default function App() {
                     onSignOut={() => { void handleSignOut(); }}
                     embedded
                     onScheduleTask={scheduleTask}
+                    activeWorkspaceId={activeWorkspaceId}
+                    priorityGuidanceMode={preferences.priorityGuidanceMode}
                   /></div>
                 ) : (
                   <div data-orin-control="tasks-workspace" className="focus-shell focus-embedded"><TaskCollection

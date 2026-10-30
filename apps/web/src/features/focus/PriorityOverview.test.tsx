@@ -14,13 +14,30 @@ describe("priority outlook", () => {
     const html = renderToStaticMarkup(<PriorityOverview
       tasks={[makeTask("Current workspace commitment")]}
       activeWorkspaceId="work" mode="balanced" onEditTask={() => undefined}
+      onScheduleTask={() => undefined} onCompleteTask={() => undefined}
       now={new Date("2026-10-30T12:00:00Z")}
     />);
     expect(html).toContain("Current workspace commitment");
     expect(html).toContain("Include tasks from all my workspaces");
     expect(html).toContain("No automatic changes or alerts.");
     expect(html).toContain("Edit Current workspace commitment");
+    expect(html).toContain("Schedule Current workspace commitment");
+    expect(html).toContain("Mark Current workspace commitment done");
+    expect(html).toContain("Mark done");
     expect(html).not.toContain("checked");
+  });
+
+  it("disables task actions while another task mutation is in flight", () => {
+    const html = renderToStaticMarkup(<PriorityOverview
+      tasks={[makeTask("Busy commitment")]} activeWorkspaceId="work" mode="balanced"
+      now={new Date("2026-10-30T12:00:00Z")}
+      onEditTask={() => undefined} onScheduleTask={() => undefined}
+      onCompleteTask={() => undefined} actionsBusy
+    />);
+    for (const label of ["Edit Busy commitment", "Schedule Busy commitment", "Mark Busy commitment done"]) {
+      const button = html.match(new RegExp(`<button[^>]*aria-label="${label}"[^>]*>`))?.[0];
+      expect(button).toContain('disabled=""');
+    }
   });
 
   it("labels planning-only without promising device alerts", () => {
