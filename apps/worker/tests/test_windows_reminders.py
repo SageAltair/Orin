@@ -176,7 +176,7 @@ def test_malformed_notification_policy_fails_closed_without_queue_mutation(tmp_p
 def test_disabled_policy_does_not_require_suppression_fields(tmp_path):
     queue = ledger(tmp_path)
     with api([task("a", NOW + 60)], enabled=False, prefs_extra={
-        "respect_focus": None, "quiet_start": None,
+        "respect_focus": None, "quiet_start": None, "categories": "malformed",
     }) as client:
         assert run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast")) == 0
     assert queue.due(NOW) == []
