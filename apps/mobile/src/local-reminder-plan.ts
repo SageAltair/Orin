@@ -111,7 +111,16 @@ export function planLocalReminders(
     if (fireAt === null || fireAt > now + MAX_HORIZON_MS) return [];
     return [{ key: `task:${task.id}:${fireAt}`, fireAt }];
   }) : [];
+  // A quiet-hour boundary can move many reminders to the same minute.
+  // The OS message is generic, so one alert per instant is sufficient and
+  // avoids a burst of indistinguishable notifications when quiet hours end.
+  const scheduledTimes = new Set<number>();
   return [...fromInbox, ...fromTasks]
     .sort((a, b) => a.fireAt - b.fireAt || a.key.localeCompare(b.key))
+    .filter((item) => {
+      if (scheduledTimes.has(item.fireAt)) return false;
+      scheduledTimes.add(item.fireAt);
+      return true;
+    })
     .slice(0, MAX_REMINDERS);
 }
