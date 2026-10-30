@@ -20,7 +20,13 @@ const zoneDateTime = (date: Date, zone: string) => {
   const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}T${value.hour}:${value.minute}`;
 };
-const instantFromZoneInput = (value: string, zone: string) => {
+export const instantFromZoneInput = (value: string, zone: string, originalInstant?: string | null) => {
+  // Preserve a previously stored exact instant when editing unrelated fields.
+  // Otherwise a valid existing fall-back event could become impossible to save.
+  if (originalInstant) {
+    const original = new Date(originalInstant);
+    if (Number.isFinite(original.getTime()) && zoneDateTime(original, zone) === value) return originalInstant;
+  }
   const [datePart, timePart] = value.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
   const [hour, minute] = timePart.split(":").map(Number);
@@ -35,6 +41,24 @@ const instantFromZoneInput = (value: string, zone: string) => {
   }
   const instant = new Date(guess);
   if (zoneDateTime(instant, zone) !== value) throw new Error("That local time does not exist because of a daylight saving change.");
+  // A fall-back transition can represent the same wall time at two different
+  // UTC instants. Do not silently choose the earlier/later occurrence.
+  // Check offsets around the selected instant, including half-hour DST zones.
+  const offsetAt = (epoch: number) => {
+    const [date, time] = zoneDateTime(new Date(epoch), zone).split("T");
+    const [y, m, d] = date.split("-").map(Number);
+    const [h, min] = time.split(":").map(Number);
+    return (Date.UTC(y, m - 1, d, h, min) - Math.floor(epoch / 60_000) * 60_000) / 60_000;
+  };
+  const selectedOffset = offsetAt(guess);
+  for (const hours of [-48, -24, 24, 48]) {
+    const nearbyOffset = offsetAt(guess + hours * 60 * 60_000);
+    if (nearbyOffset === selectedOffset) continue;
+    const alternative = guess + (selectedOffset - nearbyOffset) * 60_000;
+    if (alternative !== guess && zoneDateTime(new Date(alternative), zone) === value) {
+      throw new Error("This time occurs twice when clocks change. Choose another time.");
+    }
+  }
   return instant.toISOString();
 };
 const eventStartDay = (event: CalendarEvent, zone: string) => event.is_all_day ? event.start_date! : new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(event.start_at!));
@@ -152,9 +176,10 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
     formEvent.preventDefault(); if (!draft) return;
     setBusy(true); setError(""); setNotice("");
     try {
+      const originalEvent = draft.id ? events.find(event => event.id === draft.id) : undefined;
       const payload = draft.isAllDay
         ? { title: draft.title, description: draft.description || null, project_id: draft.projectId || null, is_all_day: true, start_date: draft.date, end_date: draft.endDate, start_at: null, end_at: null, timezone: zone, reminder_minutes: draft.reminderMinutes ? Number(draft.reminderMinutes) : null }
-        : { title: draft.title, description: draft.description || null, project_id: draft.projectId || null, is_all_day: false, start_at: instantFromZoneInput(draft.start, zone), end_at: instantFromZoneInput(draft.end, zone), start_date: null, end_date: null, timezone: zone, reminder_minutes: draft.reminderMinutes ? Number(draft.reminderMinutes) : null };
+        : { title: draft.title, description: draft.description || null, project_id: draft.projectId || null, is_all_day: false, start_at: instantFromZoneInput(draft.start, zone, originalEvent?.start_at), end_at: instantFromZoneInput(draft.end, zone, originalEvent?.end_at), start_date: null, end_date: null, timezone: zone, reminder_minutes: draft.reminderMinutes ? Number(draft.reminderMinutes) : null };
       await request<CalendarEvent>(draft.id ? `/calendar/events/${draft.id}` : "/calendar/events", { method: draft.id ? "PATCH" : "POST", body: JSON.stringify(payload) });
       setDraft(null); setNotice(draft.id ? "Event updated." : "Event saved.");
       const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone });
@@ -183,7 +208,7 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
     const minutes = block?.estimated_minutes ?? 60;
     const [datePart, timePart] = start.split("T"); const [y, m, d] = datePart.split("-").map(Number); const [h, min] = timePart.split(":").map(Number);
     const endDate = new Date(Date.UTC(y, m - 1, d, h, min + minutes));
-    const end = `${endDate.toISOString().slice(0, 10)}T${endDate.toISOString().slice(11, 16)}`;
+    const end = block ? zoneDateTime(new Date(block.end_at), zone) : `${endDate.toISOString().slice(0, 10)}T${endDate.toISOString().slice(11, 16)}`;
     setError(""); setTaskDraft({ taskId: block?.task_id ?? taskId ?? "", start, end, minutes, allowOverlap: false });
   }, [zone]);
   useEffect(() => {
@@ -194,7 +219,8 @@ export function CalendarWorkspace({ projects, scheduleTaskId, onTaskScheduled, o
     formEvent.preventDefault(); if (!taskDraft?.taskId) { setError("Choose a task to schedule."); return; }
     setBusy(true); setError("");
     try {
-      const payload = { start_at: instantFromZoneInput(taskDraft.start, zone), end_at: instantFromZoneInput(taskDraft.end, zone), estimated_minutes: taskDraft.minutes, timezone: zone, allow_overlap: taskDraft.allowOverlap };
+      const originalBlock = blocks.find(block => block.task_id === taskDraft.taskId);
+      const payload = { start_at: instantFromZoneInput(taskDraft.start, zone, originalBlock?.start_at), end_at: instantFromZoneInput(taskDraft.end, zone, originalBlock?.end_at), estimated_minutes: taskDraft.minutes, timezone: zone, allow_overlap: taskDraft.allowOverlap };
       await request<TaskBlock>(`/calendar/tasks/${taskDraft.taskId}/schedule`, { method: "PUT", body: JSON.stringify(payload) });
       setTaskDraft(null); setNotice("Task scheduled."); onTaskScheduled?.();
       const query = new URLSearchParams({ start: rangeStart, end: rangeEnd, timezone: zone });
