@@ -108,7 +108,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
   };
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!draft.title.trim() || !editingId) return;
+    if (mutationActive.current || !draft.title.trim() || !editingId) return;
     mutationActive.current = true;
     ++mutationVersion.current;
     setBusyId(editingId); setError(""); setNotice("");
@@ -128,13 +128,14 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
     } catch (value) { setError(errorMessage(value, "The task could not be saved.")); }
     finally { ++mutationVersion.current; mutationActive.current = false; setBusyId(""); }
   };
-  const changeStatus = async (task: Task) => {
+  const changeStatus = async (task: Task, requestedStatus?: Task["status"]) => {
+    if (mutationActive.current) return;
     mutationActive.current = true;
     ++mutationVersion.current;
     setBusyId(task.id); setError(""); setNotice("");
     try {
       const updated = await request<Task>(`/tasks/${task.id}`, {
-        method: "PATCH", body: JSON.stringify({ status: nextTaskStatus(task) }),
+        method: "PATCH", body: JSON.stringify({ status: requestedStatus ?? nextTaskStatus(task) }),
       });
       setTasks(current => current.map(item => item.id === updated.id ? updated : item));
       onTaskSaved?.(updated);
@@ -153,7 +154,9 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
         {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
     <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now}
-      onEditTask={begin} onScheduleTask={onScheduleTask} onCompleteTask={task => { void changeStatus(task); }}
+      onEditTask={begin} onScheduleTask={onScheduleTask}
+      onStartTask={task => { void changeStatus(task, "in_progress"); }}
+      onCompleteTask={task => { void changeStatus(task, "done"); }}
       actionsBusy={Boolean(busyId)} taskRevision={taskRevision} />
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />

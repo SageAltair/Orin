@@ -13,13 +13,15 @@ const loadOwnerTasks = () => fetchAllPages<OwnedTask>(
   "priority tasks", 100, 50, item => item.id,
 );
 
-export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask, onScheduleTask, onCompleteTask, actionsBusy = false, taskRevision = 0 }: {
+export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask, onScheduleTask, onStartTask, onCompleteTask, actionsBusy = false, taskRevision = 0 }: {
   tasks: Task[];
   activeWorkspaceId: string;
   mode: PriorityGuidanceMode;
   now: Date;
   onEditTask?: (task: Task) => void;
   onScheduleTask?: (taskId: string) => void;
+  /** Explicitly mark a not-started task in progress; does not launch a focus timer. */
+  onStartTask?: (task: Task) => void;
   onCompleteTask?: (task: Task) => void;
   actionsBusy?: boolean;
   taskRevision?: number;
@@ -104,6 +106,8 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
                 aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)}>Edit task</button>}
               {onScheduleTask && <button type="button" disabled={actionsBusy}
                 aria-label={`Schedule ${task.title}`} onClick={() => onScheduleTask(task.id)}>Schedule</button>}
+              {onStartTask && task.status === "todo" && <button type="button" disabled={actionsBusy}
+                aria-label={`Start ${task.title}`} onClick={() => onStartTask(task)}>Start</button>}
               {onCompleteTask && <button type="button" disabled={actionsBusy}
                 aria-label={`Mark ${task.title} done`} onClick={() => onCompleteTask(task)}>Mark done</button>}
             </>}
