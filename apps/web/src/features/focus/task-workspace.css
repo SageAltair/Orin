@@ -320,7 +320,8 @@
 .focus-priority-refresh { margin-left: 14px; border: 0; background: transparent; color: var(--text); text-decoration: underline; font-size: 12px; cursor: pointer; }
 .focus-priority-refresh:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 
-.focus-priority-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 14px; }
-.focus-priority-row-actions button { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); min-height: 34px; padding: 6px 10px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.focus-priority-list li > .focus-priority-row-actions { display: flex; flex-direction: row; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.focus-priority-row-actions button { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); min-height: 44px; padding: 8px 10px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.focus-priority-row-actions button:disabled { opacity: 0.55; cursor: wait; }
 .focus-priority-row-actions button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-@media (max-width: 600px) { .focus-priority-row-actions { justify-content: flex-start; flex-wrap: wrap; } }
+@media (max-width: 600px) { .focus-priority-list li > .focus-priority-row-actions { justify-content: flex-start; } }
