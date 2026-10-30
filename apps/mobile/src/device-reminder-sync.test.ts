@@ -182,6 +182,94 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).toHaveBeenCalledWith("alice", "workspace-a", inbox, otherPolicy, []);
   });
 
+  it("clears device alerts when the server opts out during a slow refresh", async () => {
+    const disabled = { ...policy, enabled: false };
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        return (policyReads === 1 ? policy : disabled) as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(policyReads).toBe(2);
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", "workspace-a", [], disabled, [],
+    );
+  });
+
+  it("applies a live category opt-out rather than stale task preferences", async () => {
+    const updated = { ...policy, categories: ["calendar"] };
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        return (policyReads === 1 ? policy : updated) as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", "workspace-a", inbox, updated, [task("future", due)],
+    );
+  });
+
+  it("preserves schedules if the final policy read fails", async () => {
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        if (policyReads === 2) throw new Error("policy recheck offline");
+        return policy as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("policy recheck offline");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule a partial task list if the category was enabled mid-refresh", async () => {
+    const initial = { ...policy, categories: ["calendar"] };
+    const updated = { ...policy, categories: ["calendar", "tasks"] };
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        return (policyReads === 1 ? initial : updated) as never;
+      }
+      if (path.startsWith("/notifications?")) return inbox as never;
+      if (path.startsWith("/tasks?")) throw new Error("Tasks must not be fetched from the old policy");
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("Task notification policy changed");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed live notification policy without replacing OS alerts", async () => {
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        return (policyReads === 1 ? policy : { ...policy, enabled: "yes" }) as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("Invalid live notification policy");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
   it("synchronizes complete tasks and inbox after a successful owner-scoped fetch", async () => {
     vi.mocked(request).mockImplementation(async (path) => {
       if (path.startsWith("/tasks")) return [task("future", due)] as never;
