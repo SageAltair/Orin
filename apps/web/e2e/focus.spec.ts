@@ -87,7 +87,7 @@ test("capture appears on Now and starts a timer within three taps", async ({ pag
   await setupFocus(page);
   await page.goto("/");
   await signIn(page);
-  await page.locator('[data-orin-control="nav-tasks"]').click();
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Now" }).click();
   await expect(page.getByRole("heading", { name: "What’s one thing on your mind?" })).toBeVisible();
   await page.getByRole("button", { name: "Add one thing" }).click();
   await page.getByRole("textbox", { name: "What would you like to remember?" }).fill("Write the first paragraph");
@@ -112,6 +112,7 @@ test("a failed capture save keeps the user's text available for retry", async ({
 
 test("Recovery exposes weekly progress and decay review controls", async ({ page }) => {
   await setupFocus(page); await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Now" }).click();
   await page.getByText("What happens next?").click();
   await page.getByRole("button", { name: "Progress and task review" }).click();
   await expect(page.getByRole("heading", { name: "A little room to reset." })).toBeVisible();
@@ -123,6 +124,7 @@ test("Recovery exposes weekly progress and decay review controls", async ({ page
 
 test("private focus data can be exported or deleted with confirmation", async ({ page }) => {
   await setupFocus(page); await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Now" }).click();
   await page.getByText("What happens next?").click();
   await page.getByRole("button", { name: "Progress and task review" }).click();
   await page.getByText("Your private focus data").click();
