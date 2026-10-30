@@ -19,6 +19,7 @@ class PreferencesRead(BaseModel):
     autonomy_mode: str = "balanced"
     custom_autonomy: dict[str, str] = Field(default_factory=dict)
     proactive_mode: Literal["quiet", "supportive", "proactive", "persistent"] = "supportive"
+    priority_guidance_mode: Literal["balanced", "proactive", "planning-only"] = "balanced"
 
 
 class PreferencesUpdate(BaseModel):
@@ -30,6 +31,7 @@ class PreferencesUpdate(BaseModel):
     autonomy_mode: str = Field(default="balanced", pattern="^(conservative|balanced|automatic|custom)$")
     custom_autonomy: dict[str, str] = Field(default_factory=dict)
     proactive_mode: Literal["quiet", "supportive", "proactive", "persistent"] = "supportive"
+    priority_guidance_mode: Literal["balanced", "proactive", "planning-only"] | None = None
 
 
 class CapabilityRead(BaseModel):
