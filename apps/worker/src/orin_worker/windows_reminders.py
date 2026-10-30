@@ -151,6 +151,30 @@ def _quiet(prefs: dict[str, object], now: int) -> bool:
         raise ValueError("Invalid quiet-hours preferences") from error
 
 
+def _validate_notification_policy(prefs: dict[str, object]) -> None:
+    """Reject malformed policy rather than silently bypassing quiet/Focus rules."""
+    if type(prefs.get("enabled")) is not bool:
+        raise ValueError("Invalid notification enabled preference")
+    categories = prefs.get("categories")
+    if not isinstance(categories, list) or any(type(item) is not str for item in categories):
+        raise ValueError("Invalid notification categories")
+    if not prefs["enabled"] or "tasks" not in categories:
+        return
+    if type(prefs.get("quiet_enabled")) is not bool or type(prefs.get("respect_focus")) is not bool:
+        raise ValueError("Invalid notification suppression preferences")
+    zone = prefs.get("timezone")
+    start = prefs.get("quiet_start")
+    end = prefs.get("quiet_end")
+    if not isinstance(zone, str) or not zone or not isinstance(start, str) or not isinstance(end, str):
+        raise ValueError("Invalid notification quiet-hours preferences")
+    if not all(re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", value) for value in (start, end)):
+        raise ValueError("Invalid notification quiet-hours time")
+    try:
+        ZoneInfo(zone)
+    except (KeyError, ValueError) as error:
+        raise ValueError("Invalid notification timezone") from error
+
+
 def _focus_active(client: httpx.Client) -> bool:
     """Fail closed if the authenticated Focus state cannot be validated."""
     response = client.get("/focus/now")
@@ -177,7 +201,8 @@ def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now:
     prefs = response.json()
     if not isinstance(prefs, dict):
         raise ValueError("Invalid notification preferences")
-    if prefs.get("enabled") is not True or "tasks" not in prefs.get("categories", []):
+    _validate_notification_policy(prefs)
+    if not prefs["enabled"] or "tasks" not in prefs["categories"]:
         return {}, prefs
 
     tasks: dict[str, int] = {}
