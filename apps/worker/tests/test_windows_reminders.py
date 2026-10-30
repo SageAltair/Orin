@@ -595,7 +595,7 @@ def test_toast_subprocess_never_inherits_api_token(monkeypatch):
     assert _toast_environment()["APPDATA"].endswith("Roaming")
     assert _toast_environment()["LOCALAPPDATA"].endswith("Local")
     assert _toast_environment()["USERPROFILE"].endswith("runner")
-    assert _toast_environment()["PSModuleAnalysisCachePath"].endswith("ModuleAnalysisCache")
+    assert {key.upper(): value for key, value in _toast_environment().items()}["PSMODULEANALYSISCACHEPATH"].endswith("ModuleAnalysisCache")
     assert "private-bearer-value" not in _toast_environment().values()
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in _toast_environment()
 
