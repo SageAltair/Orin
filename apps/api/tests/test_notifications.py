@@ -179,7 +179,8 @@ def test_persistent_requires_opt_in_and_respects_repeat_limit(sessions):
 
 def test_daily_repeat_budget_is_shared(sessions):
     factory, owner = sessions
-    now = datetime.now(timezone.utc)
+    # Fix the clock so a CI run near UTC midnight cannot cross the daily budget reset.
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
     for i in range(10):
         task(factory, owner, now, title=f"Task {i}")
     with factory.begin() as session:
