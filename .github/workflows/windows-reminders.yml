@@ -60,9 +60,16 @@ jobs:
           }
           safe_os = dict(safe)
           safe_os.update((key, value) for key, value in os.environ.items() if key.upper() in os_names)
-          safe_modules = dict(safe_os)
-          safe_modules["PSModulePath"] = str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "Modules")
-          for label, env in (("os-paths", safe_os), ("os-modules", safe_modules), ("inherited", None)):
+          process_names = {"HOME", "CI", "GITHUB_ACTIONS", "TERM",
+                           "PSExecutionPolicyPreference", "POWERSHELL_DISTRIBUTION_CHANNEL"}
+          safe_process = dict(safe_os)
+          safe_process.update((key, value) for key, value in os.environ.items() if key.upper() in {name.upper() for name in process_names})
+          safe_psmodule = dict(safe_os)
+          safe_psmodule.update((key, value) for key, value in os.environ.items() if key.upper() == "PSMODULEPATH")
+          safe_both = dict(safe_process)
+          safe_both.update((key, value) for key, value in os.environ.items() if key.upper() == "PSMODULEPATH")
+          for label, env in (("process-flags", safe_process), ("psmodule", safe_psmodule),
+                             ("combined", safe_both), ("inherited", None)):
               try:
                   subprocess.run(command, check=True, timeout=8, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
