@@ -8,7 +8,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   let releaseRefresh: (() => void) | undefined;
   let createdPayload: Record<string, unknown> | null = null;
   let tasks: Array<Record<string, unknown>> = [
-    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: null, created_at: now, updated_at: now },
+    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: "missing-project", created_at: now, updated_at: now },
     { id: "task-deadline", title: "Deadline crossing", description: null, status: "todo", priority: "normal", due_at: "2026-10-10T08:00:20Z", project_id: null, created_at: now, updated_at: now },
   ];
   await page.route("**/api/v1/**", async route => {
@@ -57,6 +57,9 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toHaveCount(0);
   await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
   await expect(workspace.locator(".focus-task-list").getByText("Prepare next week's notes")).toBeVisible();
+  // An unresolved/deleted project must not create a broken navigation action.
+  await expect(workspace.locator(".focus-task-list").getByText("Project task")).toBeVisible();
+  await expect(workspace.getByRole("button", { name: "Open project Project task" })).toHaveCount(0);
   expect(await workspace.locator(".focus-task-list li").first().evaluate(element => getComputedStyle(element).display)).toBe("flex");
   const taskViews = workspace.getByRole("navigation", { name: "Task views" });
   await expect(taskViews.getByRole("button", { name: /Overdue/ })).toContainText("0");
