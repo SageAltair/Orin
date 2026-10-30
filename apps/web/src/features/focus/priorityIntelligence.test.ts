@@ -60,9 +60,9 @@ describe("intentional priority planning", () => {
   });
 
   it("deduplicates by workspace, task and due instant even after risk changes", () => {
-    const items = [task("deadline", { priority: "urgent", dueAt: "2026-10-30T12:10:00Z" })];
+    const items = [task("deadline", { priority: "urgent", dueAt: "2026-10-30T12:25:00Z" })];
     const first = planTaskPriorities(items, options)[0];
-    const later = planTaskPriorities(items, { ...options, now: "2026-10-30T12:15:00Z", acknowledgedKeys: [first.dedupeKey] })[0];
+    const later = planTaskPriorities(items, { ...options, now: "2026-10-30T12:30:00Z", acknowledgedKeys: [first.dedupeKey] })[0];
     expect(first.risk).toBe("imminent");
     expect(later.risk).toBe("overdue");
     expect(later.dedupeKey).toBe(first.dedupeKey);
