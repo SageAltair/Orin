@@ -126,13 +126,12 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const persisted = (await persistedTasks.json()) as Array<{
     title: string; status: string; priority: string; project_id: string | null; due_at: string | null;
   }>;
-  expect(persisted).toContainEqual(expect.objectContaining({
-    title: "Disposable scheduled browser task revised",
-    status: "done",
-    priority: "high",
-    project_id: project.id,
-    due_at: "2099-11-02T09:45:00Z",
+  const savedTask = persisted.find(row => row.title === "Disposable scheduled browser task revised");
+  expect(savedTask).toEqual(expect.objectContaining({
+    status: "done", priority: "high", project_id: project.id,
   }));
+  // Compare the instant, not the API serializer\u0027s equivalent UTC offset spelling.
+  expect(new Date(savedTask?.due_at ?? "").toISOString()).toBe("2099-11-02T09:45:00.000Z");
 
   await expect.poll(async () => {
     const response = await request.get(`${isolatedApi}/api/v1/notifications`, { headers });
