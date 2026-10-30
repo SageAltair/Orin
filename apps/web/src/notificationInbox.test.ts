@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchCompleteNotificationInbox } from "./notificationInbox";
+import { eligibleAttentionItems, fetchCompleteNotificationInbox } from "./notificationInbox";
 
 describe("web notification inbox completeness", () => {
   it("loads older unread reminders beyond the API's default first 100", async () => {
@@ -41,5 +41,22 @@ describe("web notification inbox completeness", () => {
       rows.slice(offset, offset + limit));
     await expect(fetchCompleteNotificationInbox(fetchPage, 2, 2))
       .rejects.toThrow("More than 4 notifications exist");
+  });
+});
+
+describe("browser interruption policy", () => {
+  const rows = [
+    { id: "older", category: "tasks", attention_ready: true, read_at: null },
+    { id: "disabled-category", category: "calendar", attention_ready: true, read_at: null },
+    { id: "acknowledged", category: "tasks", attention_ready: true, read_at: "2026-10-30T12:00:00Z" },
+    { id: "not-ready", category: "tasks", attention_ready: false, read_at: null },
+  ];
+  it("suppresses all stale alerts immediately after global opt-out", () => {
+    expect(eligibleAttentionItems(rows, { enabled: false, categories: ["tasks", "calendar"] }))
+      .toEqual([]);
+  });
+  it("excludes disabled categories, acknowledged and not-ready records", () => {
+    expect(eligibleAttentionItems(rows, { enabled: true, categories: ["tasks"] }))
+      .toEqual([rows[0]]);
   });
 });
