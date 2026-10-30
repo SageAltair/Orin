@@ -93,6 +93,19 @@ describe("local Android reminder planner", () => {
     expect(planLocalReminders([], localPolicy, now, [task("tz", due)]))
       .toEqual([{ key: `task:tz:${next}`, fireAt: next }]);
   });
+  it("preserves deferred reminders when reopening during quiet hours after the original due time", () => {
+    const due = "2026-10-29T23:00:00Z";
+    const resumedAt = Date.parse("2026-10-30T02:00:00Z");
+    const next = Date.parse("2026-10-30T07:00:00Z");
+    const quiet = { ...policy, quiet_enabled: true };
+    expect(planLocalReminders([reminder("inbox", due)], quiet, resumedAt))
+      .toEqual([{ key: `inbox:1:${next}`, fireAt: next }]);
+    expect(planLocalReminders([], quiet, resumedAt, [task("deadline", due)]))
+      .toEqual([{ key: `task:deadline:${next}`, fireAt: next }]);
+    // A past-due item outside the quiet interval must not be resurrected.
+    expect(planLocalReminders([reminder("past", due)], policy, resumedAt)).toEqual([]);
+    expect(planLocalReminders([], policy, resumedAt, [task("past", due)])).toEqual([]);
+  });
   it("coalesces simultaneous generic alerts after quiet hours", () => {
     const quiet = { ...policy, quiet_enabled: true };
     const due1 = "2026-10-29T22:15:00Z";
