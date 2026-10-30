@@ -233,6 +233,92 @@ def test_unauthorized_and_wrong_owner_fail_closed(tmp_path):
     queue.close()
 
 
+@pytest.mark.parametrize("change", [
+    "disabled", "category_removed", "quiet_enabled", "focus_enabled", "malformed",
+])
+def test_live_policy_recheck_prevents_toast_after_mid_scan_change(tmp_path, change):
+    queue = ledger(tmp_path)
+    initial = {"enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+               "timezone": "UTC", "quiet_start": "11:00", "quiet_end": "13:00",
+               "respect_focus": False}
+    updated = dict(initial)
+    if change == "disabled":
+        updated["enabled"] = False
+    elif change == "category_removed":
+        updated["categories"] = ["calendar"]
+    elif change == "quiet_enabled":
+        updated["quiet_enabled"] = True
+    elif change == "focus_enabled":
+        updated["respect_focus"] = True
+    else:
+        updated["respect_focus"] = "yes"
+    requests = {"preferences": 0, "focus": 0}
+    alerts = []
+
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            requests["preferences"] += 1
+            return httpx.Response(200, json=initial if requests["preferences"] == 1 else updated)
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("a", NOW + 60)])
+        if request.url.path.endswith("/focus-sessions/active"):
+            requests["focus"] += 1
+            return httpx.Response(200, json={"active": True})
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        if change == "malformed":
+            with pytest.raises(ValueError, match="Invalid notification"):
+                run_once(client, queue, now=NOW, notify=lambda: alerts.append("toast"))
+        else:
+            assert run_once(client, queue, now=NOW,
+                            notify=lambda: alerts.append("toast")) == 0
+    assert requests["preferences"] == 2
+    assert requests["focus"] == (1 if change == "focus_enabled" else 0)
+    assert alerts == []
+    if change in {"disabled", "category_removed"}:
+        assert queue.due(NOW) == []
+    else:
+        assert queue.due(NOW) == [("a", NOW + 60)]
+    queue.close()
+
+
+@pytest.mark.parametrize("auth_change", ["revoked", "wrong_owner"])
+def test_live_auth_recheck_clears_queue_after_mid_scan_session_change(tmp_path, auth_change):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    auth_calls = 0
+
+    def handler(request):
+        nonlocal auth_calls
+        if request.url.path.endswith("/auth/me"):
+            auth_calls += 1
+            if auth_calls == 2 and auth_change == "revoked":
+                return httpx.Response(401)
+            owner = OWNER if auth_calls == 1 else "someone-else"
+            return httpx.Response(200, json={"id": owner})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00",
+                "respect_focus": False,
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("a", NOW + 60)])
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError if auth_change == "revoked" else PermissionError):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert auth_calls == 2
+    assert queue.due(NOW) == []
+    queue.close()
+
+
 def test_network_failure_does_not_emit_stale_queue(tmp_path):
     queue = ledger(tmp_path)
     queue.sync({"a": NOW + 60})
