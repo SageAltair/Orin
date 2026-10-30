@@ -22,7 +22,8 @@ def task(id: str, due: int | None, status: str = "todo") -> dict[str, object]:
 
 
 def api(tasks: list[dict[str, object]], *, enabled=True, categories=None, owner=OWNER,
-        status=200, prefs_extra=None) -> httpx.Client:
+        status=200, prefs_extra=None, focus_session=None, focus_status=200,
+        focus_payload=None) -> httpx.Client:
     prefs = {"enabled": enabled, "categories": categories if categories is not None else ["tasks"],
              "quiet_enabled": False, "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00"}
     prefs.update(prefs_extra or {})
@@ -32,6 +33,9 @@ def api(tasks: list[dict[str, object]], *, enabled=True, categories=None, owner=
             return httpx.Response(status if status != 200 else 200, json={"id": owner})
         if request.url.path.endswith("/notifications/preferences"):
             return httpx.Response(200, json=prefs)
+        if request.url.path.endswith("/focus/now"):
+            payload = focus_payload if focus_payload is not None else {"focus_session": focus_session}
+            return httpx.Response(focus_status, json=payload)
         if request.url.path.endswith("/tasks"):
             assert request.headers["X-Orin-Workspace-Id"] == WORKSPACE
             assert request.headers["Authorization"] == "Bearer test-token"
@@ -70,6 +74,47 @@ def test_future_task_waits_until_lead_time_then_delivers_once(tmp_path):
         assert run_once(client, queue, now=NOW + 1800, notify=lambda: alerts.append("toast")) == 1
         assert run_once(client, queue, now=NOW + 1801, notify=lambda: alerts.append("toast")) == 0
     assert alerts == ["toast"]
+    queue.close()
+
+
+def test_active_focus_suppresses_alert_until_session_ends(tmp_path):
+    queue = ledger(tmp_path)
+    alerts = []
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_session={"status": "active"}) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: alerts.append("toast")) == 0
+    assert len(queue.due(NOW)) == 1
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True}) as client:
+        assert run_once(client, queue, now=NOW + 1, notify=lambda: alerts.append("toast")) == 1
+    assert alerts == ["toast"]
+    queue.close()
+
+
+def test_focus_api_failure_and_malformed_state_fail_closed(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_status=503) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert len(queue.due(NOW)) == 1
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_payload={"unexpected": True}) as client:
+        with pytest.raises(ValueError, match="Invalid Focus"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert len(queue.due(NOW)) == 1
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_status=401) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert queue.due(NOW) == []
+    queue.close()
+
+
+def test_focus_suppression_is_opt_out(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": False},
+             focus_status=503) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: None) == 1
     queue.close()
 
 
@@ -222,6 +267,18 @@ def test_quiet_hours_respect_local_timezone_and_midnight():
              "quiet_start": "22:00", "quiet_end": "07:00"}
     assert _quiet(prefs, int(datetime(2026, 10, 29, 20, tzinfo=timezone.utc).timestamp()))
     assert not _quiet(prefs, NOW)
+
+
+def test_equal_quiet_hour_bounds_mean_quiet_all_day(tmp_path):
+    prefs = {"quiet_enabled": True, "timezone": "UTC",
+             "quiet_start": "12:00", "quiet_end": "12:00"}
+    assert _quiet(prefs, NOW)
+    assert _quiet(prefs, NOW + 3600)
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], prefs_extra=prefs) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: pytest.fail("quiet all day")) == 0
+    assert len(queue.due(NOW)) == 1
+    queue.close()
 
 
 def test_quiet_hours_suppress_then_release_without_repeating(tmp_path):
