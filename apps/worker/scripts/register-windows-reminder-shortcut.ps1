@@ -132,7 +132,10 @@ namespace Orin.Windows {
         public uint PropertyId;
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 16)]
+    // Native PROPVARIANT is 24 bytes on x64 (16 on x86). Allocate the
+    // larger representation to prevent IPropertyStore from reading past
+    // the managed buffer on 64-bit Windows; pointer offset is 8 on both.
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
     internal struct PropVariant {
         [FieldOffset(0)] public ushort VariantType;
         [FieldOffset(8)] public IntPtr Value;
