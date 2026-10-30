@@ -100,7 +100,9 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
   }, []);
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
-  const projectNameFor = (id: string) => projects.find(project => project.id === id)?.name ?? "Project task";
+  // Index project labels once, even when a workspace has thousands of tasks.
+  const projectNames = new Map(projects.map(project => [project.id, project.name]));
+  const projectNameFor = (id: string) => projectNames.get(id) ?? "Project task";
   const begin = (task?: Task) => {
     editingBaseline.current = task ?? null;
     setEditingId(task?.id ?? "new");
@@ -185,7 +187,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
       <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
         <button type="button" className="focus-task-status" aria-label={`${task.status === "done" || task.status === "cancelled" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" || task.status === "cancelled" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
         <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
-          <span>{task.project_id ? (onOpenProject
+          <span>{task.project_id ? (onOpenProject && projectNames.has(task.project_id)
             ? <button type="button" className="focus-task-project-link"
                 aria-label={`Open project ${projectNameFor(task.project_id)}`}
                 onClick={() => onOpenProject(task.project_id!)}>{projectNameFor(task.project_id)}</button>

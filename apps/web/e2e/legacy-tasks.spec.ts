@@ -8,7 +8,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   let releaseRefresh: (() => void) | undefined;
   let createdPayload: Record<string, unknown> | null = null;
   let tasks: Array<Record<string, unknown>> = [
-    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: null, created_at: now, updated_at: now },
+    { id: "task-upcoming", title: "Prepare next week's notes", description: null, status: "todo", priority: "normal", due_at: "2099-10-13T14:00:00Z", project_id: "missing-project", created_at: now, updated_at: now },
     { id: "task-deadline", title: "Deadline crossing", description: null, status: "todo", priority: "normal", due_at: "2026-10-10T08:00:20Z", project_id: null, created_at: now, updated_at: now },
   ];
   await page.route("**/api/v1/**", async route => {
@@ -39,6 +39,13 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
     }
     if (pathname === "/api/v1/users/me/preferences") return route.fulfill({ json: { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} } });
     if (pathname === "/api/v1/projects") return route.fulfill({ json: [{ id: "project-1", name: "Research", status: "active" }] });
+    // Project navigation must exercise the real detail view with valid API contracts.
+    if (pathname === "/api/v1/projects/project-1/context") return route.fulfill({ json: {
+      progress: { completed_tasks: 0, total_tasks: 0, percentage: null },
+      tasks: [], blockers: [], activity: [], knowledge: [], next_actions: [],
+    } });
+    if (pathname === "/api/v1/memories" || pathname === "/api/v1/focus-sessions" ||
+        pathname === "/api/v1/projects/project-1/milestones") return route.fulfill({ json: [] });
     if (pathname === "/api/v1/environment/preferences" || pathname.endsWith("/approvals") || pathname.endsWith("/conversations") || pathname.endsWith("/auth/sessions")) return route.fulfill({ json: [] });
     return route.fulfill({ status: 204 });
   });
@@ -57,6 +64,9 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await expect(page.getByRole("navigation", { name: "Focus navigation" })).toHaveCount(0);
   await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
   await expect(workspace.locator(".focus-task-list").getByText("Prepare next week's notes")).toBeVisible();
+  // An unresolved/deleted project must not create a broken navigation action.
+  await expect(workspace.locator(".focus-task-list").getByText("Project task")).toBeVisible();
+  await expect(workspace.getByRole("button", { name: "Open project Project task" })).toHaveCount(0);
   expect(await workspace.locator(".focus-task-list li").first().evaluate(element => getComputedStyle(element).display)).toBe("flex");
   const taskViews = workspace.getByRole("navigation", { name: "Task views" });
   await expect(taskViews.getByRole("button", { name: /Overdue/ })).toContainText("0");
