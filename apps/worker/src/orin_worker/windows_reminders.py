@@ -431,8 +431,9 @@ def check_toast_registration() -> None:
         )
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise SystemExit(
-            "Orin toast registration check failed. Verify the existing Start Menu "
-            "shortcut and matching AppUserModelID; no changes were made."
+            f"Orin toast registration check failed ({type(error).__name__}). "
+            "Verify the existing Start Menu shortcut and matching AppUserModelID; "
+            "no changes were made."
         ) from error
     print("Orin toast shortcut identity matches. Visible delivery is still unverified.")
 
