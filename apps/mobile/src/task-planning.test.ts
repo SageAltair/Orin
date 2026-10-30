@@ -24,6 +24,17 @@ describe("mobile Tasks planning", () => {
     expect(filterMobileTasks(items, "overdue", "", now).map((t) => t.id)).toEqual(["earlier"]);
     expect(filterMobileTasks(items, "completed", "", now).map((t) => t.id)).toEqual(["completed"]);
   });
+  it("reclassifies a task after the local day rolls over", () => {
+    const nextDay = task("next day", due(30, 0));
+    const before = new Date(2026, 9, 29, 23, 59, 50);
+    const after = new Date(2026, 9, 30, 0, 0, 10);
+    expect(filterMobileTasks([nextDay], "today", "", before)).toEqual([]);
+    expect(filterMobileTasks([nextDay], "today", "", after).map((item) => item.id))
+      .toEqual(["next day"]);
+    expect(filterMobileTasks([nextDay], "overdue", "", after).map((item) => item.id))
+      .toEqual(["next day"]);
+  });
+
   it("searches title and description case-insensitively", () => {
     expect(filterMobileTasks(items, "all", " FIND ME ", now).map((t) => t.id)).toEqual(["searchable"]);
     expect(filterMobileTasks(items, "all", "TOMORROW", now).map((t) => t.id)).toEqual(["tomorrow"]);
