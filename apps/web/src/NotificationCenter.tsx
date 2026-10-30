@@ -7,7 +7,7 @@ import {
 } from "./notificationPolicy";
 import "./notifications.css";
 import { request } from "./api";
-import { fetchCompleteNotificationInbox } from "./notificationInbox";
+import { eligibleAttentionItems, fetchCompleteNotificationInbox } from "./notificationInbox";
 
 type Reminder = {
   id: string;
@@ -105,8 +105,7 @@ export function NotificationCenter({
   };
   useEffect(() => {
     if (!policy.enabled || (!policy.browser_alerts && !policy.sound)) return;
-    const pending = items
-      .filter((i) => policy.categories.includes(i.category) && i.attention_ready && !i.read_at)
+    const pending = eligibleAttentionItems(items, policy)
       .filter((i) => {
         try {
           return !sessionStorage.getItem(`orin:alert:${i.id}:${i.revision}`);
@@ -146,10 +145,10 @@ export function NotificationCenter({
       }
     }
   }, [items, policy.enabled, policy.categories, policy.browser_alerts, policy.sound]);
-  // The API orders newest due date first. Surface the oldest ready
-  // commitment rather than letting a future-heavy first page hide it.
-  const urgent = policy.enabled && policy.persistent
-    ? [...items].reverse().find((i) => policy.categories.includes(i.category) && i.attention_ready && !i.read_at)
+  // The API orders newest due date first; the last eligible record is
+  // the oldest due commitment, even when it was beyond the first API page.
+  const urgent = policy.persistent
+    ? eligibleAttentionItems(items, policy).at(-1)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
