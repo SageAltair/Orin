@@ -455,6 +455,24 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
             if error.response.status_code in {401, 403}:
                 ledger.clear()
             raise
+    # The initial task snapshot can become stale while policy and Focus are
+    # checked. Confirm that every due task is still active at the same deadline
+    # immediately before delivery. A failure leaves reminders retryable.
+    # This is a best-effort final read, not a transactional server snapshot.
+    try:
+        current_tasks, _, _ = _scan_task_pages(
+            client, ledger.owner_id, ledger.workspace_id, now,
+        )
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code in {401, 403}:
+            ledger.clear()
+        raise
+    except PermissionError:
+        ledger.clear()
+        raise
+    if any(current_tasks.get(task_id) != due for task_id, due in due_tasks):
+        raise ValueError("Tasks changed before reminder delivery; retry next poll")
+
     # One generic toast per poll avoids flooding the user with N alerts.
     notify()
     for task_id, due in due_tasks:
