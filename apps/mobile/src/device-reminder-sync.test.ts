@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { request } from "./api";
 import { getLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
-import { fetchDeviceReminderTasks, refreshDeviceReminders } from "./device-reminder-sync";
+import { fetchDeviceReminderInbox, fetchDeviceReminderTasks, refreshDeviceReminders } from "./device-reminder-sync";
 import type { NotificationPolicy, Reminder, Task } from "./types";
 
 vi.mock("./api", () => ({ request: vi.fn() }));
@@ -72,7 +72,7 @@ describe("future task device reminder synchronization", () => {
         current = false;
         return [task("future", due)] as never;
       }
-      if (path === "/notifications") return inbox as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
       return policy as never;
     });
     await refreshDeviceReminders("alice", "workspace-a", () => current);
@@ -95,7 +95,7 @@ describe("future task device reminder synchronization", () => {
     const otherPolicy = { ...policy, categories: ["calendar"] };
     vi.mocked(request).mockImplementation(async (path) => {
       if (path === "/notifications/preferences") return otherPolicy as never;
-      if (path === "/notifications") return inbox as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
       throw new Error("Task endpoint should not be called");
     });
     await refreshDeviceReminders("alice", "workspace-a");
@@ -105,12 +105,62 @@ describe("future task device reminder synchronization", () => {
   it("synchronizes complete tasks and inbox after a successful owner-scoped fetch", async () => {
     vi.mocked(request).mockImplementation(async (path) => {
       if (path.startsWith("/tasks")) return [task("future", due)] as never;
-      if (path === "/notifications") return inbox as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
       return policy as never;
     });
     await refreshDeviceReminders("alice", "workspace-a");
     expect(syncLocalReminders).toHaveBeenCalledWith(
       "alice", "workspace-a", inbox, policy, [task("future", due)],
     );
+  });
+});
+
+
+describe("paginated device notification inbox", () => {
+  const reminder = (id: string): Reminder => ({
+    id, title: "Private", message: "Private", category: "tasks", source_id: null,
+    due_at: due, read_at: null, snoozed_until: null, revision: 1,
+    repeats: 0, attention_ready: false,
+  });
+
+  it("loads older due reminders beyond the API's default first page", async () => {
+    const first = Array.from({ length: 200 }, (_, index) => reminder(`newer-${index}`));
+    const older = [reminder("older-due")];
+    vi.mocked(request).mockImplementation(async (path) =>
+      (path.includes("offset=0") ? first : older) as never);
+    const result = await fetchDeviceReminderInbox();
+    expect(result).toHaveLength(201);
+    expect(result.at(-1)?.id).toBe("older-due");
+    expect(vi.mocked(request).mock.calls.map(([path]) => path)).toEqual([
+      "/notifications?limit=200&offset=0",
+      "/notifications?limit=200&offset=200",
+    ]);
+  });
+
+  it("rejects overlapping pages rather than silently losing older alerts", async () => {
+    const first = Array.from({ length: 200 }, (_, index) => reminder(`item-${index}`));
+    vi.mocked(request).mockImplementation(async (path) =>
+      (path.includes("offset=0") ? first : [reminder("item-199")]) as never);
+    await expect(fetchDeviceReminderInbox()).rejects.toThrow("Overlapping");
+  });
+
+  it("does not replace device schedules when a later inbox page fails", async () => {
+    const first = Array.from({ length: 200 }, (_, index) => reminder(`item-${index}`));
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") return policy as never;
+      if (path.startsWith("/notifications?")) {
+        if (path.includes("offset=0")) return first as never;
+        throw new Error("second inbox page unavailable");
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a")).rejects.toThrow("second inbox page unavailable");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed notification records before scheduling", async () => {
+    vi.mocked(request).mockResolvedValueOnce([{ due_at: due }] as never);
+    await expect(fetchDeviceReminderInbox()).rejects.toThrow("invalid record");
   });
 });
