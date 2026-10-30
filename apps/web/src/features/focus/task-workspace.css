@@ -316,3 +316,6 @@
   .focus-priority-overview-heading, .focus-priority-list li { flex-direction: column; align-items: flex-start; gap: 7px; }
   .focus-priority-list small { max-width: none; text-align: left; }
 }
+
+.focus-priority-refresh { margin-left: 14px; border: 0; background: transparent; color: var(--text); text-decoration: underline; font-size: 12px; cursor: pointer; }
+.focus-priority-refresh:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
