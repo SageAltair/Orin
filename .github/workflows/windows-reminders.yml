@@ -51,9 +51,18 @@ jobs:
           from orin_worker.windows_reminders import _powershell_executable, _toast_environment
           command = [_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command", "Write-Output subprocess-ready"]
           safe = _toast_environment()
-          safe_modules = dict(safe)
+          os_names = {
+              "ALLUSERSPROFILE", "PROGRAMFILES", "PROGRAMFILES(X86)",
+              "COMMONPROGRAMFILES", "COMMONPROGRAMFILES(X86)", "PUBLIC",
+              "SYSTEMDRIVE", "OS", "PROCESSOR_ARCHITECTURE", "NUMBER_OF_PROCESSORS",
+              "USERNAME", "USERDOMAIN", "COMPUTERNAME", "SESSIONNAME",
+              "LOGONSERVER", "USERDNSDOMAIN", "PROGRAMW6432", "COMMONPROGRAMW6432",
+          }
+          safe_os = dict(safe)
+          safe_os.update((key, value) for key, value in os.environ.items() if key.upper() in os_names)
+          safe_modules = dict(safe_os)
           safe_modules["PSModulePath"] = str(Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "Modules")
-          for label, env in (("restricted", safe), ("system-modules", safe_modules), ("inherited", None)):
+          for label, env in (("os-paths", safe_os), ("os-modules", safe_modules), ("inherited", None)):
               try:
                   subprocess.run(command, check=True, timeout=8, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
