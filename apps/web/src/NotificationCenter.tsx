@@ -7,6 +7,7 @@ import {
 } from "./notificationPolicy";
 import "./notifications.css";
 import { request } from "./api";
+import { fetchCompleteNotificationInbox } from "./notificationInbox";
 
 type Reminder = {
   id: string;
@@ -32,15 +33,17 @@ export function NotificationCenter({
   );
   const [items, setItems] = useState<Reminder[]>([]);
   const [open, setOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(100);
   const [error, setError] = useState("");
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
   const refresh = (): Promise<void> => {
     const generation = ++inboxGeneration.current;
-    return request<Reminder[]>("/notifications")
+    return fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
+      request<Reminder[]>(`/notifications?limit=${limit}&offset=${offset}`))
       .then((rows) => {
         if (generation !== inboxGeneration.current) return;
-        setItems(Array.isArray(rows) ? rows : []);
+        setItems(rows);
         setError("");
       })
       .catch(() => {
@@ -56,12 +59,15 @@ export function NotificationCenter({
         .then((p) => {
           if (generation !== policyGeneration.current) return;
           if (p && typeof p.enabled === "boolean") setPolicy(p);
-          void refresh();
         })
         .catch(() => undefined);
     };
     void preferences();
-    window.addEventListener("orin-notification-preferences", preferences);
+    const onPreferencesChanged = () => {
+      void preferences();
+      void refresh();
+    };
+    window.addEventListener("orin-notification-preferences", onPreferencesChanged);
     const timer = window.setInterval(() => {
       void preferences();
       void refresh();
@@ -70,7 +76,7 @@ export function NotificationCenter({
       inboxGeneration.current++;
       policyGeneration.current++;
       window.clearInterval(timer);
-      window.removeEventListener("orin-notification-preferences", preferences);
+      window.removeEventListener("orin-notification-preferences", onPreferencesChanged);
     };
   }, []);
   const action = async (
@@ -131,8 +137,10 @@ export function NotificationCenter({
       }
     }
   }, [items, policy.browser_alerts, policy.sound]);
+  // The API orders newest due date first. Surface the oldest ready
+  // commitment rather than letting a future-heavy first page hide it.
   const urgent = policy.persistent
-    ? items.find((i) => i.attention_ready && !i.read_at)
+    ? items.findLast((i) => i.attention_ready && !i.read_at)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
@@ -246,7 +254,7 @@ export function NotificationCenter({
               </small>
             </div>
           )}
-          {items.map((item) => (
+          {items.slice(0, visibleCount).map((item) => (
             <article key={item.id} className={item.read_at ? "is-read" : ""}>
               <strong>{item.title}</strong>
               <p>{item.message}</p>
@@ -303,6 +311,15 @@ export function NotificationCenter({
               )}
             </article>
           ))}
+          {items.length > visibleCount && (
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => setVisibleCount((count) => count + 100)}
+            >
+              Show 100 older reminders ({items.length - visibleCount} remaining)
+            </button>
+          )}
         </section>
       )}
     </div>
