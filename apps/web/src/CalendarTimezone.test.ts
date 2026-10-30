@@ -22,6 +22,18 @@ describe("Calendar task scheduling timezone safety", () => {
       .toThrow("occurs twice");
   });
 
+  it("preserves either original exact instant when an existing ambiguous event is unchanged", () => {
+    expect(instantFromZoneInput("2026-11-01T01:30", "America/New_York", "2026-11-01T05:30:00Z"))
+      .toBe("2026-11-01T05:30:00Z");
+    expect(instantFromZoneInput("2026-11-01T01:30", "America/New_York", "2026-11-01T06:30:00Z"))
+      .toBe("2026-11-01T06:30:00Z");
+  });
+
+  it("does not preserve an original instant when the wall time is edited", () => {
+    expect(instantFromZoneInput("2026-11-01T02:30", "America/New_York", "2026-11-01T05:30:00Z"))
+      .toBe("2026-11-01T07:30:00.000Z");
+  });
+
   it("accepts a nearby unambiguous time after the fall-back transition", () => {
     expect(instantFromZoneInput("2026-11-01T02:30", "America/New_York"))
       .toBe("2026-11-01T07:30:00.000Z");
