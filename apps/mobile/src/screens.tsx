@@ -415,10 +415,8 @@ export function TasksScreen({
         if (activeMutations.current === 0) void load(true);
       },
       isForeground: () => AppState.currentState === "active",
-      subscribeForeground: (callback) => {
-        const subscription = AppState.addEventListener("change", (state) => {
-          if (state === "active") callback();
-        });
+      subscribeAppState: (callback) => {
+        const subscription = AppState.addEventListener("change", callback);
         return () => subscription.remove();
       },
     }) : null;
