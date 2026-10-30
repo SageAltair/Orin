@@ -237,7 +237,7 @@
 .orin-shell .focus-embedded .focus-task-editor input,
 .orin-shell .focus-embedded .focus-task-editor textarea,
 .orin-shell .focus-embedded .focus-task-editor select { width:100%; box-sizing:border-box; min-width:0; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); font:inherit; }
-.orin-shell .focus-embedded .focus-task-editor-grid { display:grid; grid-template-columns:minmax(0,1.5fr) repeat(2,minmax(0,1fr)); gap:14px; margin-top:6px; }
+.orin-shell .focus-embedded .focus-task-editor-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:6px; }
 .orin-shell .focus-embedded .focus-task-editor-grid > div { min-width:0; display:flex; flex-direction:column; gap:7px; }
 .orin-shell .focus-embedded .focus-task-editor-actions { display:flex; justify-content:flex-end; gap:9px; margin-top:7px; }
 .orin-shell .focus-embedded .focus-task-hint { color:var(--muted); font-size:12px; line-height:1.6; }
