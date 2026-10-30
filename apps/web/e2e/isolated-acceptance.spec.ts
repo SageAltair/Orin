@@ -6,6 +6,9 @@ const enabled = process.env.ORIN_ISOLATED_E2E === "true";
 const isolatedApi = "http://127.0.0.1:18100";
 const isolatedWeb = "http://127.0.0.1:15273";
 
+// Keep local date/time input assertions independent of runner timezone.
+test.use({ timezoneId: "UTC" });
+
 test("isolated PostgreSQL browser journey persists Writing and delivers task reminders", async ({
   page,
   request,
@@ -74,6 +77,57 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const tasks = await request.get(`${isolatedApi}/api/v1/tasks`, { headers });
   expect(tasks.status()).toBe(200);
   expect((await tasks.json() as Array<{ id: string }>).some(row => row.id === task.id)).toBe(true);
+
+  // Real Tasks UI against PostgreSQL, not mocked route fixtures.
+  await page.getByRole("navigation", { name: "Focus navigation" })
+    .getByRole("button", { name: "Tasks" }).click();
+  let workspace = page.locator(".focus-task-collection");
+  await expect(workspace.getByRole("button", { name: /All tasks/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable due-task reminder")).toBeVisible();
+  await workspace.getByRole("button", { name: "New task" }).click();
+  await workspace.getByLabel("Task name").fill("Disposable scheduled browser task");
+  await workspace.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
+  await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
+  await workspace.getByLabel("Project", { exact: true }).selectOption(project.id);
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable scheduled browser task")).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("navigation", { name: "Focus navigation" })
+    .getByRole("button", { name: "Tasks" }).click();
+  workspace = page.locator(".focus-task-collection");
+  await workspace.locator(".focus-task-list")
+    .getByRole("button", { name: "Edit Disposable scheduled browser task" }).click();
+  await expect(workspace.getByLabel("Due date and time (local)"))
+    .toHaveValue("2099-11-02T09:45");
+  await expect(workspace.getByLabel("Project", { exact: true })).toHaveValue(project.id);
+  await workspace.getByLabel("Task name").fill("Disposable scheduled browser task revised");
+  await workspace.getByRole("button", { name: "Save task" }).click();
+  const updatedRow = workspace.locator(".focus-task-list li")
+    .filter({ hasText: "Disposable scheduled browser task revised" });
+  await expect(updatedRow).toBeVisible();
+  await updatedRow.getByRole("button", {
+    name: "Complete Disposable scheduled browser task revised",
+  }).click();
+  await workspace.getByRole("navigation", { name: "Task views" })
+    .getByRole("button", { name: /Completed/ }).click();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable scheduled browser task revised")).toBeVisible();
+  const persistedTasks = await request.get(isolatedApi + "/api/v1/tasks?limit=100&offset=0", { headers });
+  expect(persistedTasks.status()).toBe(200);
+  const persisted = (await persistedTasks.json()) as Array<{
+    title: string; status: string; priority: string; project_id: string | null; due_at: string | null;
+  }>;
+  expect(persisted).toContainEqual(expect.objectContaining({
+    title: "Disposable scheduled browser task revised",
+    status: "done",
+    priority: "high",
+    project_id: project.id,
+    due_at: "2099-11-02T09:45:00Z",
+  }));
 
   await expect.poll(async () => {
     const response = await request.get(`${isolatedApi}/api/v1/notifications`, { headers });
