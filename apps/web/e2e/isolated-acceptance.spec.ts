@@ -79,8 +79,12 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect((await tasks.json() as Array<{ id: string }>).some(row => row.id === task.id)).toBe(true);
 
   // Real Tasks UI against PostgreSQL, not mocked route fixtures.
-  await page.getByRole("navigation").first()
+  await page.getByRole("navigation", { name: "Workspace" })
     .getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.locator('[data-orin-control="tasks-workspace"]')).toBeVisible();
+  const focusTasks = page.getByRole("navigation", { name: "Focus navigation" })
+    .getByRole("button", { name: "Tasks", exact: true });
+  if (await focusTasks.count()) await focusTasks.click();
   let workspace = page.locator(".focus-task-collection");
   await expect(workspace.getByRole("button", { name: /All tasks/ }))
     .toHaveAttribute("aria-pressed", "true");
@@ -96,8 +100,12 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     .getByText("Disposable scheduled browser task")).toBeVisible();
 
   await page.reload();
-  await page.getByRole("navigation").first()
+  await page.getByRole("navigation", { name: "Workspace" })
     .getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.locator('[data-orin-control="tasks-workspace"]')).toBeVisible();
+  const focusTasks = page.getByRole("navigation", { name: "Focus navigation" })
+    .getByRole("button", { name: "Tasks", exact: true });
+  if (await focusTasks.count()) await focusTasks.click();
   workspace = page.locator(".focus-task-collection");
   await workspace.locator(".focus-task-list")
     .getByRole("button", { name: "Edit Disposable scheduled browser task" }).click();
