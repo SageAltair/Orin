@@ -15,9 +15,24 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
   const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const rows = await request<Task[]>(`/tasks?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`);
-    if (!Array.isArray(rows)) throw new Error("Task reminder sync returned an invalid page.");
+    if (!Array.isArray(rows) || rows.length > PAGE_SIZE) {
+      throw new Error("Task reminder sync returned an invalid page.");
+    }
     for (const task of rows) {
-      if (seen.has(task.id)) continue;
+      if (!task || typeof task.id !== "string" || !task.id ||
+          !["todo", "in_progress", "blocked", "done", "cancelled"].includes(task.status) ||
+          (task.due_at !== null && (
+            typeof task.due_at !== "string" ||
+            !/(?:Z|[+-]\d{2}:\d{2})$/.test(task.due_at) ||
+            !Number.isFinite(Date.parse(task.due_at))
+          ))) {
+        throw new Error("Task reminder sync returned an invalid record.");
+      }
+      // Offset pages can shift after another client edits tasks.
+      // Reject overlap rather than silently cancelling an omitted OS alert.
+      if (seen.has(task.id)) {
+        throw new Error("Overlapping task reminder pages; device schedules were preserved.");
+      }
       seen.add(task.id);
       if (task.status === "done" || task.status === "cancelled" || !task.due_at) continue;
       const due = Date.parse(task.due_at);
@@ -28,7 +43,10 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
     }
     if (rows.length < PAGE_SIZE) return upcoming;
   }
-  throw new Error("Task reminder sync exceeded 10,000 tasks. Existing device reminders were preserved.");
+  // Exactly 10,000 tasks are valid only if the next page is empty.
+  const extra = await request<Task[]>("/tasks?limit=1&offset=" + MAX_PAGES * PAGE_SIZE);
+  if (Array.isArray(extra) && extra.length === 0) return upcoming;
+  throw new Error("Task reminder sync exceeds 10,000 tasks or returned an invalid page. Existing device reminders were preserved.");
 }
 
 // The inbox API defaults to 100 newest-due notifications. Without pagination,
