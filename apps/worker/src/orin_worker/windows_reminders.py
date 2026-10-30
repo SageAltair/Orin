@@ -167,7 +167,7 @@ def _validate_notification_policy(prefs: dict[str, object]) -> None:
     end = prefs.get("quiet_end")
     if not isinstance(zone, str) or not zone or not isinstance(start, str) or not isinstance(end, str):
         raise ValueError("Invalid notification quiet-hours preferences")
-    if not all(re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", value) for value in (start, end)):
+    if not all(re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value) for value in (start, end)):
         raise ValueError("Invalid notification quiet-hours time")
     try:
         ZoneInfo(zone)
