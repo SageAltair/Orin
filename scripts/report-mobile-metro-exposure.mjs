@@ -11,6 +11,7 @@ const watchedSource = /(?:^|\/)node_modules\/(@expo\/cli|zod|deepmerge)(?:\/|$)/
 
 export function summarizeSourceMaps(maps) {
   const counts = Object.fromEntries(watched.map(name => [name, 0]));
+  const samples = Object.fromEntries(watched.map(name => [name, []]));
   let sourceCount = 0;
   function visit(map) {
     if (!map || typeof map !== "object") throw new Error("Invalid Metro source map");
@@ -23,7 +24,14 @@ export function summarizeSourceMaps(maps) {
       if (typeof source !== "string") throw new Error("Invalid Metro source path");
       sourceCount++;
       const normalized = source.replaceAll("\\", "/");
-      for (const match of normalized.matchAll(watchedSource)) counts[match[1]]++;
+      for (const match of normalized.matchAll(watchedSource)) {
+        const name = match[1];
+        counts[name]++;
+        // Keep only package-relative paths, never CI runner or developer paths.
+        const start = normalized.indexOf(`node_modules/${name}`, match.index);
+        const relative = normalized.slice(start + "node_modules/".length);
+        if (samples[name].length < 5 && !samples[name].includes(relative)) samples[name].push(relative);
+      }
     }
   }
   for (const map of maps) visit(map);
@@ -35,6 +43,7 @@ export function summarizeSourceMaps(maps) {
     audited_packages: Object.fromEntries(watched.map(name => [name, {
       source_occurrences: counts[name],
       observed_in_js_graph: counts[name] > 0,
+      sample_package_paths: samples[name],
     }])),
     limitation: "Absence from these maps is not proof that a package or vulnerability is absent from an APK, native libraries, build tooling, or other execution paths.",
   };
