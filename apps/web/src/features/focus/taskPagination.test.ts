@@ -36,7 +36,6 @@ describe("task workspace pagination", () => {
       .rejects.toThrow("Overlapping tasks pages");
   });
 
-
   it("confirms the complete identity set for a stable multi-page inventory", async () => {
     const records = Array.from({ length: 217 }, (_, index) => ({ id: "task-" + index }));
     const fetchPage = vi.fn(async (offset: number, limit: number) => records.slice(offset, offset + limit));
@@ -57,6 +56,23 @@ describe("task workspace pagination", () => {
     });
     // First pass returns a,b,d,e with no overlap, silently omitting c.
     // Second pass returns b,c,d,e, so the loader must reject the snapshot.
+    await expect(fetchAllPagesWithIdentityCheck(fetchPage, "tasks", (row) => row.id, 2, 5))
+      .rejects.toThrow("tasks changed during pagination");
+  });
+
+
+  it("confirms an exact full-page boundary after a deletion shift", async () => {
+    const afterDeletion = [{ id: "b" }, { id: "c" }];
+    let firstPage = true;
+    const fetchPage = vi.fn(async (offset: number, limit: number) => {
+      if (firstPage) {
+        firstPage = false;
+        return [{ id: "a" }, { id: "b" }];
+      }
+      return afterDeletion.slice(offset, offset + limit);
+    });
+    // The first page is full, but the deletion makes the boundary probe
+    // empty and hides c unless we confirm the full-page identity set.
     await expect(fetchAllPagesWithIdentityCheck(fetchPage, "tasks", (row) => row.id, 2, 5))
       .rejects.toThrow("tasks changed during pagination");
   });
