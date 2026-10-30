@@ -479,12 +479,12 @@ function PreferenceSettings({
             Priority guidance
             <select aria-label="Priority guidance" value={preferences.priorityGuidanceMode}
               onChange={(event) => onChange({ ...preferences, priorityGuidanceMode: event.target.value as UserPreferences["priorityGuidanceMode"] })}>
-              <option value="balanced">Balanced - daily planning, intervene only when important work is at risk</option>
-              <option value="proactive">Proactive - surface more at-risk commitments</option>
-              <option value="planning-only">Planning-only - never interrupt for priority guidance</option>
+              <option value="balanced">Balanced - prioritize important commitments</option>
+              <option value="proactive">Proactive - prepare more at-risk guidance</option>
+              <option value="planning-only">Planning-only - rank tasks without interruptions</option>
             </select>
           </label>
-          <p>Priority suggestions respect focus, quiet hours and snooze. This setting does not bypass device notification permissions.</p>
+          <p>Priority outlook currently provides suggestions only. Automatic priority interventions are not yet enabled and will remain subject to focus, quiet hours, snooze and device permissions.</p>
           <label>
             Autonomy mode
             <select
