@@ -1,5 +1,5 @@
 import type { Task } from "../../api";
-import { dueAtForEdit, toLocalDateTime } from "./taskViews";
+import { toLocalDateTime, toUtcDueAt } from "./taskViews";
 
 export type TaskDraft = {
   title: string;
@@ -23,15 +23,30 @@ export const draftFromTask = (task: Task): TaskDraft => ({
   project_id: task.project_id ?? "",
 });
 
-export function taskPayload(draft: TaskDraft, originalDue: string | null, originalStatus?: Task["status"]) {
+type EditableTask = Pick<Task, "title" | "description" | "priority" | "status" | "project_id" | "due_at">;
+
+/** PATCH only fields changed since opening the editor.
+
+    Unrelated server-side edits from another device must not be overwritten
+    by stale status, due date, project, priority or description values.
+*/
+export function taskPayload(draft: TaskDraft, original?: EditableTask) {
+  const title = draft.title.trim();
+  const description = draft.description.trim() || null;
+  const projectId = draft.project_id || null;
+  if (!original) {
+    return {
+      title, description, priority: draft.priority, status: draft.status,
+      project_id: projectId, due_at: toUtcDueAt(draft.due),
+    };
+  }
   return {
-    title: draft.title.trim(),
-    description: draft.description.trim() || null,
-    priority: draft.priority,
-    // An unchanged status must not reset Today/Active focus placement on an edit.
-    ...(originalStatus === undefined || draft.status !== originalStatus ? { status: draft.status } : {}),
-    project_id: draft.project_id || null,
-    due_at: dueAtForEdit(draft.due, originalDue),
+    ...(title !== original.title ? { title } : {}),
+    ...(description !== original.description ? { description } : {}),
+    ...(draft.priority !== original.priority ? { priority: draft.priority } : {}),
+    ...(draft.status !== original.status ? { status: draft.status } : {}),
+    ...(projectId !== original.project_id ? { project_id: projectId } : {}),
+    ...(draft.due !== toLocalDateTime(original.due_at) ? { due_at: toUtcDueAt(draft.due) } : {}),
   };
 }
 
