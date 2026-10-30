@@ -757,10 +757,11 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
-    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
+    assert args[1:6] == ("-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command")
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "secret-bearer-token" not in str(args)
     assert kwargs["check"] is True
+    assert kwargs["stdin"] == subprocess.DEVNULL
 
 
 def test_registration_probe_script_never_displays_toast_or_runs_shortcut(tmp_path):
@@ -792,11 +793,12 @@ def test_registration_diagnostic_uses_pinned_powershell_without_credentials(tmp_
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
-    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
-    assert ".Show(" not in args[4]
+    assert args[1:6] == ("-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command")
+    assert ".Show(" not in args[6]
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "private-bearer-value" not in str(args)
     assert kwargs["check"] is True
+    assert kwargs["stdin"] == subprocess.DEVNULL
     assert "Visible delivery is still unverified" in capsys.readouterr().out
 
 
