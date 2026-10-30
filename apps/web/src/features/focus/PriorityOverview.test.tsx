@@ -18,7 +18,7 @@ describe("priority outlook", () => {
     />);
     expect(html).toContain("Current workspace commitment");
     expect(html).toContain("Include tasks from all my workspaces");
-    expect(html).toContain("Read-only, no alerts sent");
+    expect(html).toContain("No automatic changes or alerts.");
     expect(html).toContain("Edit Current workspace commitment");
     expect(html).not.toContain("checked");
   });
