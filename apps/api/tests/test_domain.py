@@ -88,6 +88,51 @@ def test_editing_closed_task_preserves_requested_status_and_clears_stale_dates(
     assert next(item for item in persisted if item["id"] == task["id"])["status"] == target
 
 
+@pytest.mark.parametrize("bad_due", [
+    "2026-10-29T12:00:00",
+    "2026-10-29T12:00:00+15:00",
+    "2026-10-29T12:00:00-14:01",
+    "2026-02-31T12:00:00Z",
+    "0001-01-01T00:00:00Z",
+])
+def test_task_deadline_rejects_naive_invalid_dates_and_offsets_without_mutation(
+    client: TestClient, bad_due: str,
+) -> None:
+    valid = client.post("/api/v1/tasks", json={
+        "title": "Preserve valid deadline", "due_at": "2026-12-01T12:00:00Z",
+    })
+    assert valid.status_code == 201
+    task = valid.json()
+
+    rejected_create = client.post("/api/v1/tasks", json={
+        "title": "Invalid deadline", "due_at": bad_due,
+    })
+    assert rejected_create.status_code == 422
+    rejected_update = client.patch(f"/api/v1/tasks/{task['id']}", json={
+        "due_at": bad_due,
+    })
+    assert rejected_update.status_code == 422
+
+    tasks = client.get("/api/v1/tasks").json()
+    assert len([row for row in tasks if row["title"] == "Invalid deadline"]) == 0
+    assert next(row for row in tasks if row["id"] == task["id"])["due_at"] == task["due_at"]
+
+
+def test_task_deadline_accepts_legal_offsets_and_explicit_clear(client: TestClient) -> None:
+    created = client.post("/api/v1/tasks", json={
+        "title": "Legal offset", "due_at": "2024-02-29T12:00:00+14:00",
+    })
+    assert created.status_code == 201
+    task_id = created.json()["id"]
+    updated = client.patch(f"/api/v1/tasks/{task_id}", json={
+        "due_at": "2024-02-29T12:00:00-14:00",
+    })
+    assert updated.status_code == 200
+    cleared = client.patch(f"/api/v1/tasks/{task_id}", json={"due_at": None})
+    assert cleared.status_code == 200
+    assert cleared.json()["due_at"] is None
+
+
 def test_task_and_project_pagination_has_stable_unique_tie_breakers(client: TestClient) -> None:
     # Multiple records can share identical sort timestamps (bulk imports,
     # database precision). Offset pages must have a deterministic final key.

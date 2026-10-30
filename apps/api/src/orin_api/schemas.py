@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated, Literal
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints
+from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, EmailStr, Field, StringConstraints
 
 from orin_api.models import Density, EnergyLevel, FocusState, ProjectStatus, TaskPriority, TaskStatus, Theme
 
@@ -125,6 +125,17 @@ class MilestoneRead(BaseModel):
     updated_at: datetime
 
 
+def _validate_task_due_offset(value: datetime) -> datetime:
+    """Reject ambiguous deadlines and offsets that cannot exist in civil time."""
+    offset = value.utcoffset()
+    if offset is None or abs(offset) > timedelta(hours=14) or value.year < 1000:
+        raise ValueError("Task due date requires a valid timezone offset and year")
+    return value
+
+
+TaskDueAt = Annotated[AwareDatetime, AfterValidator(_validate_task_due_offset)]
+
+
 class TaskCreate(BaseModel):
     title: TaskTitle
     description: str | None = None
@@ -134,7 +145,7 @@ class TaskCreate(BaseModel):
     assignee_id: uuid.UUID | None = None
     status: TaskStatus = TaskStatus.TODO
     priority: TaskPriority = TaskPriority.NORMAL
-    due_at: datetime | None = None
+    due_at: TaskDueAt | None = None
     first_step: str | None = None
     why: str | None = None
     energy_level: EnergyLevel | None = None
@@ -152,7 +163,7 @@ class TaskUpdate(BaseModel):
     assignee_id: uuid.UUID | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
-    due_at: datetime | None = None
+    due_at: TaskDueAt | None = None
     first_step: str | None = None
     why: str | None = None
     energy_level: EnergyLevel | None = None
