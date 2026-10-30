@@ -159,6 +159,18 @@ describe("paginated device notification inbox", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
+  it("accepts an exactly full 10,000-record inbox only after confirming the next page is empty", async () => {
+    vi.mocked(request).mockImplementation(async (path) => {
+      const params = new URLSearchParams(path.split("?")[1]);
+      const offset = Number(params.get("offset"));
+      const limit = Number(params.get("limit"));
+      return (offset === 10_000 ? [] : Array.from({ length: limit }, (_, index) => reminder(`id-${offset + index}`))) as never;
+    });
+    expect(await fetchDeviceReminderInbox()).toHaveLength(10_000);
+    expect(vi.mocked(request)).toHaveBeenCalledTimes(51);
+    expect(vi.mocked(request).mock.calls.at(-1)?.[0]).toBe("/notifications?limit=1&offset=10000");
+  });
+
   it("rejects malformed notification records before scheduling", async () => {
     vi.mocked(request).mockResolvedValueOnce([{ due_at: due }] as never);
     await expect(fetchDeviceReminderInbox()).rejects.toThrow("invalid record");
