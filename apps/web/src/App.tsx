@@ -98,6 +98,7 @@ import { ActivityTimeline } from "./ActivityTimeline";
 import { GitHubSettings } from "./GitHubSettings";
 import { FocusExperience } from "./features/focus/FocusExperience";
 import { TaskCollection } from "./features/focus/TaskCollection";
+import { fetchAllPages } from "./features/focus/taskPagination";
 import { QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { FocusSessions } from "./FocusSessions";
 import { CalendarWorkspace } from "./CalendarWorkspace";
@@ -109,6 +110,11 @@ import { SidebarWorkspaces } from "./SidebarWorkspaces";
 import { attemptSignOut, clearSignOutUnconfirmed, isSignOutUnconfirmed, UNCONFIRMED_SIGN_OUT_MESSAGE } from "./signOut";
 
 const focusRolloutEnabled = import.meta.env.VITE_FOCUS_ENABLED === "true";
+// Keep project navigation consistent with the paginated Tasks project picker.
+const fetchWorkspaceProjects = () => fetchAllPages<Project>(
+  (offset, limit) => request<Project[]>(`/projects?limit=${limit}&offset=${offset}`),
+  "projects", 100, 50, project => project.id,
+);
 
 const storageKey = "orin.preferences.v1";
 const conversationStorageKey = "orin.activeConversation.v1";
@@ -937,7 +943,7 @@ export default function App() {
     }).catch(() => undefined);
     Promise.all([
       request<Task[]>("/tasks?limit=100"),
-      request<Project[]>("/projects"),
+      fetchWorkspaceProjects(),
       request<Preferences>("/users/me/preferences"),
       request<Approval[]>("/approvals"),
       request<EnvironmentPreference[]>("/environment/preferences"),
@@ -1205,7 +1211,7 @@ export default function App() {
       if (result.status === "completed") {
         const [t, p, prefs, environment] = await Promise.all([
           request<Task[]>("/tasks"),
-          request<Project[]>("/projects"),
+          fetchWorkspaceProjects(),
           request<Preferences>("/users/me/preferences"),
           request<EnvironmentPreference[]>("/environment/preferences"),
         ]);
