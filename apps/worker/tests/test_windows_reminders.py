@@ -39,8 +39,8 @@ def api(tasks: list[dict[str, object]], *, enabled=True, categories=None, owner=
             return httpx.Response(status if status != 200 else 200, json={"id": owner})
         if request.url.path.endswith("/notifications/preferences"):
             return httpx.Response(200, json=prefs)
-        if request.url.path.endswith("/focus/now"):
-            payload = focus_payload if focus_payload is not None else {"focus_session": focus_session}
+        if request.url.path.endswith("/focus-sessions"):
+            payload = focus_payload if focus_payload is not None else ([focus_session] if focus_session else [])
             return httpx.Response(focus_status, json=payload)
         if request.url.path.endswith("/tasks"):
             assert request.headers["X-Orin-Workspace-Id"] == WORKSPACE
@@ -83,11 +83,13 @@ def test_future_task_waits_until_lead_time_then_delivers_once(tmp_path):
     queue.close()
 
 
-def test_active_focus_suppresses_alert_until_session_ends(tmp_path):
+def test_active_standalone_focus_suppresses_alert_until_session_ends(tmp_path):
     queue = ledger(tmp_path)
     alerts = []
+    # A session without a task is omitted by /focus/now but returned by
+    # /focus-sessions, matching the server's global respect_focus policy.
     with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
-             focus_session={"status": "active"}) as client:
+             focus_session={"status": "active", "task_id": None}) as client:
         assert run_once(client, queue, now=NOW, notify=lambda: alerts.append("toast")) == 0
     assert len(queue.due(NOW)) == 1
     with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True}) as client:
@@ -113,6 +115,25 @@ def test_focus_api_failure_and_malformed_state_fail_closed(tmp_path):
         with pytest.raises(httpx.HTTPStatusError):
             run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
     assert queue.due(NOW) == []
+    queue.close()
+
+
+def test_inactive_focus_history_does_not_block_reminder(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_payload=[{"status": "completed"}, {"status": "paused"},
+                            {"status": "expired"}]) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: None) == 1
+    queue.close()
+
+
+def test_malformed_focus_history_fails_closed_even_if_active_present(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)], prefs_extra={"respect_focus": True},
+             focus_payload=[{"status": "active"}, {"unknown": True}]) as client:
+        with pytest.raises(ValueError, match="Invalid Focus session"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert queue.due(NOW) == [("a", NOW + 60)]
     queue.close()
 
 
