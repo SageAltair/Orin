@@ -1701,6 +1701,7 @@ export default function App() {
                     onSignOut={() => { void handleSignOut(); }}
                     embedded
                     onScheduleTask={scheduleTask}
+                    onOpenProject={openProject}
                     activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                   /></div>
@@ -1710,6 +1711,7 @@ export default function App() {
                     activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                     onScheduleTask={scheduleTask}
+                    onOpenProject={openProject}
                     onTaskSaved={(updated) => {
                       // An old workspace's in-flight save must never populate
                       // the newly selected workspace's dashboard.
