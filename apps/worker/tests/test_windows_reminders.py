@@ -30,7 +30,8 @@ def api(tasks: list[dict[str, object]], *, enabled=True, categories=None, owner=
         status=200, prefs_extra=None, focus_session=None, focus_status=200,
         focus_payload=None) -> httpx.Client:
     prefs = {"enabled": enabled, "categories": categories if categories is not None else ["tasks"],
-             "quiet_enabled": False, "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00"}
+             "quiet_enabled": False, "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00",
+             "respect_focus": True}
     prefs.update(prefs_extra or {})
 
     def handler(request: httpx.Request) -> httpx.Response:
