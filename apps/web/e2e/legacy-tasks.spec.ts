@@ -104,4 +104,8 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await workspace.getByRole("button", { name: "Complete Review findings after refresh" }).click();
   await taskViews.getByRole("button", { name: /Completed/ }).click();
   await expect(workspace.getByRole("button", { name: "Reopen Review findings after refresh" })).toBeVisible();
+
+  // A task's project association is navigable, not just an inert label.
+  await workspace.locator(".focus-task-list").getByRole("button", { name: "Open project Research" }).click();
+  await expect(page.locator('[data-orin-control="projects-workspace"]')).toBeVisible();
 });
