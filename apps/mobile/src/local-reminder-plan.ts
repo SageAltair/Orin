@@ -39,39 +39,58 @@ function inQuietHours(fireAt: number, policy: NotificationPolicy): boolean {
   }
 }
 
-// The server holds unread alerts through quiet hours. Device-only reminders
-// must likewise defer rather than disappear when the app remains closed.
-// Search around the next local quiet-end boundary in UTC so DST transitions
-// do not rely on a fixed timezone offset.
+// The server retains unread alerts through quiet hours. The device planner
+// defers to the first allowed minute, including ambiguous or missing wall-clock
+// minutes at daylight-saving transitions.
 function afterQuietHours(fireAt: number, policy: NotificationPolicy): number | null {
   if (!policy.quiet_enabled) return fireAt;
-  const validTime = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const validTime = /^([01]\\d|2[0-3]):[0-5]\\d$/;
   if (!validTime.test(policy.quiet_start) || !validTime.test(policy.quiet_end)) return null;
   if (policy.quiet_start === policy.quiet_end) return null;
   if (!inQuietHours(fireAt, policy)) return fireAt;
   try {
-    const parts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: policy.timezone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-    }).formatToParts(new Date(fireAt));
-    const hour = Number(parts.find((part) => part.type === "hour")?.value);
-    const minute = Number(parts.find((part) => part.type === "minute")?.value);
-    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    const formatter = new Intl.DateTimeFormat("en-GB", {
+      timeZone: policy.timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+    });
+    const localAt = (utc: number) => {
+      const parts = formatter.formatToParts(new Date(utc));
+      const part = (name: string) => Number(parts.find((item) => item.type === name)?.value);
+      const year = part("year"), month = part("month"), day = part("day");
+      const hour = part("hour"), minute = part("minute");
+      if (![year, month, day, hour, minute].every(Number.isFinite)) {
+        throw new Error("Invalid timezone date");
+      }
+      return {
+        minuteOfDay: hour * 60 + minute,
+        offset: Date.UTC(year, month - 1, day, hour, minute) - Math.floor(utc / 60_000) * 60_000,
+      };
+    };
+    const [startHour, startMinute] = policy.quiet_start.split(":").map(Number);
     const [endHour, endMinute] = policy.quiet_end.split(":").map(Number);
+    const start = startHour! * 60 + startMinute!;
     const end = endHour! * 60 + endMinute!;
-    const local = hour * 60 + minute;
-    const minutesToEnd = ((end - local + 1440) % 1440) || 1440;
-    let upper = fireAt + minutesToEnd * 60_000;
-    // A fall-back DST transition can put the estimated boundary inside quiet
-    // hours. Allow three hours of correction, otherwise fail closed.
-    for (let i = 0; i < 180 && inQuietHours(upper, policy); i++) upper += 60_000;
-    if (inQuietHours(upper, policy)) return null;
-    let lower = fireAt;
-    while (upper - lower > 60_000) {
-      const middle = lower + Math.ceil((upper - lower) / 120_000) * 60_000;
-      if (inQuietHours(middle, policy)) lower = middle;
-      else upper = middle;
+    const isQuiet = (minute: number) =>
+      start < end ? minute >= start && minute < end : minute >= start || minute < end;
+    const initial = localAt(fireAt);
+    const minutesToEnd = ((end - initial.minuteOfDay + 1440) % 1440) || 1440;
+    const estimated = Math.floor(fireAt / 60_000) * 60_000 + minutesToEnd * 60_000;
+    const estimatedLocal = localAt(estimated);
+    // On ordinary days the UTC offset stays constant, so this is exact and
+    // avoids a minute-by-minute search for every scheduled task.
+    if (initial.offset === estimatedLocal.offset && estimatedLocal.minuteOfDay === end) {
+      return estimated;
     }
-    return upper;
+    // A clock change can make quiet status non-monotonic (the repeated 01:00
+    // hour may briefly become allowed). Binary search would skip that window.
+    // DST is rare; use a bounded, minute-accurate scan only on those days.
+    const last = fireAt + 27 * 60 * 60_000;
+    for (let cursor = Math.floor(fireAt / 60_000) * 60_000 + 60_000;
+      cursor <= last; cursor += 60_000) {
+      if (!isQuiet(localAt(cursor).minuteOfDay)) return cursor;
+    }
+    return null;
   } catch {
     return null;
   }
