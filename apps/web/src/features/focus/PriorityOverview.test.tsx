@@ -13,12 +13,13 @@ describe("priority outlook", () => {
   it("defaults to current workspace only with an explicit cross-workspace opt-in", () => {
     const html = renderToStaticMarkup(<PriorityOverview
       tasks={[makeTask("Current workspace commitment")]}
-      activeWorkspaceId="work" mode="balanced"
+      activeWorkspaceId="work" mode="balanced" onEditTask={() => undefined}
       now={new Date("2026-10-30T12:00:00Z")}
     />);
     expect(html).toContain("Current workspace commitment");
     expect(html).toContain("Include tasks from all my workspaces");
     expect(html).toContain("Read-only, no alerts sent");
+    expect(html).toContain("Edit Current workspace commitment");
     expect(html).not.toContain("checked");
   });
 
