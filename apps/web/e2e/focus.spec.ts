@@ -336,6 +336,10 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
     id: "work-deadline", title: "Work-only deadline", description: null, status: "todo",
     priority: "urgent", due_at: "2099-10-13T14:00:00Z", project_id: null,
     workspace_id: "work", created_at: timestamp, updated_at: timestamp,
+  }, {
+    id: "unscoped-deadline", title: "Legacy unscoped deadline", description: null,
+    status: "todo", priority: "high", due_at: "2099-10-13T14:00:00Z",
+    project_id: null, workspace_id: null, created_at: timestamp, updated_at: timestamp,
   }] }));
   await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [
     { id: "personal", name: "Personal" }, { id: "work", name: "Work" },
@@ -351,6 +355,9 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
   await expect(outlook.locator(".focus-priority-list")).toContainText("Work");
   const otherWorkspace = outlook.locator(".focus-priority-list li").filter({ hasText: "Work-only deadline" });
   await expect(otherWorkspace.getByRole("button")).toHaveCount(0);
+  const unscoped = outlook.locator(".focus-priority-list li").filter({ hasText: "Legacy unscoped deadline" });
+  await expect(unscoped).toContainText("Unscoped task");
+  await expect(unscoped.getByRole("button")).toHaveCount(0);
   await optIn.uncheck();
   await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
   await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
