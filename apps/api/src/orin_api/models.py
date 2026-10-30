@@ -245,6 +245,7 @@ class UserPreferences(TimestampMixin, Base):
     autonomy_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="balanced", server_default="balanced")
     custom_autonomy: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
     proactive_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="supportive", server_default="supportive")
+    priority_guidance_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="balanced", server_default="balanced")
 
     user: Mapped[User] = relationship(back_populates="preferences")
 
