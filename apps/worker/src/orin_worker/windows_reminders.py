@@ -180,22 +180,17 @@ def _validate_notification_policy(prefs: dict[str, object]) -> None:
 
 
 def _focus_active(client: httpx.Client) -> bool:
-    """Use all authenticated Focus sessions, including those without a task.
+    """Check all active Focus sessions, not just the latest 50 history rows.
 
-    /focus/now selects only sessions attached to unfinished tasks. A standalone
-    active Focus session would be invisible there, bypassing respect_focus.
-    /focus-sessions includes all owner sessions and expires elapsed sessions.
+    The authenticated API expires elapsed sessions and scopes the answer to
+    the bearer-token owner. Missing or malformed state fails closed.
     """
-    response = client.get("/focus-sessions")
+    response = client.get("/focus-sessions/active")
     response.raise_for_status()
-    sessions = response.json()
-    if not isinstance(sessions, list) or len(sessions) > 50:
-        raise ValueError("Invalid Focus sessions")
-    statuses = {"active", "paused", "completed", "cancelled", "expired"}
-    if any(not isinstance(item, dict) or item.get("status") not in statuses for item in sessions):
-        raise ValueError("Invalid Focus session record")
-    return any(item["status"] == "active" for item in sessions)
-
+    state = response.json()
+    if not isinstance(state, dict) or type(state.get("active")) is not bool:
+        raise ValueError("Invalid Focus active state")
+    return state["active"]
 
 def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, tuple[object, object]], int]:
     """Read every task page, including identities of completed tasks.
