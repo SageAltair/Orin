@@ -93,6 +93,16 @@ describe("local Android reminder planner", () => {
     expect(planLocalReminders([], localPolicy, now, [task("tz", due)]))
       .toEqual([{ key: `task:tz:${next}`, fireAt: next }]);
   });
+  it("coalesces simultaneous generic alerts after quiet hours", () => {
+    const quiet = { ...policy, quiet_enabled: true };
+    const due1 = "2026-10-29T22:15:00Z";
+    const due2 = "2026-10-29T23:45:00Z";
+    const fireAt = Date.parse("2026-10-30T07:00:00Z");
+    const result = planLocalReminders([reminder("a", due1), reminder("b", due2)],
+      quiet, now, [task("c", due1)]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.fireAt).toBe(fireAt);
+  });
   it("handles spring-forward and fall-back quiet-hour boundaries", () => {
     const eastern = { ...policy, quiet_enabled: true, timezone: "America/New_York" };
     const springNow = Date.parse("2027-03-14T05:00:00Z");
