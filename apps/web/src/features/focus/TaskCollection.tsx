@@ -23,7 +23,7 @@ const fetchAllProjects = () => fetchAllPages<Project>(
   100, 50, (project) => project.id,
 );
 
-export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
+export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
@@ -100,6 +100,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
   }, []);
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
+  const projectNameFor = (id: string) => projects.find(project => project.id === id)?.name ?? "Project task";
   const begin = (task?: Task) => {
     editingBaseline.current = task ?? null;
     setEditingId(task?.id ?? "new");
@@ -184,7 +185,11 @@ export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId 
       <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
         <button type="button" className="focus-task-status" aria-label={`${task.status === "done" || task.status === "cancelled" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" || task.status === "cancelled" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
         <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
-          <span>{task.project_id ? projects.find(project => project.id === task.project_id)?.name ?? "Project task" : "Personal"}
+          <span>{task.project_id ? (onOpenProject
+            ? <button type="button" className="focus-task-project-link"
+                aria-label={`Open project ${projectNameFor(task.project_id)}`}
+                onClick={() => onOpenProject(task.project_id!)}>{projectNameFor(task.project_id)}</button>
+            : projectNameFor(task.project_id)) : "Personal"}
             {task.due_at ? ` · Due ${new Date(task.due_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}` : " · No due date"}
             {task.priority !== "normal" ? ` · ${task.priority} priority` : ""}
             {task.status !== "todo" ? ` · ${task.status.replace("_", " ")}` : ""}</span>
