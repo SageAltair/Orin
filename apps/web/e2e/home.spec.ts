@@ -997,3 +997,31 @@ test("switching projects ignores stale responses and keeps unsaved objective edi
   await expect(page.getByText("0 of 2 tasks complete (0%)")).toBeVisible();
   await expect(page.getByRole("button", { name: /^Beta task\b/ })).toBeVisible();
 });
+
+test("home dashboard counts completed tasks beyond the first API page", async ({ page }) => {
+  await mockApi(page);
+  const inventory = Array.from({ length: 105 }, (_, index) => ({
+    id: `dashboard-task-${index}`,
+    owner_id: "user-1",
+    project_id: null,
+    title: `Dashboard task ${index}`,
+    status: index >= 100 ? "done" : "todo",
+    priority: "normal",
+    due_at: null,
+    created_at: "2026-10-08T00:00:00Z",
+    updated_at: "2026-10-08T00:00:00Z",
+  }));
+  const offsets: number[] = [];
+  await page.route("**/api/v1/tasks?*", route => {
+    const params = new URL(route.request().url()).searchParams;
+    const offset = Number(params.get("offset") ?? 0);
+    const limit = Number(params.get("limit") ?? 100);
+    offsets.push(offset);
+    return route.fulfill({ json: inventory.slice(offset, offset + limit) });
+  });
+  await page.goto("/");
+  await signIn(page);
+  await expect(page.locator(".home-right-rail .focus-summary strong")).toContainText("5/12");
+  expect(offsets).toContain(0);
+  expect(offsets).toContain(100);
+});
