@@ -337,13 +337,27 @@ def _toast_script(app_id: str, shortcut: Path) -> str:
     )
 
 
+def _powershell_executable() -> str:
+    """Use the OS-reported system directory, never PATH, for the toast process."""
+    import ctypes
+
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = ctypes.windll.kernel32.GetSystemDirectoryW(buffer, len(buffer))
+    if not length or length >= len(buffer):
+        raise RuntimeError("Cannot resolve the Windows system directory")
+    executable = Path(buffer.value) / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not executable.is_file():
+        raise RuntimeError("System Windows PowerShell executable is unavailable")
+    return str(executable)
+
+
 def _windows_toast() -> None:
     """Generic content only; fail closed unless the registered identity matches."""
     if os.name != "nt":
         raise RuntimeError("Windows toast delivery requires Windows")
     app_id, shortcut = _toast_identity()
     subprocess.run(
-        ("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+        (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
          _toast_script(app_id, shortcut)),
         check=True, capture_output=True, timeout=15, env=_toast_environment(),
     )
