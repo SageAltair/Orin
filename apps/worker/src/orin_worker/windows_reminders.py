@@ -313,7 +313,7 @@ def _toast_environment() -> dict[str, str]:
     allowed = {
         "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC",
         "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
-        "PROGRAMDATA",
+        "PROGRAMDATA", "PSMODULEANALYSISCACHEPATH",
     }
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
