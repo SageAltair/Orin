@@ -14,8 +14,12 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   task identifiers, due timestamps and toast-attempt markers, never task names.
   A different owner/workspace clears previous queue entries. A single-instance file lock prevents concurrent companions from double-alerting.
 - Checks live authentication, current task state and notification preferences
-  before each delivery pass. HTTP 401/403 or owner mismatch clears the queue.
-  Network failure fails closed without delivering cached reminders.
+  before each delivery pass, then **rechecks authentication and suppression policy
+  immediately before a due toast**. Changes to task opt-in, quiet hours or Focus
+  suppression during a slow task scan take effect before delivery. HTTP 401/403
+  or owner mismatch clears the queue. Network failure fails closed without
+  delivering cached reminders. A still-valid independently supplied token cannot
+  detect browser logout without a client-controlled session bridge.
 - For multi-page task lists, performs a confirming read of all task identities,
   statuses and due timestamps before replacing the durable queue. This detects
   many offset-pagination shifts caused by concurrent edits or deletions, but
