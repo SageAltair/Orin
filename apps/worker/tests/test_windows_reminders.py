@@ -762,6 +762,9 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     assert "secret-bearer-token" not in str(args)
     assert kwargs["check"] is True
     assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"] == subprocess.DEVNULL
+    assert "capture_output" not in kwargs
 
 
 def test_registration_probe_script_never_displays_toast_or_runs_shortcut(tmp_path):
@@ -799,6 +802,9 @@ def test_registration_diagnostic_uses_pinned_powershell_without_credentials(tmp_
     assert "private-bearer-value" not in str(args)
     assert kwargs["check"] is True
     assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"] == subprocess.DEVNULL
+    assert "capture_output" not in kwargs
     assert "Visible delivery is still unverified" in capsys.readouterr().out
 
 
