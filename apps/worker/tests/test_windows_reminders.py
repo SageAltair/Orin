@@ -67,6 +67,51 @@ def test_due_timestamp_must_be_timezone_aware():
         _due_epoch("not-a-date")
 
 
+@pytest.mark.parametrize("raw", [
+    "2026-02-31T12:00:00Z",
+    "2025-02-29T12:00:00Z",
+    "2026-04-31T12:00:00Z",
+    "2026-10-29T12:00:00+15:00",
+    "2026-10-29T12:00:00-14:30",
+    "2026-10-29T12:00:00+23:59",
+    "2026-10-29T12:00:00+00:00:30",
+    "2026-10-29 12:00:00Z",
+    "2026-10-29T12:00:00.1234567890Z",
+    "0001-01-01T00:00:00Z",
+])
+def test_due_timestamp_rejects_impossible_dates_and_offsets(raw):
+    with pytest.raises(ValueError, match="Invalid"):
+        _due_epoch(raw)
+
+
+def test_due_timestamp_accepts_leap_day_precision_and_legal_offsets():
+    assert _due_epoch("2024-02-29T12:34:56.123456789+03:00") == int(
+        datetime(2024, 2, 29, 9, 34, 56, tzinfo=timezone.utc).timestamp()
+    )
+    assert _due_epoch("2024-02-29T12:00+14:00") == int(
+        datetime(2024, 2, 28, 22, 0, tzinfo=timezone.utc).timestamp()
+    )
+    assert _due_epoch("2024-02-29T12:00-14:00") == int(
+        datetime(2024, 3, 1, 2, 0, tzinfo=timezone.utc).timestamp()
+    )
+
+
+@pytest.mark.parametrize("bad_due", [
+    "2026-10-29T12:00:00+15:00",
+    "2026-02-31T12:00:00Z",
+])
+def test_invalid_due_snapshot_preserves_existing_queue_and_never_toasts(tmp_path, bad_due):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    invalid = task("bad", NOW + 60)
+    invalid["due_at"] = bad_due
+    with api([invalid]) as client:
+        with pytest.raises(ValueError, match="Invalid"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert queue.due(NOW) == [("previous", NOW + 60)]
+    queue.close()
+
+
 def test_api_must_be_tls_except_loopback():
     assert _secure_api("https://orin.example")
     assert _secure_api("http://127.0.0.1:8100")

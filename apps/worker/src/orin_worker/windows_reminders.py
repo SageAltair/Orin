@@ -29,6 +29,13 @@ PAGE_SIZE = 100
 LEAD_SECONDS = 30 * 60
 MAX_AGE_SECONDS = 24 * 60 * 60
 POLL_SECONDS = 60
+# Match the Android reminder parser: explicit timezone, real calendar date,
+# and a legal UTC offset. datetime.fromisoformat alone accepts +23:59 and
+# nonstandard separators/offset seconds that could shift Windows alerts.
+_AWARE_DUE_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}"
+    r"(?::[0-9]{2}(?:\.[0-9]{1,9})?)?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
 
 
 def _due_epoch(raw: object) -> int:
@@ -40,6 +47,13 @@ def _due_epoch(raw: object) -> int:
         raise ValueError("Invalid task due timestamp") from error
     if date.tzinfo is None or date.utcoffset() is None:
         raise ValueError("Task due timestamp must include a timezone")
+    if not _AWARE_DUE_RE.fullmatch(raw) or int(raw[:4]) < 1000:
+        raise ValueError("Invalid task due timestamp format")
+    if raw[-1] != "Z":
+        offset = raw[-6:]
+        hours, minutes = int(offset[1:3]), int(offset[4:6])
+        if hours > 14 or minutes > 59 or (hours == 14 and minutes != 0):
+            raise ValueError("Invalid task due timezone offset")
     return int(date.timestamp())
 
 
