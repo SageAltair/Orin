@@ -44,6 +44,26 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   It has **not** been verified on a real Windows desktop. Do not treat subprocess
   success as visible delivery.
 
+## Read-only Windows shortcut diagnostic
+
+On a Windows desktop, install the worker in an isolated virtual environment,
+then configure only `ORIN_WINDOWS_REMINDERS_APP_ID` and
+`ORIN_WINDOWS_REMINDERS_SHORTCUT` to point at an **existing** Start Menu
+shortcut with its matching registered AppUserModelID. Run:
+
+```powershell
+orin-windows-reminders-check
+```
+
+This checks the shortcut's actual `System.AppUserModel.ID` using the
+OS-provided Windows PowerShell. It does **not** send a toast, create a
+shortcut, register an identity, start the companion, contact the API, or
+require a bearer token. Failure exits nonzero and makes no changes.
+A passing diagnostic confirms only registration metadata, not that a toast
+was visible or that Windows allows notifications. Interactive delivery
+acceptance remains mandatory. See Microsoft's
+[desktop toast AppUserModelID requirements](https://learn.microsoft.com/en-us/windows/win32/shell/enable-desktop-toast-with-appusermodelid).
+
 ## Developer-only manual opt-in (after local Windows acceptance)
 
 Install the worker in a virtual environment and launch
