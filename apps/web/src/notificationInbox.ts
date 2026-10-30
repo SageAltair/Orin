@@ -15,3 +15,18 @@ export function fetchCompleteNotificationInbox<T extends { id: string }>(
     fetchPage, "notifications", (row) => row.id, pageSize, maxPages,
   );
 }
+
+/** Recheck local opt-out/category policy before any browser interruption. */
+export function eligibleAttentionItems<T extends {
+  category: string;
+  read_at: string | null;
+  attention_ready: boolean;
+}>(
+  items: readonly T[],
+  policy: { enabled: boolean; categories: readonly string[] },
+): T[] {
+  if (!policy.enabled) return [];
+  const enabledCategories = new Set(policy.categories);
+  return items.filter((item) =>
+    enabledCategories.has(item.category) && item.attention_ready && !item.read_at);
+}
