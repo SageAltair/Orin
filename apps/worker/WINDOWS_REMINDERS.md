@@ -23,9 +23,14 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
 - The current Orin web logout flow does not necessarily revoke an independently
   supplied bearer token. Stop this process and revoke its token on logout or
   account change. A fully integrated session lifecycle is **not implemented**.
-- Windows toast transport requires an interactive user session and a registered
-  app identity for reliable OS acceptance. It has not been verified on a real
-  Windows desktop. Do not treat subprocess success as visible delivery.
+- Windows toast attempts now fail closed unless an existing absolute Start Menu
+  `.lnk` path and a syntactically valid AppUserModelID are explicitly configured.
+  The PowerShell transport checks that the shortcut exposes the same registered
+  `System.AppUserModel.ID` before calling `Show`. It does not install or
+  register a shortcut. These guards are covered only by isolated tests.
+- Toast transport still requires an interactive user session and OS acceptance.
+  It has **not** been verified on a real Windows desktop. Do not treat subprocess
+  success as visible delivery.
 
 ## Developer-only manual opt-in (after local Windows acceptance)
 
@@ -34,8 +39,14 @@ Install the worker in a virtual environment and launch
 `ORIN_WINDOWS_REMINDERS_ENABLED=1`,
 `ORIN_WINDOWS_REMINDERS_API_URL=https://<trusted-api>`,
 `ORIN_WINDOWS_REMINDERS_TOKEN=<short-lived-user-token>`,
-`ORIN_WINDOWS_REMINDERS_OWNER_ID=<owner-uuid>`, and
-`ORIN_WINDOWS_REMINDERS_WORKSPACE_ID=<workspace-uuid>`.
+`ORIN_WINDOWS_REMINDERS_OWNER_ID=<owner-uuid>`,
+`ORIN_WINDOWS_REMINDERS_WORKSPACE_ID=<workspace-uuid>`,
+`ORIN_WINDOWS_REMINDERS_APP_ID=<registered-AppUserModelID>`, and
+`ORIN_WINDOWS_REMINDERS_SHORTCUT=<absolute-Start-Menu-Programs-lnk-path>`.
+The shortcut must already exist in the current-user or all-users Start Menu
+Programs directory and expose that exact AppUserModelID. Missing, mismatched,
+or unregistered identity fails without marking any reminder as attempted.
+Do not create or install a shortcut during automated tests.
 Use an HTTPS API, or loopback HTTP for local development. Do not put bearer
 tokens into tracked scripts, PowerShell history, screenshots, or logs.
 

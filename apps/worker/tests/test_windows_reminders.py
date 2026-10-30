@@ -2,12 +2,17 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
+import os
+import subprocess
+
+import orin_worker.windows_reminders as windows_reminders
 
 import httpx
 import pytest
 
 from orin_worker.windows_reminders import (
-    ReminderLedger, _due_epoch, _quiet, _secure_api, _toast_environment, single_instance, run_once,
+    ReminderLedger, _due_epoch, _quiet, _secure_api, _toast_environment,
+    _toast_identity, _toast_script, single_instance, run_once,
 )
 
 OWNER = "16e447d8-27f9-4b0d-82be-3f0dbf2d899b"
@@ -376,4 +381,67 @@ def test_invalid_task_status_aborts_without_notification(tmp_path):
     with api([record]) as client:
         with pytest.raises(ValueError, match="status"):
             run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no alerts"))
+    queue.close()
+
+
+def test_windows_toast_identity_requires_start_menu_shortcut(tmp_path, monkeypatch):
+    user_root = tmp_path / "user-profile"
+    programs = user_root / "Microsoft" / "Windows" / "Start Menu" / "Programs"
+    programs.mkdir(parents=True)
+    shortcut = programs / "Orin.lnk"
+    shortcut.write_bytes(b"test-only shortcut placeholder")
+    monkeypatch.setenv("APPDATA", str(user_root))
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path / "machine-profile"))
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_APP_ID", "Orin.Desktop")
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_SHORTCUT", str(shortcut))
+    assert _toast_identity() == ("Orin.Desktop", shortcut.resolve())
+
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_APP_ID", "Orin;Write-Host bad")
+    with pytest.raises(RuntimeError, match="AppUserModelID"):
+        _toast_identity()
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_APP_ID", "Orin.Desktop")
+
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_SHORTCUT", str(tmp_path / "outside.lnk"))
+    (tmp_path / "outside.lnk").write_bytes(b"outside")
+    with pytest.raises(RuntimeError, match="Start Menu Programs"):
+        _toast_identity()
+
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_SHORTCUT", str(programs / "missing.lnk"))
+    with pytest.raises(RuntimeError, match="does not exist"):
+        _toast_identity()
+
+
+def test_windows_toast_script_checks_registered_identity_before_show(tmp_path):
+    shortcut = tmp_path / "O'Brien.lnk"
+    script = _toast_script("Orin.Desktop", shortcut)
+    assert "O''Brien.lnk" in script
+    assert "$registered -cne $appId" in script
+    assert script.index("ExtendedProperty('System.AppUserModel.ID')") < script.index(".Show($toast)")
+    assert "CreateToastNotifier($appId)" in script
+    assert "Bearer" not in script
+
+
+
+def test_windows_toast_refuses_unconfigured_identity_before_subprocess(monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.delenv("ORIN_WINDOWS_REMINDERS_APP_ID", raising=False)
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda *args, **kwargs: pytest.fail("no subprocess without identity"))
+    with pytest.raises(RuntimeError, match="AppUserModelID"):
+        windows_reminders._windows_toast()
+
+
+def test_windows_toast_subprocess_failure_does_not_consume_reminder(tmp_path):
+    queue = ledger(tmp_path)
+    with api([task("a", NOW + 60)]) as client:
+        with pytest.raises(subprocess.CalledProcessError):
+            run_once(client, queue, now=NOW, notify=lambda: (_ for _ in ()).throw(
+                subprocess.CalledProcessError(1, "powershell.exe")))
+        assert queue.due(NOW) == [("a", NOW + 60)]
+        assert run_once(client, queue, now=NOW + 1, notify=lambda: None) == 1
     queue.close()

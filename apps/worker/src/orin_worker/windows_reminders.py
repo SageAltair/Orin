@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -245,22 +246,73 @@ def _toast_environment() -> dict[str, str]:
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
-def _windows_toast() -> None:
-    """Generic content only; no task titles, credentials, or user data cross the OS boundary."""
-    if os.name != "nt":
-        raise RuntimeError("Windows toast delivery requires Windows")
-    script = (
+def _toast_identity() -> tuple[str, Path]:
+    """Require an existing Start Menu shortcut with an explicit app identity.
+
+    The shortcut's actual AppUserModelID is checked by the toast subprocess.
+    This function only validates the configured path and identity syntax.
+    """
+    app_id = os.getenv("ORIN_WINDOWS_REMINDERS_APP_ID", "")
+    raw_path = os.getenv("ORIN_WINDOWS_REMINDERS_SHORTCUT", "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,127}", app_id):
+        raise RuntimeError("A valid Windows reminder AppUserModelID is required")
+    if not raw_path or not Path(raw_path).is_absolute() or Path(raw_path).suffix.lower() != ".lnk":
+        raise RuntimeError("An absolute Start Menu .lnk path is required")
+    try:
+        shortcut = Path(raw_path).resolve(strict=True)
+    except OSError as error:
+        raise RuntimeError("Windows reminder Start Menu shortcut does not exist") from error
+    if not shortcut.is_file():
+        raise RuntimeError("Windows reminder shortcut must be a file")
+    roots = []
+    for variable, suffix in (
+        ("APPDATA", ("Microsoft", "Windows", "Start Menu", "Programs")),
+        ("PROGRAMDATA", ("Microsoft", "Windows", "Start Menu", "Programs")),
+    ):
+        base = os.getenv(variable)
+        if base:
+            roots.append((Path(base) / Path(*suffix)).resolve())
+    if not any(shortcut.is_relative_to(root) for root in roots):
+        raise RuntimeError("Windows reminder shortcut must be inside a Start Menu Programs folder")
+    return app_id, shortcut
+
+
+def _ps_quote(value: str) -> str:
+    """Quote a PowerShell single-quoted string without permitting code injection."""
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _toast_script(app_id: str, shortcut: Path) -> str:
+    """Fail before Show unless the existing shortcut exposes the matching AUMID."""
+    return (
         "$ErrorActionPreference='Stop';"
+        "$appId=" + _ps_quote(app_id) + ";"
+        "$shortcutPath=" + _ps_quote(str(shortcut)) + ";"
+        "$shell=New-Object -ComObject Shell.Application;"
+        "$folder=$shell.Namespace((Split-Path -Parent $shortcutPath));"
+        "if ($null -eq $folder) { throw 'Start Menu folder unavailable' };"
+        "$item=$folder.ParseName((Split-Path -Leaf $shortcutPath));"
+        "if ($null -eq $item) { throw 'Start Menu shortcut unavailable' };"
+        "$registered=[string]$item.ExtendedProperty('System.AppUserModel.ID');"
+        "if ($registered -cne $appId) { throw 'Start Menu AppUserModelID mismatch' };"
         "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
         "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]|Out-Null;"
         "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
         "$xml.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>Orin</text>"
         "<text>You have a scheduled task.</text></binding></visual></toast>');"
         "$toast=[Windows.UI.Notifications.ToastNotification]::new($xml);"
-        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Orin').Show($toast)"
+        "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)"
     )
+
+
+def _windows_toast() -> None:
+    """Generic content only; fail closed unless the registered identity matches."""
+    if os.name != "nt":
+        raise RuntimeError("Windows toast delivery requires Windows")
+    app_id, shortcut = _toast_identity()
     subprocess.run(
-        ("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script),
+        ("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+         _toast_script(app_id, shortcut)),
         check=True, capture_output=True, timeout=15, env=_toast_environment(),
     )
 
