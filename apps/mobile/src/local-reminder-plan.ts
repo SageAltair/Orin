@@ -45,7 +45,7 @@ function inQuietHours(fireAt: number, policy: NotificationPolicy): boolean {
 // do not rely on a fixed timezone offset.
 function afterQuietHours(fireAt: number, policy: NotificationPolicy): number | null {
   if (!policy.quiet_enabled) return fireAt;
-  const validTime = /^([01]\\d|2[0-3]):[0-5]\\d$/;
+  const validTime = /^([01]\d|2[0-3]):[0-5]\d$/;
   if (!validTime.test(policy.quiet_start) || !validTime.test(policy.quiet_end)) return null;
   if (policy.quiet_start === policy.quiet_end) return null;
   if (!inQuietHours(fireAt, policy)) return fireAt;
