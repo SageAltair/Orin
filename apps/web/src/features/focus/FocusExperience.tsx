@@ -25,7 +25,8 @@ function readStored<T>(key: string, fallback: T): T {
 
 export function FocusExperience({ name, onSignOut, embedded = false, onScheduleTask, onOpenProject, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { name: string; onSignOut: () => void; embedded?: boolean; onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const focus = useFocusWorkspace();
-  const [surface, setSurface] = useState<Surface>("now");
+  // The main application Tasks route must open All Tasks, not the Focus Now screen.
+  const [surface, setSurface] = useState<Surface>(embedded ? "tasks" : "now");
   const [captureMessage, setCaptureMessage] = useState("");
   const [theme, setTheme] = useState<Theme>(() => readStored("orin.focus.theme.v1", "auto"));
   const [reducedMotion, setReducedMotion] = useState(() => readStored("orin.focus.reduced-motion.v1", false));
