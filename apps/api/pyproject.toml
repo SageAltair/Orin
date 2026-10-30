@@ -20,7 +20,7 @@ dependencies = [
   "httpx>=0.28,<1.0",
   "cryptography>=43,<52",
   "python-multipart>=0.0.20,<1.0",
-  "pypdf>=5,<7",
+  "pypdf>=6.21.3,<7",
   "tzdata>=2024.1,<2027",
 ]
 
