@@ -35,6 +35,10 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   silent/DND bypass.
 - When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions/active` endpoint before a due alert. Unlike the 50-row Focus history, this owner-scoped endpoint includes older active sessions, even without an associated task, and expires elapsed sessions. Active sessions suppress delivery; missing, malformed or unavailable Focus state fails closed. This requires an API version with the active-state endpoint. Tests do not establish real Windows acceptance.
 - Equal quiet-hours start/end bounds mean quiet all day, matching the API policy.
+- Due timestamps are validated against real calendar dates and strict ISO date/time
+  syntax with explicit timezone offsets no greater than 14 hours. Malformed
+  deadlines fail closed before replacing the reminder queue; Python's permissive
+  ISO parser alone would accept invalid offsets such as `+15:00`.
 - The current Orin web logout flow does not necessarily revoke an independently
   supplied bearer token. Stop this process and revoke its token on logout or
   account change. A fully integrated session lifecycle is **not implemented**.
