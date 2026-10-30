@@ -338,6 +338,40 @@ test("personal Tasks respects the account's persisted priority guidance mode", a
   await expect(outlook.getByText("Planning-only")).toBeVisible();
 });
 
+test("all-workspace priorities revalidate after an explicit current-workspace completion", async ({ page }) => {
+  await setupFocus(page);
+  let completed = false;
+  let inventoryReads = 0;
+  await page.route("**/api/v1/priority/tasks?*", route => {
+    inventoryReads += 1;
+    return route.fulfill({ json: completed ? [] : [{
+      id: "inbox-task", title: "Ask the team about the venue", description: null,
+      status: "todo", priority: "normal", due_at: null, project_id: null,
+      workspace_id: "personal", created_at: timestamp, updated_at: timestamp,
+    }] });
+  });
+  await page.route("**/api/v1/workspaces", route => route.fulfill({
+    json: [{ id: "personal", name: "Personal" }],
+  }));
+  await page.route("**/api/v1/tasks/inbox-task", route => {
+    if (route.request().method() !== "PATCH") return route.fallback();
+    completed = true;
+    return route.fulfill({ json: {
+      id: "inbox-task", title: "Ask the team about the venue", description: null,
+      status: "done", priority: "normal", due_at: null, project_id: null,
+      created_at: timestamp, updated_at: timestamp,
+    } });
+  });
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  await outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" }).check();
+  await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
+  await outlook.getByRole("button", { name: "Mark Ask the team about the venue done" }).click();
+  await expect(outlook.getByText("Ask the team about the venue")).toHaveCount(0);
+  expect(inventoryReads).toBeGreaterThanOrEqual(2);
+});
+
 test("priority outlook requires explicit cross-workspace opt-in and can return to private scope", async ({ page }) => {
   await setupFocus(page);
   await page.route("**/api/v1/priority/tasks?*", route => route.fulfill({ json: [{
