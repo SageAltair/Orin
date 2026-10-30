@@ -10,6 +10,7 @@ import threading
 from contextlib import asynccontextmanager
 from orin_api.background import maintenance_loop
 from orin_api.notification_router import router as notification_router
+from orin_api.priority_router import router as priority_router
 from orin_api.privacy_router import router as privacy_router
 from orin_api.metrics import record_request
 
@@ -57,6 +58,7 @@ app.add_middleware(
 )
 app.include_router(privacy_router)
 app.include_router(notification_router)
+app.include_router(priority_router)
 app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(domain_router)
