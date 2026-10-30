@@ -40,7 +40,41 @@ describe("future task device reminder synchronization", () => {
     expect(result).toHaveLength(101);
     expect(result.at(-1)?.id).toBe("last");
     expect(vi.mocked(request).mock.calls.map(([path]) => path))
-      .toEqual(["/tasks?limit=100&offset=0", "/tasks?limit=100&offset=100"]);
+      .toEqual([
+        "/tasks?limit=100&offset=0", "/tasks?limit=100&offset=100",
+        "/tasks?limit=100&offset=0", "/tasks?limit=100&offset=100",
+      ]);
+  });
+
+  it("detects a deletion that shifts offset pages without overlapping IDs", async () => {
+    const original = Array.from({ length: 101 }, (_, i) => task(String(i), due));
+    const afterDeletion = original.slice(1);
+    let scan = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset"));
+      if (offset === 0) scan += 1;
+      // First page is read before deletion; the second page has shifted.
+      const records = scan === 1 && offset === 0 ? original : afterDeletion;
+      return records.slice(offset, offset + 100) as never;
+    });
+    await expect(fetchDeviceReminderTasks(now)).rejects.toThrow("changed during pagination");
+    expect(scan).toBe(2);
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects a deadline edit between confirming task scans", async () => {
+    const original = Array.from({ length: 101 }, (_, i) => task(String(i), due));
+    const edited = original.map((entry) => ({ ...entry }));
+    edited[100]!.due_at = "2026-11-02T15:00:00Z";
+    let scan = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset"));
+      if (offset === 0) scan += 1;
+      return (scan === 1 ? original : edited).slice(offset, offset + 100) as never;
+    });
+    await expect(fetchDeviceReminderTasks(now)).rejects.toThrow("changed during pagination");
+    expect(scan).toBe(2);
+    expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
   it("retains recently overdue tasks so quiet-hour deferrals survive a foreground sync", async () => {
@@ -92,7 +126,7 @@ describe("future task device reminder synchronization", () => {
         Array.from({ length: limit }, (_, i) => task(String(offset + i), due))) as never;
     });
     expect(await fetchDeviceReminderTasks(now)).toHaveLength(10_000);
-    expect(vi.mocked(request)).toHaveBeenCalledTimes(101);
+    expect(vi.mocked(request)).toHaveBeenCalledTimes(202);
     expect(vi.mocked(request).mock.calls.at(-1)?.[0]).toBe("/tasks?limit=1&offset=10000");
   });
 

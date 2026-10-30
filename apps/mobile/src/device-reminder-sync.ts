@@ -18,9 +18,15 @@ function isAwareTimestamp(value: unknown): value is string {
 // The owner-scoped API has offset pagination but no date filter or total count.
 // Fetch every page before touching OS schedules so a network failure cannot
 // silently cancel previously scheduled reminders.
-export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]> {
+type TaskPageSnapshot = {
+  upcoming: Task[];
+  signatures: Map<string, { status: Task["status"]; dueAt: string | null }>;
+  pages: number;
+};
+
+async function scanTaskPages(now: number): Promise<TaskPageSnapshot> {
   const upcoming: Task[] = [];
-  const seen = new Set<string>();
+  const signatures = new Map<string, { status: Task["status"]; dueAt: string | null }>();
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const rows = await request<Task[]>(`/tasks?limit=${PAGE_SIZE}&offset=${page * PAGE_SIZE}`);
     if (!Array.isArray(rows) || rows.length > PAGE_SIZE) {
@@ -36,25 +42,41 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
           ))) {
         throw new Error("Task reminder sync returned an invalid record.");
       }
-      // Offset pages can shift after another client edits tasks.
-      // Reject overlap rather than silently cancelling an omitted OS alert.
-      if (seen.has(task.id)) {
+      if (signatures.has(task.id)) {
         throw new Error("Overlapping task reminder pages; device schedules were preserved.");
       }
-      seen.add(task.id);
+      signatures.set(task.id, { status: task.status, dueAt: task.due_at });
       if (task.status === "done" || task.status === "cancelled" || !task.due_at) continue;
       const due = Date.parse(task.due_at);
-      // A deadline that passed during quiet hours can still have a future
-      // deferred alert. Retain a 48-hour lookback (including DST shifts);
-      // the planner rejects any deadline whose deferred time has passed.
-      if (Number.isFinite(due) && due > now - 48 * 60 * 60 * 1000) upcoming.push(task);
+      // Retain 48 hours of overdue deadlines for deferred quiet-hour alerts.
+      if (due > now - 48 * 60 * 60 * 1000) upcoming.push(task);
     }
-    if (rows.length < PAGE_SIZE) return upcoming;
+    if (rows.length < PAGE_SIZE) return { upcoming, signatures, pages: page + 1 };
   }
   // Exactly 10,000 tasks are valid only if the next page is empty.
-  const extra = await request<Task[]>("/tasks?limit=1&offset=" + MAX_PAGES * PAGE_SIZE);
-  if (Array.isArray(extra) && extra.length === 0) return upcoming;
+  const extra = await request<Task[]>(`/tasks?limit=1&offset=${MAX_PAGES * PAGE_SIZE}`);
+  if (Array.isArray(extra) && extra.length === 0) {
+    return { upcoming, signatures, pages: MAX_PAGES + 1 };
+  }
   throw new Error("Task reminder sync exceeds 10,000 tasks or returned an invalid page. Existing device reminders were preserved.");
+}
+
+// Offset pages can shift without overlapping IDs when another client deletes
+// or edits a task. Confirm every identity/status/deadline before touching OS
+// schedules. This is best-effort consistency, not an atomic database snapshot.
+export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]> {
+  const initial = await scanTaskPages(now);
+  if (initial.pages > 1) {
+    const confirmed = await scanTaskPages(now);
+    if (initial.signatures.size !== confirmed.signatures.size ||
+        [...initial.signatures].some(([id, value]) => {
+          const other = confirmed.signatures.get(id);
+          return !other || other.status !== value.status || other.dueAt !== value.dueAt;
+        })) {
+      throw new Error("Task reminder pages changed during pagination; device schedules were preserved.");
+    }
+  }
+  return initial.upcoming;
 }
 
 // The inbox API defaults to 100 newest-due notifications. Without pagination,
