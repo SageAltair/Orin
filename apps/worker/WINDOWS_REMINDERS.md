@@ -26,7 +26,9 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
 - Windows toast attempts now fail closed unless an existing absolute Start Menu
   `.lnk` path and a syntactically valid AppUserModelID are explicitly configured.
   The PowerShell transport checks that the shortcut exposes the same registered
-  `System.AppUserModel.ID` before calling `Show`. It does not install or
+  `System.AppUserModel.ID` before calling `Show`. It resolves Windows PowerShell
+  from the OS-reported system directory instead of searching `PATH`, and fails
+  closed if the system executable is unavailable. It does not install or
   register a shortcut. These guards are covered only by isolated tests.
 - Toast transport still requires an interactive user session and OS acceptance.
   It has **not** been verified on a real Windows desktop. Do not treat subprocess
