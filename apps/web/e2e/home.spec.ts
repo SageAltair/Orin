@@ -469,7 +469,7 @@ test("activity links open related workspace records and exposes lifecycle event 
     { id: "activity-plan", user_id: "user-1", project_id: null, task_id: null, command_id: "command-1", execution_id: null, approval_id: null, worker_job_id: null, activity_type: "plan_created", summary: "Validated plan created", created_at: "2026-10-08T00:00:00Z", result_status: "succeeded", severity: "info", source: "planner", correlation_id: "command-1", metadata: {} },
     { id: "activity-progress", user_id: "user-1", project_id: null, task_id: null, command_id: "command-1", execution_id: "execution-1", approval_id: null, worker_job_id: "job-1", activity_type: "worker_job_progress", summary: "Worker progress updated", created_at: "2026-10-08T00:00:00Z", result_status: "running", severity: "info", source: "worker", correlation_id: "command-1", metadata: {} },
   ];
-  await page.route("**/api/v1/projects", route => route.fulfill({ json: [project] }));
+  await page.route("**/api/v1/projects*", route => route.fulfill({ json: [project] }));
   await page.route("**/api/v1/tasks", route => route.fulfill({ json: [task] }));
   await page.route("**/api/v1/activity**", route => {
     const query = new URL(route.request().url()).searchParams;
@@ -506,7 +506,7 @@ test("compact work toolbar searches, restores, renames, and starts sessions", as
   const conversations = [
     { id: "conversation-history", title: "Release planning", task_id: "task-history", project_id: project.id, objective: "Plan the release", summary: "Decided the rollout order", pending_question: null, updated_at: updated },
   ];
-  await page.route("**/api/v1/projects", route => route.fulfill({ json: [project] }));
+  await page.route("**/api/v1/projects*", route => route.fulfill({ json: [project] }));
   await page.route("**/api/v1/conversations**", async route => {
     if (route.request().method() === "PATCH") {
       const title = (await route.request().postDataJSON() as { title: string }).title;
@@ -600,7 +600,7 @@ test("home dashboard shows persisted tasks, projects, and work sessions", async 
     { id: "task-next", title: "Prepare the launch outline", status: "todo", priority: "high", due_at: null, project_id: "project-active" },
     { id: "task-done", title: "Already finished", status: "done", priority: "urgent", due_at: null, project_id: "project-active" },
   ] }));
-  await page.route("**/api/v1/projects", route => route.fulfill({ json: [
+  await page.route("**/api/v1/projects*", route => route.fulfill({ json: [
     { id: "project-active", name: "Orin launch", description: "Product work", objective: "Ship a reliable first release", status: "active", created_at: updated, updated_at: updated },
   ] }));
   await page.route("**/api/v1/conversations", route => route.fulfill({ json: [

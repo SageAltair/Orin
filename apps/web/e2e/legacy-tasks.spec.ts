@@ -86,7 +86,7 @@ test("rollout flag off exposes the professional Tasks workspace and precise sche
   await workspace.getByLabel("Task name").fill("Plan the research review");
   await workspace.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
   await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
-  await workspace.getByLabel("Project").selectOption("project-1");
+  await workspace.getByLabel("Project", { exact: true }).selectOption("project-1");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Plan the research review")).toBeVisible();
   await expect.poll(() => createdPayload?.project_id).toBe("project-1");
