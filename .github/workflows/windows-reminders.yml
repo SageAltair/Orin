@@ -5,6 +5,7 @@ on:
     paths:
       - apps/worker/src/orin_worker/windows_reminders.py
       - apps/worker/tests/test_windows_reminders.py
+      - apps/worker/scripts/register-windows-reminder-shortcut.ps1
       - .github/workflows/windows-reminders.yml
   workflow_dispatch:
 
@@ -29,3 +30,28 @@ jobs:
         run: python -m pytest apps/worker/tests/test_windows_reminders.py -q
       - name: Resolve real Windows system PowerShell (no toast)
         run: python -c "from orin_worker.windows_reminders import _powershell_executable; print(_powershell_executable())"
+      - name: Verify shortcut identity in a disposable runner profile (no toast)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $profileRoot = Join-Path $env:RUNNER_TEMP 'orin-reminder-shortcut-ci'
+          $shortcut = Join-Path $profileRoot 'Microsoft\Windows\Start Menu\Programs\Orin Task Reminders.lnk'
+          $installer = Join-Path $env:GITHUB_WORKSPACE 'apps/worker/scripts/register-windows-reminder-shortcut.ps1'
+          $python = (Get-Command python).Source
+          & $installer -Install -PythonPath $python -AppDataRoot $profileRoot
+          if (-not (Test-Path -LiteralPath $shortcut)) { throw 'Registration did not create the test shortcut.' }
+          $env:APPDATA = $profileRoot
+          $env:ORIN_WINDOWS_REMINDERS_APP_ID = 'Oddly.Orin.Reminders'
+          $env:ORIN_WINDOWS_REMINDERS_SHORTCUT = $shortcut
+          orin-windows-reminders-check
+          & $installer -Install -PythonPath $python -AppDataRoot $profileRoot
+          try {
+            & $installer -Remove -AppId 'Other.App.Identity' -AppDataRoot $profileRoot
+            throw 'Wrong-identity removal unexpectedly succeeded.'
+          } catch {
+            if ($_.Exception.Message -notlike '*different AppUserModelID*') { throw }
+          }
+          & $installer -Remove -AppDataRoot $profileRoot
+          if (Test-Path -LiteralPath $shortcut) { throw 'Removal left a test shortcut.' }
+          & $installer -Install -PythonPath $python -AppDataRoot $profileRoot -WhatIf
+          if (Test-Path -LiteralPath $shortcut) { throw 'WhatIf unexpectedly created a shortcut.' }
