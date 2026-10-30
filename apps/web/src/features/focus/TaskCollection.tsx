@@ -109,7 +109,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
     setBusyId(editingId); setError(""); setNotice("");
     try {
       const original = tasks.find(item => item.id === editingId);
-      const payload = taskPayload(draft, original?.due_at ?? null);
+      const payload = taskPayload(draft, original?.due_at ?? null, original?.status);
       const isNew = editingId === "new";
       const saved = await request<Task>(isNew ? "/tasks" : `/tasks/${editingId}`, {
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
