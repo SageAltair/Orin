@@ -37,7 +37,6 @@ export async function fetchAllPages<T>(
   throw new Error(`More than ${maxPages * pageSize} ${collection} exist. The full list could not be loaded safely.`);
 }
 
-
 /**
  * Best-effort protection against offset shifts that omit an item without
  * producing an overlapping ID. The API has no cursor/snapshot token, so
@@ -52,7 +51,8 @@ export async function fetchAllPagesWithIdentityCheck<T>(
   maxPages = 50,
 ): Promise<T[]> {
   const initial = await fetchAllPages(fetchPage, collection, pageSize, maxPages, getId);
-  if (initial.length <= pageSize) return initial;
+  // A full first page plus an empty boundary probe can hide a deletion shift.
+  if (initial.length < pageSize) return initial;
   const confirmed = await fetchAllPages(fetchPage, collection, pageSize, maxPages, getId);
   const initialIds = new Set(initial.map(getId));
   if (initial.length !== confirmed.length ||
