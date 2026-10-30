@@ -84,6 +84,17 @@ describe("intentional priority planning", () => {
     expect(() => planTaskPriorities([], { ...options, mode: "unknown" as never })).toThrow("Unknown");
   });
 
+  it("accepts server microseconds and offsets but rejects calendar rollover", () => {
+    const plan = planTaskPriorities([
+      task("valid", { priority: "urgent", dueAt: "2026-10-30T15:25:00.123456+03:00" }),
+      task("rollover", { priority: "urgent", dueAt: "2026-02-31T12:05:00Z" }),
+      task("offset", { priority: "urgent", dueAt: "2026-10-30T12:05:00+15:00" }),
+    ], options);
+    expect(plan.find(item => item.taskId === "valid")?.risk).toBe("imminent");
+    expect(plan.find(item => item.taskId === "rollover")?.risk).toBe("none");
+    expect(plan.find(item => item.taskId === "offset")?.risk).toBe("none");
+  });
+
   it("sorts tied recommendations deterministically and does not mutate inputs", () => {
     const tasks = [task("z"), task("a")];
     const plan = planTaskPriorities(tasks, options);
