@@ -12,7 +12,8 @@ import pytest
 
 from orin_worker.windows_reminders import (
     ReminderLedger, _due_epoch, _quiet, _secure_api, _toast_environment,
-    _toast_identity, _toast_script, single_instance, run_once,
+    _toast_identity, _toast_script, _shortcut_identity_script,
+    check_toast_registration, single_instance, run_once,
 )
 
 OWNER = "16e447d8-27f9-4b0d-82be-3f0dbf2d899b"
@@ -687,3 +688,64 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "secret-bearer-token" not in str(args)
     assert kwargs["check"] is True
+
+
+def test_registration_probe_script_never_displays_toast_or_runs_shortcut(tmp_path):
+    script = _shortcut_identity_script("Orin.Desktop", tmp_path / "O'Brien.lnk")
+    assert "O''Brien.lnk" in script
+    assert "ExtendedProperty('System.AppUserModel.ID')" in script
+    assert "$registered -cne $appId" in script
+    assert ".Show(" not in script
+    assert "Start-Process" not in script
+    assert "ToastNotificationManager" not in script
+
+
+def test_registration_diagnostic_uses_pinned_powershell_without_credentials(tmp_path, monkeypatch, capsys):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.setattr(windows_reminders, "_toast_identity",
+                        lambda: ("Orin.Desktop", tmp_path / "Orin.lnk"))
+    monkeypatch.setattr(windows_reminders, "_powershell_executable",
+                        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TOKEN", "private-bearer-value")
+    calls = []
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda args, **kwargs: calls.append((args, kwargs)))
+    check_toast_registration()
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
+    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
+    assert ".Show(" not in args[4]
+    assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
+    assert "private-bearer-value" not in str(args)
+    assert kwargs["check"] is True
+    assert "Visible delivery is still unverified" in capsys.readouterr().out
+
+
+def test_registration_diagnostic_fails_closed_without_modifying_shortcut(tmp_path, monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.setattr(windows_reminders, "_toast_identity",
+                        lambda: ("Orin.Desktop", tmp_path / "Orin.lnk"))
+    monkeypatch.setattr(windows_reminders, "_powershell_executable",
+                        lambda: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(
+                            subprocess.CalledProcessError(1, "powershell.exe")))
+    with pytest.raises(SystemExit, match="no changes were made"):
+        check_toast_registration()
+    monkeypatch.setattr(windows_reminders, "_toast_identity",
+                        lambda: (_ for _ in ()).throw(RuntimeError("missing shortcut")))
+    monkeypatch.setattr(windows_reminders.subprocess, "run",
+                        lambda *args, **kwargs: pytest.fail("no process without shortcut"))
+    with pytest.raises(SystemExit, match="no changes were made"):
+        check_toast_registration()
