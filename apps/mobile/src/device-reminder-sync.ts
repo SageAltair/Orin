@@ -11,7 +11,7 @@ const MAX_INBOX_PAGES = 50;
 // planner, cancelling a previously scheduled OS alert on the next sync.
 function isAwareTimestamp(value: unknown): value is string {
   return typeof value === "string" &&
-    /(?:Z|[+-]\\d{2}:\\d{2})$/.test(value) &&
+    /(?:Z|[+-]\d{2}:\d{2})$/.test(value) &&
     Number.isFinite(Date.parse(value));
 }
 
