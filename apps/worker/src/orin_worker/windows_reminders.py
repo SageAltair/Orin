@@ -15,6 +15,7 @@ import subprocess
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -412,7 +413,8 @@ def check_toast_registration() -> None:
     print("Orin toast shortcut identity matches. Visible delivery is still unverified.")
 
 
-def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast) -> int:
+def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast,
+             delivery_clock: Callable[[], int] | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
     try:
         tasks, prefs = _fetch_snapshot(client, ledger.owner_id, ledger.workspace_id, now)
@@ -473,10 +475,18 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     if any(current_tasks.get(task_id) != due for task_id, due in due_tasks):
         raise ValueError("Tasks changed before reminder delivery; retry next poll")
 
+    # A long task scan can cross into quiet hours after the poll-start
+    # timestamp. Re-evaluate the *current* local clock immediately before
+    # delivery. Tests may inject a deterministic clock; production supplies
+    # the live wall clock rather than trusting the original poll timestamp.
+    delivery_now = delivery_clock() if delivery_clock is not None else now
+    if _quiet(live_prefs, delivery_now):
+        return 0
+
     # One generic toast per poll avoids flooding the user with N alerts.
     notify()
     for task_id, due in due_tasks:
-        ledger.mark_attempted(task_id, due, now)
+        ledger.mark_attempted(task_id, due, delivery_now)
     return len(due_tasks)
 
 
@@ -510,7 +520,8 @@ def main() -> None:
             ) as client:
                 while not stopping.is_set():
                     try:
-                        run_once(client, ledger, now=int(time.time()))
+                        run_once(client, ledger, now=int(time.time()),
+                                 delivery_clock=lambda: int(time.time()))
                     except httpx.HTTPStatusError as error:
                         if error.response.status_code in {401, 403}:
                             logger.error("Reminder authorization revoked; stopping companion")

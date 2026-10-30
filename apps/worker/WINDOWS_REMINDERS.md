@@ -27,7 +27,12 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   read fails closed and retries on the next poll without consuming reminders.
   Large lists require additional API requests. Before each due toast, another authenticated scan verifies that due tasks remain active with unchanged deadlines. This is a best-effort check, not an atomic guarantee against edits after the scan.
 - Opting out of tasks notifications clears the local queue on the next
-  successful sync. Quiet hours are respected. No silent/DND bypass.
+  successful sync. Quiet hours are respected. The production loop rechecks
+  the current wall clock immediately before attempting a toast, so a long
+  task scan that crosses into quiet hours does not use the stale poll-start
+  time. This is still best-effort: an OS alert can be suppressed independently,
+  and a preference change after the final server read is not atomic. No
+  silent/DND bypass.
 - When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions/active` endpoint before a due alert. Unlike the 50-row Focus history, this owner-scoped endpoint includes older active sessions, even without an associated task, and expires elapsed sessions. Active sessions suppress delivery; missing, malformed or unavailable Focus state fails closed. This requires an API version with the active-state endpoint. Tests do not establish real Windows acceptance.
 - Equal quiet-hours start/end bounds mean quiet all day, matching the API policy.
 - The current Orin web logout flow does not necessarily revoke an independently
