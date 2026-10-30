@@ -10,11 +10,12 @@ const loadOwnerTasks = () => fetchAllPages<OwnedTask>(
   "priority tasks", 100, 50, item => item.id,
 );
 
-export function PriorityOverview({ tasks, activeWorkspaceId, mode, now }: {
+export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTask }: {
   tasks: Task[];
   activeWorkspaceId: string;
   mode: PriorityGuidanceMode;
   now: Date;
+  onEditTask?: (task: Task) => void;
 }) {
   const [includeAll, setIncludeAll] = useState(false);
   const [remoteTasks, setRemoteTasks] = useState<OwnedTask[]>([]);
@@ -90,7 +91,11 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now }: {
             <span>{includeAll ? `${workspaceNames.get(item.workspaceId) ?? "Personal"} · ` : ""}
               {task.due_at ? new Date(task.due_at).toLocaleString() : "No deadline"}
             </span></div>
-          <small>{item.reasons[0] ?? (task.priority === "urgent" ? "Marked urgent" : task.priority === "high" ? "Marked high priority" : "For planning")}</small>
+          <div className="focus-priority-row-actions">
+            <small>{item.reasons[0] ?? (task.priority === "urgent" ? "Marked urgent" : task.priority === "high" ? "Marked high priority" : "For planning")}</small>
+            {onEditTask && item.workspaceId === currentId && <button type="button"
+              aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)}>Edit task</button>}
+          </div>
         </li>;
       })}
     </ol> : <p className="focus-quiet-message">No active tasks to prioritize in this scope.</p>)}
