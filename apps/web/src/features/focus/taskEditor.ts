@@ -23,12 +23,13 @@ export const draftFromTask = (task: Task): TaskDraft => ({
   project_id: task.project_id ?? "",
 });
 
-export function taskPayload(draft: TaskDraft, originalDue: string | null) {
+export function taskPayload(draft: TaskDraft, originalDue: string | null, originalStatus?: Task["status"]) {
   return {
     title: draft.title.trim(),
     description: draft.description.trim() || null,
     priority: draft.priority,
-    status: draft.status,
+    // An unchanged status must not reset Today/Active focus placement on an edit.
+    ...(originalStatus === undefined || draft.status !== originalStatus ? { status: draft.status } : {}),
     project_id: draft.project_id || null,
     due_at: dueAtForEdit(draft.due, originalDue),
   };
