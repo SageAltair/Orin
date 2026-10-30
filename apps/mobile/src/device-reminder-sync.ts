@@ -168,5 +168,24 @@ export async function refreshDeviceReminders(
     policy.categories.includes("tasks") ? fetchDeviceReminderTasks() : Promise.resolve([]),
   ]);
   if (!isCurrent()) return;
-  await syncLocalReminders(owner, workspaceId, reminders, policy, tasks);
+  // A remote opt-out, category change or quiet-hours update can arrive while
+  // paginated tasks and inbox reminders are being fetched. Re-read policy
+  // before replacing OS schedules; a revoked opt-in clears alerts immediately.
+  const livePolicy = await request<NotificationPolicy>("/notifications/preferences");
+  if (!isCurrent()) return;
+  if (typeof livePolicy.enabled !== "boolean" ||
+      !Array.isArray(livePolicy.categories) ||
+      livePolicy.categories.some((category) => typeof category !== "string")) {
+    throw new Error("Invalid live notification policy; device schedules were preserved.");
+  }
+  if (!livePolicy.enabled) {
+    await syncLocalReminders(owner, workspaceId, [], livePolicy, []);
+    return;
+  }
+  // The initial policy excluded task fetching, so newly enabling the category
+  // cannot safely schedule a partial snapshot. Retry on the next refresh.
+  if (!policy.categories.includes("tasks") && livePolicy.categories.includes("tasks")) {
+    throw new Error("Task notification policy changed during sync; device schedules were preserved.");
+  }
+  await syncLocalReminders(owner, workspaceId, reminders, livePolicy, tasks);
 }
