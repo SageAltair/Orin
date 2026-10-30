@@ -413,3 +413,54 @@ def test_legacy_task_status_api_uses_shared_focus_transitions(client: TestClient
 def test_first_settings_read_uses_browser_timezone_only_when_unset(client: TestClient) -> None:
     assert client.get("/api/v1/focus/settings", headers={"X-Timezone": "Africa/Dar_es_Salaam"}).json()["timezone"] == "Africa/Dar_es_Salaam"
     assert client.get("/api/v1/focus/settings", headers={"X-Timezone": "America/Los_Angeles"}).json()["timezone"] == "Africa/Dar_es_Salaam"
+
+
+def test_active_focus_status_covers_history_overflow_and_owner_scope(client: TestClient) -> None:
+    primary, second, _, active_user = app.state.focus_test_users
+    sessions = app.state.focus_test_session_factory
+    now = datetime.now(timezone.utc)
+
+    # The history endpoint is deliberately capped at 50, but an older active
+    # standalone Focus session must still suppress Windows task reminders.
+    with sessions.begin() as db:
+        db.add(FocusSession(
+            user_id=primary.id, objective="Long-running focus", status="active",
+            duration_minutes=120, started_at=now - timedelta(minutes=45),
+        ))
+        for index in range(55):
+            db.add(FocusSession(
+                user_id=primary.id, objective=f"Past session {index}",
+                status="completed", duration_minutes=25,
+                started_at=now - timedelta(minutes=20) + timedelta(seconds=index),
+                ended_at=now - timedelta(minutes=10),
+            ))
+        db.add(FocusSession(
+            user_id=second.id, objective="Another owner's focus", status="active",
+            duration_minutes=120, started_at=now - timedelta(minutes=15),
+        ))
+
+    history = client.get("/api/v1/focus-sessions")
+    assert history.status_code == 200
+    assert len(history.json()) == 50
+    assert all(item["status"] != "active" for item in history.json())
+    active = client.get("/api/v1/focus-sessions/active")
+    assert active.status_code == 200
+    assert active.json() == {"active": True}
+
+    active_user[0] = second
+    assert client.get("/api/v1/focus-sessions/active").json() == {"active": True}
+    active_user[0] = primary
+
+    # Expiry is evaluated even when the active session is absent from history.
+    with sessions.begin() as db:
+        row = db.scalar(select(FocusSession).where(
+            FocusSession.user_id == primary.id, FocusSession.status == "active",
+        ))
+        assert row is not None
+        row.started_at = now - timedelta(hours=3)
+    assert client.get("/api/v1/focus-sessions/active").json() == {"active": False}
+    with sessions() as db:
+        row = db.scalar(select(FocusSession).where(FocusSession.user_id == primary.id, FocusSession.status == "expired"))
+        assert row is not None and row.ended_at is not None
+    active_user[0] = second
+    assert client.get("/api/v1/focus-sessions/active").json() == {"active": True}

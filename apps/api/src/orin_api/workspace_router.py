@@ -956,6 +956,30 @@ def list_focus_sessions(user: User = Depends(get_current_user), session: Session
     return [_focus_view(row) for row in rows]
 
 
+@router.get("/focus-sessions/active")
+def get_active_focus_status(
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict[str, bool]:
+    """Authoritative owner-scoped Focus suppression, independent of history limits.
+
+    The history endpoint returns only the latest 50 sessions. A long-running
+    active session can be older than that window and must still suppress
+    reminders. Expire elapsed active sessions before reporting their state.
+    """
+    now = datetime.now(timezone.utc)
+    active_rows = session.scalars(
+        select(FocusSession).where(
+            FocusSession.user_id == user.id, FocusSession.status == "active",
+        )
+    ).all()
+    for row in active_rows:
+        _expire_focus(row, now)
+    active = any(row.status == "active" for row in active_rows)
+    session.commit()
+    return {"active": active}
+
+
 @router.post("/focus-sessions", status_code=201)
 def start_focus(data: FocusCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> dict[str, object]:
     task = None

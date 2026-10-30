@@ -24,7 +24,7 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   Large lists require additional API requests.
 - Opting out of tasks notifications clears the local queue on the next
   successful sync. Quiet hours are respected. No silent/DND bypass.
-- When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions` history before a due alert, including active sessions without an associated task. Active sessions suppress delivery; invalid or unavailable Focus state fails closed. This policy is covered by mocked tests, not yet by real Windows acceptance.
+- When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions/active` endpoint before a due alert. Unlike the 50-row Focus history, this owner-scoped endpoint includes older active sessions, even without an associated task, and expires elapsed sessions. Active sessions suppress delivery; missing, malformed or unavailable Focus state fails closed. This requires an API version with the active-state endpoint. Tests do not establish real Windows acceptance.
 - Equal quiet-hours start/end bounds mean quiet all day, matching the API policy.
 - The current Orin web logout flow does not necessarily revoke an independently
   supplied bearer token. Stop this process and revoke its token on logout or
