@@ -333,8 +333,8 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def _toast_script(app_id: str, shortcut: Path) -> str:
-    """Fail before Show unless the existing shortcut exposes the matching AUMID."""
+def _shortcut_identity_script(app_id: str, shortcut: Path) -> str:
+    """Read-only AUMID probe shared by diagnostics and the toast transport."""
     return (
         "$ErrorActionPreference='Stop';"
         "$appId=" + _ps_quote(app_id) + ";"
@@ -346,6 +346,13 @@ def _toast_script(app_id: str, shortcut: Path) -> str:
         "if ($null -eq $item) { throw 'Start Menu shortcut unavailable' };"
         "$registered=[string]$item.ExtendedProperty('System.AppUserModel.ID');"
         "if ($registered -cne $appId) { throw 'Start Menu AppUserModelID mismatch' };"
+    )
+
+
+def _toast_script(app_id: str, shortcut: Path) -> str:
+    """Fail before Show unless the existing shortcut exposes the matching AUMID."""
+    return (
+        _shortcut_identity_script(app_id, shortcut) +
         "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
         "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]|Out-Null;"
         "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
@@ -380,6 +387,29 @@ def _windows_toast() -> None:
          _toast_script(app_id, shortcut)),
         check=True, capture_output=True, timeout=15, env=_toast_environment(),
     )
+
+
+def check_toast_registration() -> None:
+    """Opt-in, read-only Windows shortcut diagnostic; never sends a toast.
+
+    No API credentials or reminder queue are needed. A matching AUMID does not
+    prove Windows will display a notification, which needs interactive testing.
+    """
+    if os.name != "nt":
+        raise SystemExit("Windows toast registration diagnostics require Windows")
+    try:
+        app_id, shortcut = _toast_identity()
+        subprocess.run(
+            (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
+             _shortcut_identity_script(app_id, shortcut)),
+            check=True, capture_output=True, timeout=15, env=_toast_environment(),
+        )
+    except (RuntimeError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise SystemExit(
+            "Orin toast registration check failed. Verify the existing Start Menu "
+            "shortcut and matching AppUserModelID; no changes were made."
+        ) from error
+    print("Orin toast shortcut identity matches. Visible delivery is still unverified.")
 
 
 def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast) -> int:
