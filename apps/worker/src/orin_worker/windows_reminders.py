@@ -143,10 +143,26 @@ def _quiet(prefs: dict[str, object], now: int) -> bool:
         end = str(prefs["quiet_end"])
         current = datetime.fromtimestamp(now, timezone.utc).astimezone(zone).strftime("%H:%M")
         if start == end:
-            return False
+            # Match the server policy: equal bounds mean quiet all day.
+            return True
         return start <= current < end if start < end else current >= start or current < end
     except (KeyError, ValueError) as error:
         raise ValueError("Invalid quiet-hours preferences") from error
+
+
+def _focus_active(client: httpx.Client) -> bool:
+    """Fail closed if the authenticated Focus state cannot be validated."""
+    response = client.get("/focus/now")
+    response.raise_for_status()
+    state = response.json()
+    if not isinstance(state, dict) or "focus_session" not in state:
+        raise ValueError("Invalid Focus state")
+    focus = state["focus_session"]
+    if focus is None:
+        return False
+    if not isinstance(focus, dict) or focus.get("status") != "active":
+        raise ValueError("Invalid active Focus session")
+    return True
 
 
 def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
@@ -265,6 +281,14 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
         return 0
     due_tasks = ledger.due(now)
     if due_tasks:
+        if prefs.get("respect_focus") is True:
+            try:
+                if _focus_active(client):
+                    return 0
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code in {401, 403}:
+                    ledger.clear()
+                raise
         # One generic toast per poll avoids flooding the user with N alerts.
         notify()
         for task_id, due in due_tasks:
