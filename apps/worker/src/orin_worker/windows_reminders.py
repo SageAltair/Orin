@@ -308,7 +308,13 @@ def single_instance(path: Path):
 
 def _toast_environment() -> dict[str, str]:
     # Do not inherit the user's bearer token into the PowerShell toast process.
-    allowed = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC"}
+    # Shell.Application COM shortcut lookup needs the interactive Windows profile.
+    # Keep only OS/profile paths, never bearer tokens or arbitrary app settings.
+    allowed = {
+        "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "PATHEXT", "COMSPEC",
+        "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+        "PROGRAMDATA", "PSMODULEANALYSISCACHEPATH",
+    }
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
 
 
@@ -398,9 +404,11 @@ def _windows_toast() -> None:
         raise RuntimeError("Windows toast delivery requires Windows")
     app_id, shortcut = _toast_identity()
     subprocess.run(
-        (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
+        (_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command",
          _toast_script(app_id, shortcut)),
-        check=True, capture_output=True, timeout=15, env=_toast_environment(),
+        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        timeout=15, env=_toast_environment(),
     )
 
 
@@ -415,14 +423,17 @@ def check_toast_registration() -> None:
     try:
         app_id, shortcut = _toast_identity()
         subprocess.run(
-            (_powershell_executable(), "-NoProfile", "-NonInteractive", "-Command",
+            (_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command",
              _shortcut_identity_script(app_id, shortcut)),
-            check=True, capture_output=True, timeout=15, env=_toast_environment(),
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+        timeout=15, env=_toast_environment(),
         )
     except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise SystemExit(
-            "Orin toast registration check failed. Verify the existing Start Menu "
-            "shortcut and matching AppUserModelID; no changes were made."
+            f"Orin toast registration check failed ({type(error).__name__}). "
+            "Verify the existing Start Menu shortcut and matching AppUserModelID; "
+            "no changes were made."
         ) from error
     print("Orin toast shortcut identity matches. Visible delivery is still unverified.")
 

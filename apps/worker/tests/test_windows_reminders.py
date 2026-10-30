@@ -587,7 +587,15 @@ def test_missing_host_is_not_secure():
 def test_toast_subprocess_never_inherits_api_token(monkeypatch):
     monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TOKEN", "private-bearer-value")
     monkeypatch.setenv("PATH", "safe-bin")
+    monkeypatch.setenv("APPDATA", r"C:\Users\runner\AppData\Roaming")
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\runner\AppData\Local")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\runner")
+    monkeypatch.setenv("PSModuleAnalysisCachePath", r"C:\Users\runner\AppData\Local\ModuleAnalysisCache")
     assert _toast_environment()["PATH"] == "safe-bin"
+    assert _toast_environment()["APPDATA"].endswith("Roaming")
+    assert _toast_environment()["LOCALAPPDATA"].endswith("Local")
+    assert _toast_environment()["USERPROFILE"].endswith("runner")
+    assert {key.upper(): value for key, value in _toast_environment().items()}["PSMODULEANALYSISCACHEPATH"].endswith("ModuleAnalysisCache")
     assert "private-bearer-value" not in _toast_environment().values()
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in _toast_environment()
 
@@ -751,10 +759,14 @@ def test_toast_invokes_pinned_powershell_without_exposing_token(tmp_path, monkey
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
-    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
+    assert args[1:6] == ("-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command")
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "secret-bearer-token" not in str(args)
     assert kwargs["check"] is True
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"] == subprocess.DEVNULL
+    assert "capture_output" not in kwargs
 
 
 def test_registration_probe_script_never_displays_toast_or_runs_shortcut(tmp_path):
@@ -786,11 +798,15 @@ def test_registration_diagnostic_uses_pinned_powershell_without_credentials(tmp_
     assert len(calls) == 1
     args, kwargs = calls[0]
     assert args[0].endswith(r"WindowsPowerShell\v1.0\powershell.exe")
-    assert args[1:4] == ("-NoProfile", "-NonInteractive", "-Command")
-    assert ".Show(" not in args[4]
+    assert args[1:6] == ("-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command")
+    assert ".Show(" not in args[6]
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in kwargs["env"]
     assert "private-bearer-value" not in str(args)
     assert kwargs["check"] is True
+    assert kwargs["stdin"] == subprocess.DEVNULL
+    assert kwargs["stdout"] == subprocess.DEVNULL
+    assert kwargs["stderr"] == subprocess.DEVNULL
+    assert "capture_output" not in kwargs
     assert "Visible delivery is still unverified" in capsys.readouterr().out
 
 
@@ -808,13 +824,13 @@ def test_registration_diagnostic_fails_closed_without_modifying_shortcut(tmp_pat
     monkeypatch.setattr(windows_reminders.subprocess, "run",
                         lambda *args, **kwargs: (_ for _ in ()).throw(
                             subprocess.CalledProcessError(1, "powershell.exe")))
-    with pytest.raises(SystemExit, match="no changes were made"):
+    with pytest.raises(SystemExit, match=r"CalledProcessError.*no changes were made"):
         check_toast_registration()
     monkeypatch.setattr(windows_reminders, "_toast_identity",
                         lambda: (_ for _ in ()).throw(RuntimeError("missing shortcut")))
     monkeypatch.setattr(windows_reminders.subprocess, "run",
                         lambda *args, **kwargs: pytest.fail("no process without shortcut"))
-    with pytest.raises(SystemExit, match="no changes were made"):
+    with pytest.raises(SystemExit, match=r"RuntimeError.*no changes were made"):
         check_toast_registration()
 
 
