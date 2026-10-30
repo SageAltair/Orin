@@ -587,7 +587,13 @@ def test_missing_host_is_not_secure():
 def test_toast_subprocess_never_inherits_api_token(monkeypatch):
     monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TOKEN", "private-bearer-value")
     monkeypatch.setenv("PATH", "safe-bin")
+    monkeypatch.setenv("APPDATA", r"C:\Users\runner\AppData\Roaming")
+    monkeypatch.setenv("LOCALAPPDATA", r"C:\Users\runner\AppData\Local")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\runner")
     assert _toast_environment()["PATH"] == "safe-bin"
+    assert _toast_environment()["APPDATA"].endswith("Roaming")
+    assert _toast_environment()["LOCALAPPDATA"].endswith("Local")
+    assert _toast_environment()["USERPROFILE"].endswith("runner")
     assert "private-bearer-value" not in _toast_environment().values()
     assert "ORIN_WINDOWS_REMINDERS_TOKEN" not in _toast_environment()
 
