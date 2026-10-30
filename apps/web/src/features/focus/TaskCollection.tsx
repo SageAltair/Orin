@@ -4,6 +4,8 @@ import { ApiError, request, type Project, type Task } from "../../api";
 import { filterTasksForView, type TaskView } from "./taskViews";
 import { blankTaskDraft, draftFromTask, nextTaskStatus, taskPayload, type TaskDraft } from "./taskEditor";
 import { fetchAllPages } from "./taskPagination";
+import { PriorityOverview } from "./PriorityOverview";
+import type { PriorityGuidanceMode } from "./priorityIntelligence";
 import "./task-workspace.css";
 
 const views: Array<[TaskView, string]> = [
@@ -21,7 +23,7 @@ const fetchAllProjects = () => fetchAllPages<Project>(
   100, 50, (project) => project.id,
 );
 
-export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void }) {
+export function TaskCollection({ onScheduleTask, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
@@ -147,6 +149,7 @@ export function TaskCollection({ onScheduleTask, onTaskSaved }: { onScheduleTask
       <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
         {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
+    <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now} />
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
     <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
