@@ -221,4 +221,39 @@ describe("paginated device notification inbox", () => {
     vi.mocked(request).mockResolvedValueOnce([{ due_at: due }] as never);
     await expect(fetchDeviceReminderInbox()).rejects.toThrow("invalid record");
   });
+
+  it("rejects invalid inbox dates, revisions and identities instead of cancelling prior alerts", async () => {
+    const valid = reminder("existing");
+    for (const bad of [
+      { ...valid, id: "" },
+      { ...valid, category: "" },
+      { ...valid, revision: -1 },
+      { ...valid, revision: 1.5 },
+      { ...valid, due_at: "2026-11-02T12:00:00" },
+      { ...valid, due_at: "invalidZ" },
+      { ...valid, read_at: "not-a-date" },
+      { ...valid, snoozed_until: "2026-11-02T12:00:00" },
+      { ...valid, source_id: 123 },
+    ]) {
+      vi.mocked(request).mockReset().mockImplementation(async (path) => {
+        if (path === "/notifications/preferences") return policy as never;
+        if (path.startsWith("/notifications?")) return [bad] as never;
+        if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+        throw new Error("Unexpected API request");
+      });
+      await expect(refreshDeviceReminders("alice", "workspace-a")).rejects.toThrow("invalid record");
+      expect(syncLocalReminders).not.toHaveBeenCalled();
+    }
+  });
+
+  it("accepts timezone-aware inbox dates and optional timestamps", async () => {
+    const valid = {
+      ...reminder("valid"),
+      due_at: "2026-11-02T15:00:00+03:00",
+      read_at: "2026-10-29T12:00:00Z",
+      snoozed_until: "2026-11-03T15:00:00+03:00",
+    };
+    vi.mocked(request).mockResolvedValueOnce([valid] as never);
+    expect(await fetchDeviceReminderInbox()).toEqual([valid]);
+  });
 });
