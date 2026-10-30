@@ -329,3 +329,27 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await workspace.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Upcoming/ }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
 });
+
+test("priority outlook requires explicit cross-workspace opt-in and can return to private scope", async ({ page }) => {
+  await setupFocus(page);
+  await page.route("**/api/v1/priority/tasks?*", route => route.fulfill({ json: [{
+    id: "work-deadline", title: "Work-only deadline", description: null, status: "todo",
+    priority: "urgent", due_at: "2099-10-13T14:00:00Z", project_id: null,
+    workspace_id: "work", created_at: timestamp, updated_at: timestamp,
+  }] }));
+  await page.route("**/api/v1/workspaces", route => route.fulfill({ json: [
+    { id: "personal", name: "Personal" }, { id: "work", name: "Work" },
+  ] }));
+  await page.goto("/"); await signIn(page);
+  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  const outlook = page.getByRole("region", { name: "Priority outlook" });
+  const optIn = outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" });
+  await expect(optIn).not.toBeChecked();
+  await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
+  await optIn.check();
+  await expect(outlook.getByText("Work-only deadline")).toBeVisible();
+  await expect(outlook.locator(".focus-priority-list")).toContainText("Work");
+  await optIn.uncheck();
+  await expect(outlook.getByText("Work-only deadline")).toHaveCount(0);
+  await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
+});
