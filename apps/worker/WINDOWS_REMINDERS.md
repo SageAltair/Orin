@@ -16,6 +16,12 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
 - Checks live authentication, current task state and notification preferences
   before each delivery pass. HTTP 401/403 or owner mismatch clears the queue.
   Network failure fails closed without delivering cached reminders.
+- For multi-page task lists, performs a confirming read of all task identities,
+  statuses and due timestamps before replacing the durable queue. This detects
+  many offset-pagination shifts caused by concurrent edits or deletions, but
+  cannot provide a database snapshot or guarantee against all races. A changed
+  read fails closed and retries on the next poll without consuming reminders.
+  Large lists require additional API requests.
 - Opting out of tasks notifications clears the local queue on the next
   successful sync. Quiet hours are respected. No silent/DND bypass.
 - When the server's `respect_focus` preference is enabled, checks the authenticated `/focus-sessions` history before a due alert, including active sessions without an associated task. Active sessions suppress delivery; invalid or unavailable Focus state fails closed. This policy is covered by mocked tests, not yet by real Windows acceptance.

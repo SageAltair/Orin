@@ -256,6 +256,57 @@ def test_pagination_reads_all_and_no_partial_snapshot(tmp_path):
     queue.close()
 
 
+@pytest.mark.parametrize("change", ["delete_during_pages", "change_deadline_between_scans"])
+def test_offset_shift_or_deadline_edit_does_not_replace_windows_reminders(tmp_path, change):
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    original = [task(f"t-{i}", NOW + 60) for i in range(101)]
+    changed = [dict(item) for item in original]
+    if change == "delete_during_pages":
+        # The first 100 rows were fetched, then an earlier row was deleted.
+        # Page two is now empty, so no ID overlaps and a single pass silently
+        # omits t-100. The confirming scan must reject the changed snapshot.
+        changed.pop(0)
+    else:
+        changed[-1]["due_at"] = datetime.fromtimestamp(
+            NOW + 3600, timezone.utc,
+        ).isoformat()
+    scans = 0
+
+    def handler(request):
+        nonlocal scans
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"],
+                "quiet_enabled": False, "respect_focus": True,
+                "timezone": "UTC", "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            assert request.headers["X-Orin-Workspace-Id"] == WORKSPACE
+            offset = int(request.url.params["offset"])
+            limit = int(request.url.params["limit"])
+            if offset == 0:
+                scans += 1
+            if change == "delete_during_pages" and scans == 1 and offset > 0:
+                records = changed
+            else:
+                records = original if scans == 1 else changed
+            return httpx.Response(200, json=records[offset:offset + limit])
+        return httpx.Response(404)
+
+    with httpx.Client(
+        base_url="https://orin.example/api/v1",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(ValueError, match="changed during pagination"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
+    assert scans == 2
+    assert queue.due(NOW) == [("previous", NOW + 60)]
+    queue.close()
+
+
 def test_large_snapshot_is_safe_under_legacy_sqlite_variable_limit(tmp_path):
     queue = ledger(tmp_path)
     # Older SQLite builds permit only 999 bound variables per statement.
