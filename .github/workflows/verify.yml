@@ -41,7 +41,18 @@ jobs:
           npm ci
           npm run typecheck
           npm test
-          npm run export:android
+          npm run export:android -- --source-maps
+      - name: Check Metro source map exposure report
+        run: |
+          node --test scripts/report-mobile-metro-exposure.test.mjs
+          node scripts/report-mobile-metro-exposure.mjs apps/mobile/dist apps/mobile/mobile-runtime-js-exposure.json
+      - name: Preserve Android JS exposure evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-js-dependency-exposure
+          path: apps/mobile/mobile-runtime-js-exposure.json
+          if-no-files-found: warn
 
   verify:
     runs-on: ubuntu-latest
