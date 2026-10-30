@@ -133,6 +133,25 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable due-task reminder")).toHaveCount(0);
 
+  // Real Calendar scheduling must persist a task block without changing the
+  // task's deadline. Completion must remove the block from PostgreSQL.
+  const scheduleDay = new Date(Date.now() + 24 * 60 * 60_000).toISOString().slice(0, 10);
+  await page.getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule task" }).first().click();
+  const scheduler = page.getByRole("dialog", { name: "Schedule a task" });
+  await scheduler.getByRole("combobox").selectOption({ label: "Disposable scheduled browser task" });
+  await scheduler.getByLabel("Starts").fill(`${scheduleDay}T10:00`);
+  await scheduler.getByLabel("Duration in minutes").fill("45");
+  await scheduler.getByRole("button", { name: "Save schedule" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Task scheduled." })).toBeVisible();
+  const scheduleUrl = `${isolatedApi}/api/v1/calendar/schedule?start=${scheduleDay}&end=${scheduleDay}&timezone=UTC`;
+  const scheduledResponse = await request.get(scheduleUrl, { headers });
+  expect(scheduledResponse.status()).toBe(200);
+  const scheduledBlocks = (await scheduledResponse.json()) as Array<{ task_id: string; title: string }>;
+  const scheduledBlock = scheduledBlocks.find(row => row.title === "Disposable scheduled browser task");
+  expect(scheduledBlock?.task_id).toBeTruthy();
+
   await page.reload();
   await openTasks();
   workspace = page.locator(".focus-task-collection");
@@ -153,6 +172,10 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     .getByRole("button", { name: /Completed/ }).click();
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable scheduled browser task revised")).toBeVisible();
+  const afterCompletion = await request.get(scheduleUrl, { headers });
+  expect(afterCompletion.status()).toBe(200);
+  const remainingBlocks = (await afterCompletion.json()) as Array<{ task_id: string }>;
+  expect(remainingBlocks.some(row => row.task_id === scheduledBlock?.task_id)).toBe(false);
   const persistedTasks = await request.get(isolatedApi + "/api/v1/tasks?limit=100&offset=0", { headers });
   expect(persistedTasks.status()).toBe(200);
   const persisted = (await persistedTasks.json()) as Array<{
