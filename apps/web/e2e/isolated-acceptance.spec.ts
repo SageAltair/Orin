@@ -56,6 +56,19 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect(taskResponse.status()).toBe(201);
   const task = (await taskResponse.json()) as { id: string };
 
+  // The browser is pinned to UTC. Exercise the real Today view against a
+  // calendar-day due date, rather than relying on a mocked task response.
+  const todayAtNoonUtc = new Date();
+  todayAtNoonUtc.setUTCHours(12, 0, 0, 0);
+  const todayResponse = await request.post(`${isolatedApi}/api/v1/tasks`, {
+    headers,
+    data: {
+      title: "Disposable today browser task",
+      due_at: todayAtNoonUtc.toISOString(),
+    },
+  });
+  expect(todayResponse.status()).toBe(201);
+
   await page.getByRole("button", { name: "Writing", exact: true }).click();
   await page.getByRole("button", { name: "New note" }).first().click();
   await page.getByLabel("Document title").fill("Disposable browser draft");
@@ -100,6 +113,25 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable scheduled browser task")).toBeVisible();
+
+  // Verify date-based navigation against real persisted tasks, not mocked
+  // selectors. Overdue can overlap Today; Upcoming must not.
+  const taskViews = workspace.getByRole("navigation", { name: "Task views" });
+  await taskViews.getByRole("button", { name: /Today/ }).click();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable today browser task")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable scheduled browser task")).toHaveCount(0);
+  await taskViews.getByRole("button", { name: /Overdue/ }).click();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable due-task reminder")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable scheduled browser task")).toHaveCount(0);
+  await taskViews.getByRole("button", { name: /Upcoming/ }).click();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable scheduled browser task")).toBeVisible();
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable due-task reminder")).toHaveCount(0);
 
   await page.reload();
   await openTasks();
