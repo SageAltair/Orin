@@ -74,10 +74,22 @@ class ReminderLedger:
                 "DELETE FROM reminders WHERE owner_id != ? OR workspace_id != ?",
                 (self.owner_id, self.workspace_id),
             )
+        # Connection-local staging avoids SQLite's bound-variable limit while
+        # keeping snapshot replacement transactional. No task IDs are persisted
+        # in a second on-disk table.
+        self.db.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS reminder_snapshot_tasks "
+            "(task_id TEXT PRIMARY KEY)"
+        )
 
     def sync(self, tasks: dict[str, int]) -> None:
         """Replace the entire scoped snapshot atomically; never sync partial pages."""
         with self.db:
+            self.db.execute("DELETE FROM reminder_snapshot_tasks")
+            self.db.executemany(
+                "INSERT INTO reminder_snapshot_tasks(task_id) VALUES (?)",
+                ((task_id,) for task_id in tasks),
+            )
             for task_id, due_epoch in tasks.items():
                 self.db.execute(
                     "INSERT INTO reminders(owner_id,workspace_id,task_id,due_epoch) "
@@ -87,15 +99,12 @@ class ReminderLedger:
                     "THEN attempted_epoch ELSE NULL END",
                     (self.owner_id, self.workspace_id, task_id, due_epoch),
                 )
-            if tasks:
-                placeholders = ",".join("?" for _ in tasks)
-                self.db.execute(
-                    "DELETE FROM reminders WHERE owner_id=? AND workspace_id=? "
-                    f"AND task_id NOT IN ({placeholders})",
-                    (self.owner_id, self.workspace_id, *tasks),
-                )
-            else:
-                self.clear()
+            self.db.execute(
+                "DELETE FROM reminders WHERE owner_id=? AND workspace_id=? "
+                "AND NOT EXISTS (SELECT 1 FROM reminder_snapshot_tasks "
+                "WHERE reminder_snapshot_tasks.task_id=reminders.task_id)",
+                (self.owner_id, self.workspace_id),
+            )
 
     def due(self, now: int) -> list[tuple[str, int]]:
         return self.db.execute(

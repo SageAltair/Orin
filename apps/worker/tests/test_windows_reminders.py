@@ -1,6 +1,7 @@
 """Isolated tests for opt-in Windows reminder scheduling. No OS alerts or live API."""
 from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 
 import httpx
 import pytest
@@ -149,6 +150,58 @@ def test_pagination_reads_all_and_no_partial_snapshot(tmp_path):
         assert run_once(client, queue, now=NOW, notify=lambda: alerts.append(1)) == 105
         assert alerts == [1]
     assert queue.db.execute("SELECT count(*) FROM reminders").fetchone()[0] == 105
+    queue.close()
+
+
+def test_large_snapshot_is_safe_under_legacy_sqlite_variable_limit(tmp_path):
+    queue = ledger(tmp_path)
+    # Older SQLite builds permit only 999 bound variables per statement.
+    # The prior NOT IN implementation failed with 1,000 or more task IDs.
+    if hasattr(queue.db, "setlimit"):
+        queue.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+    initial = {f"task-{i}": NOW + 60 for i in range(1500)}
+    queue.sync(initial)
+    queue.mark_attempted("task-1200", NOW + 60, NOW)
+    queue.mark_attempted("task-1400", NOW + 60, NOW)
+
+    revised = {f"task-{i}": NOW + 60 for i in range(198, 1500)}
+    revised["task-1400"] = NOW + 3600
+    queue.sync(revised)
+
+    assert queue.db.execute("SELECT COUNT(*) FROM reminders").fetchone()[0] == 1302
+    assert queue.db.execute(
+        "SELECT attempted_epoch FROM reminders WHERE task_id='task-1200'"
+    ).fetchone() == (NOW,)
+    assert queue.db.execute(
+        "SELECT due_epoch,attempted_epoch FROM reminders WHERE task_id='task-1400'"
+    ).fetchone() == (NOW + 3600, None)
+    assert queue.db.execute(
+        "SELECT COUNT(*) FROM reminders WHERE task_id='task-0'"
+    ).fetchone()[0] == 0
+
+    queue.sync({})
+    assert queue.db.execute("SELECT COUNT(*) FROM reminders").fetchone()[0] == 0
+    queue.close()
+
+
+def test_failed_snapshot_update_rolls_back_staging_and_reminders(tmp_path):
+    queue = ledger(tmp_path)
+    queue.sync({"a": NOW + 60, "b": NOW + 120})
+    queue.db.execute(
+        "CREATE TEMP TRIGGER reject_due_change BEFORE UPDATE OF due_epoch "
+        "ON reminders WHEN NEW.task_id='a' "
+        "BEGIN SELECT RAISE(ABORT, 'synthetic failure'); END"
+    )
+    with pytest.raises(sqlite3.DatabaseError, match="synthetic failure"):
+        queue.sync({"a": NOW + 3600})
+    assert queue.db.execute(
+        "SELECT task_id,due_epoch FROM reminders ORDER BY task_id"
+    ).fetchall() == [("a", NOW + 60), ("b", NOW + 120)]
+    queue.db.execute("DROP TRIGGER reject_due_change")
+    queue.sync({"a": NOW + 60})
+    assert queue.db.execute(
+        "SELECT task_id FROM reminders"
+    ).fetchall() == [("a",)]
     queue.close()
 
 
