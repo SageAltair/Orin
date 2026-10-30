@@ -82,9 +82,15 @@ export async function fetchDeviceReminderTasks(now = Date.now()): Promise<Task[]
 // The inbox API defaults to 100 newest-due notifications. Without pagination,
 // earlier due alerts can disappear from the device planner even while unread.
 // A failed or overlapping page must leave the existing OS schedule untouched.
-export async function fetchDeviceReminderInbox(): Promise<Reminder[]> {
+type InboxPageSnapshot = {
+  reminders: Reminder[];
+  signatures: Map<string, string>;
+  pages: number;
+};
+
+async function scanInboxPages(): Promise<InboxPageSnapshot> {
   const reminders: Reminder[] = [];
-  const seen = new Set<string>();
+  const signatures = new Map<string, string>();
   for (let page = 0; page < MAX_INBOX_PAGES; page += 1) {
     const rows = await request<Reminder[]>(
       `/notifications?limit=${INBOX_PAGE_SIZE}&offset=${page * INBOX_PAGE_SIZE}`,
@@ -102,20 +108,42 @@ export async function fetchDeviceReminderInbox(): Promise<Reminder[]> {
           (reminder.source_id !== null && typeof reminder.source_id !== "string")) {
         throw new Error("Notification inbox returned an invalid record.");
       }
-      if (seen.has(reminder.id)) {
+      if (signatures.has(reminder.id)) {
         throw new Error("Overlapping notification inbox pages; device schedules were preserved.");
       }
-      seen.add(reminder.id);
+      // Only fields that influence local scheduling need to remain stable.
+      signatures.set(reminder.id, JSON.stringify([
+        reminder.category, reminder.source_id, reminder.due_at,
+        reminder.read_at, reminder.snoozed_until, reminder.revision,
+      ]));
       reminders.push(reminder);
     }
-    if (rows.length < INBOX_PAGE_SIZE) return reminders;
+    if (rows.length < INBOX_PAGE_SIZE) return { reminders, signatures, pages: page + 1 };
   }
-  // Exactly 10,000 records are safe; distinguish them from an incomplete list.
+  // Exactly 10,000 records are safe only after an empty boundary probe.
   const extra = await request<Reminder[]>(
     `/notifications?limit=1&offset=${MAX_INBOX_PAGES * INBOX_PAGE_SIZE}`,
   );
-  if (Array.isArray(extra) && extra.length === 0) return reminders;
+  if (Array.isArray(extra) && extra.length === 0) {
+    return { reminders, signatures, pages: MAX_INBOX_PAGES + 1 };
+  }
   throw new Error("Notification inbox exceeds 10,000 records or returned an invalid page. Existing device reminders were preserved.");
+}
+
+// Confirm multi-page inbox identity and scheduling state before replacing OS
+// alerts. Offset deletions can omit a reminder without overlapping page IDs.
+// This is best-effort consistency, not an atomic database snapshot.
+export async function fetchDeviceReminderInbox(): Promise<Reminder[]> {
+  const initial = await scanInboxPages();
+  if (initial.pages > 1) {
+    const confirmed = await scanInboxPages();
+    if (initial.signatures.size !== confirmed.signatures.size ||
+        [...initial.signatures].some(([id, signature]) =>
+          confirmed.signatures.get(id) !== signature)) {
+      throw new Error("Notification inbox changed during pagination; device schedules were preserved.");
+    }
+  }
+  return initial.reminders;
 }
 
 // No permission prompts here. Only an explicitly opted-in owner is eligible.

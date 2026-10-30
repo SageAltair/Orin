@@ -214,7 +214,44 @@ describe("paginated device notification inbox", () => {
     expect(vi.mocked(request).mock.calls.map(([path]) => path)).toEqual([
       "/notifications?limit=200&offset=0",
       "/notifications?limit=200&offset=200",
+      "/notifications?limit=200&offset=0",
+      "/notifications?limit=200&offset=200",
     ]);
+  });
+
+  it("preserves OS schedules when deletion silently shifts inbox pages", async () => {
+    const original = Array.from({ length: 201 }, (_, index) => reminder(`id-${index}`));
+    const afterDeletion = original.slice(1);
+    let scan = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") return policy as never;
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) {
+        const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset"));
+        if (offset === 0) scan += 1;
+        const records = scan === 1 && offset === 0 ? original : afterDeletion;
+        return records.slice(offset, offset + 200) as never;
+      }
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("changed during pagination");
+    expect(scan).toBe(2);
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects a snooze change between confirming inbox scans", async () => {
+    const original = Array.from({ length: 201 }, (_, index) => reminder(`id-${index}`));
+    const edited = original.map((entry) => ({ ...entry }));
+    edited[200]!.snoozed_until = "2026-11-03T12:00:00Z";
+    let scan = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      const offset = Number(new URLSearchParams(path.split("?")[1]).get("offset"));
+      if (offset === 0) scan += 1;
+      return (scan === 1 ? original : edited).slice(offset, offset + 200) as never;
+    });
+    await expect(fetchDeviceReminderInbox()).rejects.toThrow("changed during pagination");
+    expect(scan).toBe(2);
   });
 
   it("rejects overlapping pages rather than silently losing older alerts", async () => {
@@ -247,7 +284,7 @@ describe("paginated device notification inbox", () => {
       return (offset === 10_000 ? [] : Array.from({ length: limit }, (_, index) => reminder(`id-${offset + index}`))) as never;
     });
     expect(await fetchDeviceReminderInbox()).toHaveLength(10_000);
-    expect(vi.mocked(request)).toHaveBeenCalledTimes(51);
+    expect(vi.mocked(request)).toHaveBeenCalledTimes(102);
     expect(vi.mocked(request).mock.calls.at(-1)?.[0]).toBe("/notifications?limit=1&offset=10000");
   });
 
