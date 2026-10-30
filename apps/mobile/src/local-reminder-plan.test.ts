@@ -48,7 +48,9 @@ describe("local Android reminder planner", () => {
   it("honors disabled policy and quiet hours including overnight", () => {
     const r = reminder("quiet", "2026-10-29T23:00:00Z");
     expect(planLocalReminders([r], { ...policy, enabled: false }, now)).toEqual([]);
-    expect(planLocalReminders([r], { ...policy, quiet_enabled: true }, now)).toEqual([]);
+    const afterQuiet = Date.parse("2026-10-30T07:00:00Z");
+    expect(planLocalReminders([r], { ...policy, quiet_enabled: true }, now))
+      .toEqual([{ key: `quiet:1:${afterQuiet}`, fireAt: afterQuiet }]);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "09:00", quiet_end: "17:00" }, now)).toHaveLength(1);
     expect(planLocalReminders([r], { ...policy, quiet_enabled: true, quiet_start: "12:00", quiet_end: "12:00" }, now)).toEqual([]);
   });
@@ -75,10 +77,45 @@ describe("local Android reminder planner", () => {
     const due = "2026-10-29T23:00:00Z";
     const candidate = task("quiet", due);
     expect(planLocalReminders([], { ...policy, categories: ["calendar"] }, now, [candidate])).toEqual([]);
-    expect(planLocalReminders([], { ...policy, quiet_enabled: true }, now, [candidate])).toEqual([]);
+    const afterQuiet = Date.parse("2026-10-30T07:00:00Z");
+    expect(planLocalReminders([], { ...policy, quiet_enabled: true }, now, [candidate]))
+      .toEqual([{ key: `task:quiet:${afterQuiet}`, fireAt: afterQuiet }]);
     expect(planLocalReminders([], policy, now, [task("far", "2026-11-10T12:00:00Z")])).toEqual([]);
     const many = Array.from({ length: 40 }, (_, i) => task(String(i), new Date(now + (40 - i) * 60_000).toISOString()));
     expect(planLocalReminders([], policy, now, many)).toHaveLength(32);
+  });
+  it("defers quiet-hour reminders to the next allowed time in the policy timezone", () => {
+    const due = "2026-10-29T20:00:00Z"; // 23:00 in Dar es Salaam
+    const next = Date.parse("2026-10-30T04:00:00Z"); // 07:00 in Dar es Salaam
+    const localPolicy = { ...policy, quiet_enabled: true, timezone: "Africa/Dar_es_Salaam" };
+    expect(planLocalReminders([reminder("tz", due)], localPolicy, now))
+      .toEqual([{ key: `tz:1:${next}`, fireAt: next }]);
+    expect(planLocalReminders([], localPolicy, now, [task("tz", due)]))
+      .toEqual([{ key: `task:tz:${next}`, fireAt: next }]);
+  });
+  it("handles spring-forward and fall-back quiet-hour boundaries", () => {
+    const eastern = { ...policy, quiet_enabled: true, timezone: "America/New_York" };
+    const springNow = Date.parse("2027-03-14T05:00:00Z");
+    const springDue = "2027-03-14T06:30:00Z"; // 01:30 EST
+    const springEnd = Date.parse("2027-03-14T11:00:00Z"); // 07:00 EDT
+    expect(planLocalReminders([reminder("spring", springDue)], eastern, springNow))
+      .toEqual([{ key: `spring:1:${springEnd}`, fireAt: springEnd }]);
+    const fallNow = Date.parse("2026-11-01T04:00:00Z");
+    const fallDue = "2026-11-01T05:30:00Z"; // first 01:30 EDT
+    const fallEnd = Date.parse("2026-11-01T12:00:00Z"); // 07:00 EST
+    expect(planLocalReminders([reminder("fall", fallDue)], eastern, fallNow))
+      .toEqual([{ key: `fall:1:${fallEnd}`, fireAt: fallEnd }]);
+  });
+  it("fails closed on invalid quiet settings and does not defer beyond horizon", () => {
+    const due = "2026-10-29T23:00:00Z";
+    expect(planLocalReminders([reminder("invalid", due)],
+      { ...policy, quiet_enabled: true, timezone: "Invalid/Timezone" }, now)).toEqual([]);
+    expect(planLocalReminders([reminder("invalid", due)],
+      { ...policy, quiet_enabled: true, quiet_end: "99:00" }, now)).toEqual([]);
+    const nearHorizon = "2026-11-05T11:00:00Z";
+    expect(planLocalReminders([], {
+      ...policy, quiet_enabled: true, quiet_start: "10:00", quiet_end: "12:30",
+    }, now, [task("beyond", nearHorizon)])).toEqual([]);
   });
   it("caps device scheduling and prioritizes earliest dates", () => {
     const items = Array.from({ length: 40 }, (_, i) => reminder(String(i), new Date(now + (40 - i) * 60_000).toISOString()));
