@@ -44,7 +44,7 @@ jobs:
           $env:ORIN_WINDOWS_REMINDERS_APP_ID = 'Oddly.Orin.Reminders'
           $env:ORIN_WINDOWS_REMINDERS_SHORTCUT = $shortcut
           # Distinguish sanitized subprocess startup from COM shortcut probing.
-          python -c "from orin_worker.windows_reminders import _powershell_executable, _toast_environment; import subprocess; subprocess.run([_powershell_executable(), '-NoProfile', '-NonInteractive', '-Command', 'Write-Output subprocess-ready'], check=True, timeout=10, env=_toast_environment())"
+          python -c "from orin_worker.windows_reminders import _powershell_executable, _toast_environment; import subprocess; subprocess.run([_powershell_executable(), '-NoProfile', '-NonInteractive', '-InputFormat', 'None', '-Command', 'Write-Output subprocess-ready'], check=True, timeout=10, stdin=subprocess.DEVNULL, env=_toast_environment())"
           $shell = New-Object -ComObject Shell.Application
           $folder = $shell.Namespace((Split-Path -Parent $shortcut))
           $registered = [string]$folder.ParseName((Split-Path -Leaf $shortcut)).ExtendedProperty('System.AppUserModel.ID')
