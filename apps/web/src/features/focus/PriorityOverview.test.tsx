@@ -34,9 +34,9 @@ describe("priority outlook", () => {
       onEditTask={() => undefined} onScheduleTask={() => undefined}
       onCompleteTask={() => undefined} actionsBusy
     />);
-    expect(html).toContain('aria-label="Edit Busy commitment" disabled');
-    expect(html).toContain('aria-label="Schedule Busy commitment" disabled');
-    expect(html).toContain('aria-label="Mark Busy commitment done" disabled');
+    expect(html).toContain('disabled="" aria-label="Edit Busy commitment"');
+    expect(html).toContain('disabled="" aria-label="Schedule Busy commitment"');
+    expect(html).toContain('disabled="" aria-label="Mark Busy commitment done"');
   });
 
   it("labels planning-only without promising device alerts", () => {
