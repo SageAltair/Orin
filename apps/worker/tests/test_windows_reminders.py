@@ -477,6 +477,28 @@ def test_equal_quiet_hour_bounds_mean_quiet_all_day(tmp_path):
     queue.close()
 
 
+def test_slow_scan_crossing_into_quiet_hours_does_not_toast(tmp_path):
+    queue = ledger(tmp_path)
+    alerts = []
+    prefs = {"quiet_enabled": True, "timezone": "UTC",
+             "quiet_start": "12:01", "quiet_end": "13:00",
+             "respect_focus": False}
+    with api([task("a", NOW + 60)], prefs_extra=prefs) as client:
+        # The poll starts at 12:00, but the authenticated final task scan
+        # finishes after 12:01. Using only poll-start time would alert in
+        # the newly active quiet window.
+        assert run_once(client, queue, now=NOW,
+                        delivery_clock=lambda: NOW + 61,
+                        notify=lambda: alerts.append("toast")) == 0
+        assert queue.due(NOW) == [("a", NOW + 60)]
+        # The original deadline remains retryable after quiet hours end.
+        assert run_once(client, queue, now=NOW + 3601,
+                        delivery_clock=lambda: NOW + 3601,
+                        notify=lambda: alerts.append("toast")) == 1
+    assert alerts == ["toast"]
+    queue.close()
+
+
 def test_quiet_hours_suppress_then_release_without_repeating(tmp_path):
     queue = ledger(tmp_path)
     prefs = {"quiet_enabled": True, "timezone": "UTC",
