@@ -1705,6 +1705,8 @@ export default function App() {
                 ) : (
                   <div data-orin-control="tasks-workspace" className="focus-shell focus-embedded"><TaskCollection
                     key={activeWorkspaceId || "personal"}
+                    activeWorkspaceId={activeWorkspaceId}
+                    priorityGuidanceMode={preferences.priorityGuidanceMode}
                     onScheduleTask={scheduleTask}
                     onTaskSaved={(updated) => {
                       // An old workspace's in-flight save must never populate
