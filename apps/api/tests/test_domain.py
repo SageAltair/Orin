@@ -54,6 +54,40 @@ def client() -> Generator[TestClient, None, None]:
         engine.dispose()
 
 
+@pytest.mark.parametrize(
+    ("initial", "target", "expected_focus"),
+    [
+        ("done", "blocked", "later"),
+        ("done", "in_progress", "active"),
+        ("cancelled", "in_progress", "active"),
+        ("cancelled", "todo", "later"),
+        ("cancelled", "done", None),
+    ],
+)
+def test_editing_closed_task_preserves_requested_status_and_clears_stale_dates(
+    client: TestClient, initial: str, target: str, expected_focus: str | None,
+) -> None:
+    created = client.post("/api/v1/tasks", json={
+        "title": "Resume planning", "status": initial,
+    })
+    assert created.status_code == 201
+    task = created.json()
+    assert task["status"] == initial
+
+    updated = client.patch(f"/api/v1/tasks/{task['id']}", json={"status": target})
+    assert updated.status_code == 200
+    payload = updated.json()
+    assert payload["status"] == target
+    assert payload["focus_state"] == expected_focus
+    if target != "done":
+        assert payload["completed_at"] is None
+    if target != "cancelled":
+        assert payload["released_at"] is None
+
+    persisted = client.get("/api/v1/tasks").json()
+    assert next(item for item in persisted if item["id"] == task["id"])["status"] == target
+
+
 def test_task_and_project_pagination_has_stable_unique_tie_breakers(client: TestClient) -> None:
     # Multiple records can share identical sort timestamps (bulk imports,
     # database precision). Offset pages must have a deterministic final key.
