@@ -35,7 +35,7 @@ describe("app dashboard task inventory", () => {
       return tasks.slice(offset, offset + Number(params.get("limit")));
     });
     expect(await loadAppTaskInventory(fetchPage)).toHaveLength(200);
-    expect(fetchPage).toHaveBeenLastCalledWith("/tasks?limit=1&offset=5000");
+    expect(fetchPage).toHaveBeenLastCalledWith("/tasks?limit=100&offset=200");
   });
 
   it("fails instead of silently presenting partial dashboard totals", async () => {
