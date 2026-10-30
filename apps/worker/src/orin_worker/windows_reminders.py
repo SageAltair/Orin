@@ -232,7 +232,8 @@ def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now
             return tasks, signatures, page + 1
     raise ValueError("Task pagination limit reached")
 
-def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
+def _fetch_live_policy(client: httpx.Client, owner_id: str) -> dict[str, object]:
+    """Authenticate and read current suppression settings, never cached policy."""
     identity = client.get("/auth/me")
     identity.raise_for_status()
     account = identity.json()
@@ -244,6 +245,11 @@ def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now:
     if not isinstance(prefs, dict):
         raise ValueError("Invalid notification preferences")
     _validate_notification_policy(prefs)
+    return prefs
+
+
+def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
+    prefs = _fetch_live_policy(client, owner_id)
     if not prefs["enabled"] or "tasks" not in prefs["categories"]:
         return {}, prefs
 
@@ -391,19 +397,38 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     if _quiet(prefs, now):
         return 0
     due_tasks = ledger.due(now)
-    if due_tasks:
-        if prefs.get("respect_focus") is True:
-            try:
-                if _focus_active(client):
-                    return 0
-            except httpx.HTTPStatusError as error:
-                if error.response.status_code in {401, 403}:
-                    ledger.clear()
-                raise
-        # One generic toast per poll avoids flooding the user with N alerts.
-        notify()
-        for task_id, due in due_tasks:
-            ledger.mark_attempted(task_id, due, now)
+    if not due_tasks:
+        return 0
+
+    # Task pagination can take time. Revalidate the owner and suppression
+    # policy immediately before attempting a toast, not just before the scan.
+    # A mid-scan logout/revocation or opt-out must never deliver an old alert.
+    try:
+        live_prefs = _fetch_live_policy(client, ledger.owner_id)
+    except httpx.HTTPStatusError as error:
+        if error.response.status_code in {401, 403}:
+            ledger.clear()
+        raise
+    except PermissionError:
+        ledger.clear()
+        raise
+    if not live_prefs["enabled"] or "tasks" not in live_prefs["categories"]:
+        ledger.clear()
+        return 0
+    if _quiet(live_prefs, now):
+        return 0
+    if live_prefs["respect_focus"]:
+        try:
+            if _focus_active(client):
+                return 0
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in {401, 403}:
+                ledger.clear()
+            raise
+    # One generic toast per poll avoids flooding the user with N alerts.
+    notify()
+    for task_id, due in due_tasks:
+        ledger.mark_attempted(task_id, due, now)
     return len(due_tasks)
 
 
