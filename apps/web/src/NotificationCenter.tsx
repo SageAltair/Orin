@@ -7,6 +7,7 @@ import {
 } from "./notificationPolicy";
 import "./notifications.css";
 import { request } from "./api";
+import { eligibleAttentionItems, fetchCompleteNotificationInbox } from "./notificationInbox";
 
 type Reminder = {
   id: string;
@@ -32,21 +33,34 @@ export function NotificationCenter({
   );
   const [items, setItems] = useState<Reminder[]>([]);
   const [open, setOpen] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(100);
   const [error, setError] = useState("");
   const inboxGeneration = useRef(0);
   const policyGeneration = useRef(0);
-  const refresh = (): Promise<void> => {
+  const inFlightRefresh = useRef<Promise<void> | null>(null);
+  const refresh = (afterMutation = false): Promise<void> => {
+    // Reuse an active polling scan, but require a fresh scan after an explicit
+    // user mutation so an older snapshot cannot restore stale read state.
+    if (inFlightRefresh.current) return afterMutation
+      ? inFlightRefresh.current.then(() => refresh())
+      : inFlightRefresh.current;
     const generation = ++inboxGeneration.current;
-    return request<Reminder[]>("/notifications")
+    const pending: Promise<void> = fetchCompleteNotificationInbox<Reminder>((offset, limit) =>
+      request<Reminder[]>(`/notifications?limit=${limit}&offset=${offset}`))
       .then((rows) => {
         if (generation !== inboxGeneration.current) return;
-        setItems(Array.isArray(rows) ? rows : []);
+        setItems(rows);
         setError("");
       })
       .catch(() => {
         if (generation === inboxGeneration.current)
           setError("Reminders could not be refreshed.");
+      })
+      .finally(() => {
+        if (inFlightRefresh.current === pending) inFlightRefresh.current = null;
       });
+    inFlightRefresh.current = pending;
+    return pending;
   };
   useEffect(() => {
     void refresh();
@@ -56,12 +70,15 @@ export function NotificationCenter({
         .then((p) => {
           if (generation !== policyGeneration.current) return;
           if (p && typeof p.enabled === "boolean") setPolicy(p);
-          void refresh();
         })
         .catch(() => undefined);
     };
     void preferences();
-    window.addEventListener("orin-notification-preferences", preferences);
+    const onPreferencesChanged = () => {
+      void preferences();
+      void refresh(true);
+    };
+    window.addEventListener("orin-notification-preferences", onPreferencesChanged);
     const timer = window.setInterval(() => {
       void preferences();
       void refresh();
@@ -70,7 +87,7 @@ export function NotificationCenter({
       inboxGeneration.current++;
       policyGeneration.current++;
       window.clearInterval(timer);
-      window.removeEventListener("orin-notification-preferences", preferences);
+      window.removeEventListener("orin-notification-preferences", onPreferencesChanged);
     };
   }, []);
   const action = async (
@@ -83,15 +100,14 @@ export function NotificationCenter({
         method: "POST",
         body: JSON.stringify({ action: kind, minutes }),
       });
-      await refresh();
+      await refresh(true);
     } catch {
       setError("Could not update this reminder. Try again.");
     }
   };
   useEffect(() => {
-    if (!policy.browser_alerts && !policy.sound) return;
-    const pending = items
-      .filter((i) => i.attention_ready && !i.read_at)
+    if (!policy.enabled || (!policy.browser_alerts && !policy.sound)) return;
+    const pending = eligibleAttentionItems(items, policy)
       .filter((i) => {
         try {
           return !sessionStorage.getItem(`orin:alert:${i.id}:${i.revision}`);
@@ -130,9 +146,11 @@ export function NotificationCenter({
         /* Inbox remains available. */
       }
     }
-  }, [items, policy.browser_alerts, policy.sound]);
+  }, [items, policy.enabled, policy.categories, policy.browser_alerts, policy.sound]);
+  // The API orders newest due date first; the last eligible record is
+  // the oldest due commitment, even when it was beyond the first API page.
   const urgent = policy.persistent
-    ? items.find((i) => i.attention_ready && !i.read_at)
+    ? eligibleAttentionItems(items, policy).at(-1)
     : undefined;
   const unread = items.filter((item) => !item.read_at).length;
   return (
@@ -246,7 +264,7 @@ export function NotificationCenter({
               </small>
             </div>
           )}
-          {items.map((item) => (
+          {items.slice(0, visibleCount).map((item) => (
             <article key={item.id} className={item.read_at ? "is-read" : ""}>
               <strong>{item.title}</strong>
               <p>{item.message}</p>
@@ -292,7 +310,7 @@ export function NotificationCenter({
                       await request(`/notifications/${item.id}/read`, {
                         method: "PATCH",
                       });
-                      await refresh();
+                      await refresh(true);
                     } catch {
                       setError("This reminder could not be marked read.");
                     }
@@ -303,6 +321,15 @@ export function NotificationCenter({
               )}
             </article>
           ))}
+          {items.length > visibleCount && (
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => setVisibleCount((count) => count + 100)}
+            >
+              Show 100 older reminders ({items.length - visibleCount} remaining)
+            </button>
+          )}
         </section>
       )}
     </div>
