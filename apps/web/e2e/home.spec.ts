@@ -1021,7 +1021,7 @@ test("home dashboard counts completed tasks beyond the first API page", async ({
   });
   await page.goto("/");
   await signIn(page);
-  await expect(page.locator(".home-right-rail .focus-summary strong")).toContainText("5/12");
+  await expect(page.locator(".home-right-rail .focus-summary strong")).toContainText("5/105");
   expect(offsets).toContain(0);
   expect(offsets).toContain(100);
 
