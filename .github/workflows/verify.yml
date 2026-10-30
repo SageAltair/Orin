@@ -1,7 +1,12 @@
 name: Verify Orin
 on:
   push:
+    branches: [main]
   pull_request:
+# Cancel superseded PR heads, but never cancel or coalesce main merge verification.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 jobs:
