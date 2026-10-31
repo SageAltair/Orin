@@ -336,6 +336,7 @@ test("personal Tasks respects the account's persisted priority guidance mode", a
   await setupFocus(page, "planning-only");
   await page.goto("/"); await signIn(page);
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  await page.locator(".focus-priority-disclosure > summary").click();
   const outlook = page.getByRole("region", { name: "Priority outlook" });
   await expect(outlook.getByText("Planning-only")).toBeVisible();
 });
@@ -343,6 +344,7 @@ test("personal Tasks respects the account's persisted priority guidance mode", a
 test("priority Start explicitly marks a task in progress without starting a focus timer", async ({ page }) => {
   await setupFocus(page); await page.goto("/"); await signIn(page);
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  await page.locator(".focus-priority-disclosure > summary").click();
   const outlook = page.getByRole("region", { name: "Priority outlook" });
   const taskName = "Ask the team about the venue";
   const start = outlook.getByRole("button", { name: `Start ${taskName}` });
@@ -388,6 +390,7 @@ test("all-workspace priorities revalidate after an explicit current-workspace co
   });
   await page.goto("/"); await signIn(page);
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  await page.locator(".focus-priority-disclosure > summary").click();
   const outlook = page.getByRole("region", { name: "Priority outlook" });
   await outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" }).check();
   await expect(outlook.getByText("Ask the team about the venue")).toBeVisible();
@@ -412,6 +415,7 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
   ] }));
   await page.goto("/"); await signIn(page);
   await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+  await page.locator(".focus-priority-disclosure > summary").click();
   const outlook = page.getByRole("region", { name: "Priority outlook" });
   const optIn = outlook.getByRole("checkbox", { name: "Include tasks from all my workspaces" });
   await expect(optIn).not.toBeChecked();
