@@ -1176,6 +1176,7 @@ def test_bound_browser_logout_during_task_scan_fails_closed(tmp_path):
                 "quiet_start": "22:00", "quiet_end": "07:00",
             })
         if request.url.path.endswith("/tasks"):
+            state["task_reads"] += 1
             return httpx.Response(200, json=[task("due", NOW + 60)])
         return httpx.Response(404)
     with httpx.Client(base_url="https://orin.example/api/v1",
@@ -1308,7 +1309,7 @@ def test_browser_workspace_lease_fails_closed_before_native_toast(tmp_path, scen
     queue = ledger(tmp_path)
     queue.sync({"old": NOW + 60})
     calls = []
-    state = {"leases": 0}
+    state = {"leases": 0, "task_reads": 0}
     def handler(request):
         if request.url.path.endswith("/auth/me"):
             return httpx.Response(200, json={"id": OWNER})
@@ -1355,6 +1356,8 @@ def test_browser_workspace_lease_fails_closed_before_native_toast(tmp_path, scen
                          browser_lease_generation=LEASE_GENERATION,
                          notify=lambda: calls.append("toast"))
     assert calls == (["toast"] if scenario == "active" else [])
+    if scenario in {"expired", "outage", "wrong_generation"}:
+        assert state["task_reads"] == 0, "Revoked browser lease must block stale task reads"
     if scenario != "active":
         assert queue.due(NOW) == []
     queue.close()
