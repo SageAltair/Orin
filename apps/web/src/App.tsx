@@ -72,6 +72,7 @@ import {
   request,
   requestBlob,
   restoreSession,
+  revokeReminderLeaseOnPageHide,
   setActiveWorkspace,
 } from "./api";
 import ReactMarkdown from "react-markdown";
@@ -816,6 +817,11 @@ export default function App() {
     window.addEventListener(windowsLeaseToggleEvent, onToggle);
     return () => window.removeEventListener(windowsLeaseToggleEvent, onToggle);
   }, [user?.id]);
+  useEffect(() => {
+    if (!user || !windowsLeaseEnabled) return;
+    window.addEventListener("pagehide", revokeReminderLeaseOnPageHide);
+    return () => window.removeEventListener("pagehide", revokeReminderLeaseOnPageHide);
+  }, [user?.id, windowsLeaseEnabled]);
   const handleWorkspaceChange = useCallback(async (workspace: { id: string; name: string }) => {
     if (windowsLeaseEnabled && activeWorkspaceRef.current &&
         activeWorkspaceRef.current !== workspace.id) {
