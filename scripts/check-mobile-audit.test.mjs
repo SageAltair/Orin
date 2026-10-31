@@ -36,10 +36,18 @@ function report(highNames = KNOWN_HIGH_PACKAGES, criticalNames = []) {
   };
 }
 
-test("accepts only the reviewed high packages and their exact transitive advisory", () => {
-  const result = evaluateMobileAudit(report());
+test("accepts an audit with zero high or critical findings", () => {
+  assert.equal(HIGH_BASELINE_CEILING, 0);
+  const result = evaluateMobileAudit(report([], []));
   assert.equal(result.passed, true);
-  assert.equal(result.counts.high, HIGH_BASELINE_CEILING);
+  assert.equal(result.counts.high, 0);
+  assert.deepEqual(result.highPackages, []);
+});
+
+test("rejects previously tolerated high packages after the Expo security update", () => {
+  const result = evaluateMobileAudit(report());
+  assert.equal(result.passed, false);
+  assert.equal(result.counts.high, KNOWN_HIGH_PACKAGES.length);
   assert.deepEqual(result.unexpected, []);
   assert.deepEqual(result.advisories, KNOWN_HIGH_ADVISORIES.map((id) => id.toLowerCase()));
   assert.deepEqual(result.unexpectedAdvisories, []);
@@ -50,7 +58,7 @@ test("rejects a replacement high package even if the count stays unchanged", () 
   // The old root dependency is replaced by another high-severity dependency.
   replacement.vulnerabilities["@expo/cli"].via = ["@expo/config", "unreviewed-package"];
   const result = evaluateMobileAudit(replacement);
-  assert.equal(result.counts.high, HIGH_BASELINE_CEILING);
+  assert.equal(result.counts.high, KNOWN_HIGH_PACKAGES.length);
   assert.deepEqual(result.unexpected, ["unreviewed-package"]);
   assert.equal(result.passed, false);
 });
@@ -63,7 +71,7 @@ test("ignores low-severity advisories reachable through a high package", () => {
     severity: "low",
   });
   const result = evaluateMobileAudit(mixed);
-  assert.equal(result.passed, true);
+  assert.equal(result.passed, false);
   assert.deepEqual(result.unexpectedAdvisories, []);
 });
 
@@ -71,7 +79,7 @@ test("rejects a new high advisory in an existing known package", () => {
   const changed = report();
   changed.vulnerabilities.zod.via.push(newAdvisory);
   const result = evaluateMobileAudit(changed);
-  assert.equal(result.counts.high, HIGH_BASELINE_CEILING);
+  assert.equal(result.counts.high, KNOWN_HIGH_PACKAGES.length);
   assert.deepEqual(result.unexpected, []);
   assert.deepEqual(result.unexpectedAdvisories, ["ghsa-new-advisory-0000"]);
   assert.equal(result.passed, false);
