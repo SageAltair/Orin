@@ -569,6 +569,12 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
              browser_session_id: str | None = None,
              browser_lease_generation: str | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
+    # A revoked browser lease must also block *reading* old-workspace tasks.
+    # Check before the first task request, after the snapshot and before toast.
+    if browser_lease_generation is not None:
+        _check_bound_browser_lease(
+            client, ledger, browser_session_id, browser_lease_generation, now,
+        )
     try:
         tasks, prefs = _fetch_snapshot(client, ledger.owner_id, ledger.workspace_id, now)
     except httpx.HTTPStatusError as error:
