@@ -39,10 +39,15 @@ function assertValidDevicePolicy(value: unknown): asserts value is NotificationP
   }
   const policy = value as NotificationPolicy;
   if (!policy.enabled) return;
-  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   if (!Array.isArray(policy.categories) ||
-      policy.categories.some((category) => typeof category !== "string") ||
-      typeof policy.quiet_enabled !== "boolean" ||
+      policy.categories.some((category) => typeof category !== "string")) {
+    throw new Error("Invalid notification policy; device schedules were preserved.");
+  }
+  // Removing every category is also an explicit opt-out. Do not let an
+  // unrelated malformed quiet-hours field keep old alerts on the device.
+  if (policy.categories.length === 0) return;
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+  if (typeof policy.quiet_enabled !== "boolean" ||
       typeof policy.respect_focus !== "boolean" ||
       typeof policy.timezone !== "string" ||
       typeof policy.quiet_start !== "string" || !clock.test(policy.quiet_start) ||
