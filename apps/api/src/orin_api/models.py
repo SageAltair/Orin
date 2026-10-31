@@ -648,6 +648,24 @@ class AuthSession(CreatedAtMixin, Base):
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(back_populates="auth_session", cascade="all, delete-orphan", foreign_keys="RefreshToken.session_id")
 
 
+class BrowserReminderLease(Base):
+    """Short-lived browser authorization for one Windows companion workspace.
+
+    No bearer/refresh tokens or task data are stored. A generation change
+    invalidates companions started for an earlier workspace.
+    """
+    __tablename__ = "browser_reminder_leases"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("auth_sessions.id", ondelete="CASCADE"), primary_key=True,
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False,
+    )
+    generation_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class RefreshToken(CreatedAtMixin, Base):
     __tablename__ = "refresh_tokens"
     __table_args__ = (
