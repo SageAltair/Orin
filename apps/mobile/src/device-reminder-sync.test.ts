@@ -257,20 +257,47 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
-  it("revokes local alerts after a confirmed refresh credential rejection", async () => {
+  it("revokes local alerts and reports confirmed session expiry to the foreground", async () => {
+    const onRevoked = vi.fn();
     vi.mocked(wasRefreshCredentialRejected).mockReturnValue(true);
     vi.mocked(request).mockRejectedValueOnce(new Error("Session rejected"));
-    await expect(refreshDeviceReminders("alice", "workspace-a"))
+    await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
       .rejects.toThrow("Session rejected");
-    expect(revokeLocalReminderOwner).toHaveBeenCalledWith("alice");
+    expect(revokeLocalReminderOwner).toHaveBeenCalledWith("alice", wasRefreshCredentialRejected);
+    expect(onRevoked).toHaveBeenCalledExactlyOnceWith(true);
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
-  it("preserves existing local alerts when the refresh outage is transient", async () => {
+  it("reports failed OS cleanup without pretending the expired session is valid", async () => {
+    const onRevoked = vi.fn();
+    vi.mocked(wasRefreshCredentialRejected).mockReturnValue(true);
+    vi.mocked(request).mockRejectedValueOnce(new Error("Session rejected"));
+    vi.mocked(revokeLocalReminderOwner).mockRejectedValueOnce(new Error("OS cancellation failed"));
+    await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
+      .rejects.toThrow("OS cancellation failed");
+    expect(onRevoked).toHaveBeenCalledExactlyOnceWith(false);
+  });
+
+  it("does not sign out a newly authenticated same-owner session", async () => {
+    const onRevoked = vi.fn();
+    vi.mocked(wasRefreshCredentialRejected).mockReturnValue(true);
+    vi.mocked(request).mockRejectedValueOnce(new Error("Old session rejected"));
+    vi.mocked(revokeLocalReminderOwner).mockImplementationOnce(async (_owner, stillRejected) => {
+      vi.mocked(wasRefreshCredentialRejected).mockReturnValue(false);
+      expect(stillRejected?.()).toBe(false);
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
+      .rejects.toThrow("Old session rejected");
+    expect(onRevoked).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing local alerts and the visible session on a transient refresh outage", async () => {
+    const onRevoked = vi.fn();
     vi.mocked(request).mockRejectedValueOnce(new Error("Refresh server unavailable"));
-    await expect(refreshDeviceReminders("alice", "workspace-a"))
+    await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
       .rejects.toThrow("Refresh server unavailable");
     expect(revokeLocalReminderOwner).not.toHaveBeenCalled();
+    expect(onRevoked).not.toHaveBeenCalled();
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
