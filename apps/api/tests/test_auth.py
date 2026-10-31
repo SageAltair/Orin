@@ -190,6 +190,13 @@ def test_user_can_list_and_revoke_another_owned_session(auth_client: TestClient)
     sessions = client.get("/api/v1/auth/sessions").json()
     old_session = next(row for row in sessions if not row["current"])
     assert client.delete(f"/api/v1/auth/sessions/{old_session['id']}").status_code == 204
+    # The independent companion credential can still read this session's
+    # revoked state and must stop before attempting a Windows reminder.
+    listed_after_revoke = client.get("/api/v1/auth/sessions")
+    assert listed_after_revoke.status_code == 200
+    revoked = next(row for row in listed_after_revoke.json() if row["id"] == old_session["id"])
+    assert revoked["active"] is False
+    assert revoked["revoked_at"] is not None
     authenticate(client, str(first["access_token"]))
     assert client.get("/api/v1/auth/me").status_code == 401
     authenticate(client, str(second["access_token"]))
