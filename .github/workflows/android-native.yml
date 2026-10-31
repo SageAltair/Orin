@@ -47,6 +47,7 @@ jobs:
         working-directory: apps/mobile/android
         run: |
           bash ./gradlew :app:processReleaseMainManifest --no-daemon --max-workers=2
+          test -s app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
           ! grep -q 'android.permission.SYSTEM_ALERT_WINDOW' app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
       - name: Compile arm64 Android debug APK without device installation
         working-directory: apps/mobile/android
