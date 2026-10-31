@@ -205,6 +205,9 @@ jobs:
           cd apps/web
           npm ci
           npm audit --omit=dev --audit-level=high
+          # Vite is a dev dependency but powers the exposed local development server.
+          # Include dev dependencies and fail on moderate advisories as well.
+          npm audit --audit-level=moderate
       - name: Verify mobile audit regression policy
         run: node --test scripts/check-mobile-audit.test.mjs
       - name: Audit mobile locked dependencies (critical zero, high baseline ceiling)
