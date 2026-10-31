@@ -27,6 +27,10 @@ let accessToken: string | null = null;
 let activeWorkspaceId: string | null = null;
 let refreshPromise: Promise<boolean> | null = null;
 let authRevision = 0;
+// Only a definitive refresh-credential rejection, not an expired access token
+// followed by a transient refresh outage, can authorize local alert cleanup.
+let rejectedRefreshRevision: number | null = null;
+export const wasRefreshCredentialRejected = () => rejectedRefreshRevision === authRevision;
 let tokenWriteQueue: Promise<void> = Promise.resolve();
 let workspaceWriteQueue: Promise<void> = Promise.resolve();
 
@@ -34,6 +38,7 @@ let workspaceWriteQueue: Promise<void> = Promise.resolve();
 const beginAuthTransition = () => {
   authRevision += 1;
   refreshPromise = null;
+  rejectedRefreshRevision = null;
   return authRevision;
 };
 
@@ -152,12 +157,15 @@ const refresh = async () => {
         if (!response.ok) {
           // A rejected refresh credential ends the session. Temporary server
           // errors must not erase a still-valid token from secure storage.
-          if (response.status === 401 || response.status === 403)
+          if (response.status === 401 || response.status === 403) {
+            rejectedRefreshRevision = revision;
             await persistToken(null, revision);
+          }
           return false;
         }
         const data = (await response.json()) as { access_token: string };
         if (revision !== authRevision) return false;
+        rejectedRefreshRevision = null;
         await persistToken(data.access_token, revision);
         return revision === authRevision;
       })

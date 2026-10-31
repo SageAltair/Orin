@@ -20,6 +20,7 @@ import {
   request,
   restoreSession,
   setActiveWorkspace,
+  wasRefreshCredentialRejected,
 } from "./src/api";
 import {
   AuthScreen,
@@ -70,6 +71,15 @@ export default function App() {
       .then(async (restored) => {
         setUser(restored);
         if (restored) await loadWorkspaces();
+        else if (wasRefreshCredentialRejected()) {
+          // A confirmed refresh-credential rejection is not an offline
+          // startup failure. Remove stale OS alerts for the revoked session.
+          try {
+            await reconcileLocalReminderAccount(null);
+          } catch {
+            Alert.alert("Device reminders", "Your session expired, but Orin could not clear device reminders. Disable Orin notifications in Android settings.");
+          }
+        }
       })
       .finally(() => setBooting(false));
   }, []);

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as SecureStore from "expo-secure-store";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
-import { getLocalReminderEnabled, reconcileLocalReminderAccount, reconcileLocalReminderWorkspace, reminderOwnerForSession, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
+import { getLocalReminderEnabled, reconcileLocalReminderAccount, reconcileLocalReminderWorkspace, reminderOwnerForSession, revokeLocalReminderOwner, setLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
 import type { NotificationPolicy, Reminder, Task } from "./types";
 
 vi.mock("react-native", () => ({ Platform: { OS: "android", Version: 35 } }));
@@ -118,6 +118,26 @@ describe("native reminder account isolation and consent", () => {
     expect(stored).toBeNull();
     expect(scheduled).toHaveLength(0);
   });
+  it("revokes the opted-in owner's scheduled alerts after confirmed session rejection", async () => {
+    await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
+    expect(scheduled).toHaveLength(1);
+    await revokeLocalReminderOwner("alice");
+    expect(stored).toBeNull();
+    expect(scopeStored).toBeNull();
+    expect(scheduled).toHaveLength(0);
+  });
+
+  it("does not let a stale owner's revocation clear a newer account's alerts", async () => {
+    await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
+    await reconcileLocalReminderWorkspace("bob", "workspace-b");
+    await setLocalReminderEnabled("bob", "workspace-b", true, [reminder], policy);
+    expect(scheduled).toHaveLength(1);
+    await revokeLocalReminderOwner("alice");
+    expect(stored).toBe("bob");
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]!.content.data.owner).toBe("bob");
+  });
+
   it("replaces stale revisions and removes alerts when server preferences disable reminders", async () => {
     await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
     await syncLocalReminders("alice", "workspace-a", [{ ...reminder, revision: 2 }], policy);

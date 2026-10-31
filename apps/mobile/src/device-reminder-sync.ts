@@ -1,5 +1,5 @@
-import { request } from "./api";
-import { getLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
+import { request, wasRefreshCredentialRejected } from "./api";
+import { getLocalReminderEnabled, revokeLocalReminderOwner, syncLocalReminders } from "./native-reminders";
 import type { NotificationPolicy, Reminder, Task } from "./types";
 
 const PAGE_SIZE = 100;
@@ -190,7 +190,7 @@ export async function fetchDeviceReminderInbox(): Promise<Reminder[]> {
 
 // No permission prompts here. Only an explicitly opted-in owner is eligible.
 // Session and workspace changes fence stale in-flight network responses.
-export async function refreshDeviceReminders(
+async function refreshDeviceRemindersInternal(
   owner: string,
   workspaceId: string,
   isCurrent: () => boolean = () => true,
@@ -229,4 +229,23 @@ export async function refreshDeviceReminders(
     throw new Error("Task notification policy changed during sync; device schedules were preserved.");
   }
   await syncLocalReminders(owner, workspaceId, reminders, livePolicy, tasks);
+}
+
+/** A definitive refresh rejection revokes only this owner's local OS alerts.
+ * A temporary network/5xx refresh failure does not set that auth signal, so
+ * offline schedules survive. An old request cannot clear a newer account.
+ */
+export async function refreshDeviceReminders(
+  owner: string,
+  workspaceId: string,
+  isCurrent: () => boolean = () => true,
+): Promise<void> {
+  try {
+    await refreshDeviceRemindersInternal(owner, workspaceId, isCurrent);
+  } catch (error) {
+    if (isCurrent() && wasRefreshCredentialRejected()) {
+      await revokeLocalReminderOwner(owner);
+    }
+    throw error;
+  }
 }

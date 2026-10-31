@@ -73,6 +73,7 @@ describe("Android concurrent refresh and account transitions", () => {
           : new Response(null, { status: 401 }),
       );
       await expect(oldRequest).rejects.toMatchObject({ status: 401 });
+      expect(api.wasRefreshCredentialRejected()).toBe(false);
       await expect(api.request("/tasks", {}, false)).resolves.toEqual({ ok: true });
 
       const taskCall = [...fetchMock.mock.calls].reverse().find(([url]) => String(url).endsWith("/tasks"));
