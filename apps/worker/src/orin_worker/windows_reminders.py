@@ -531,18 +531,6 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     # An independent companion credential must not continue delivering after
     # the explicitly selected browser session has logged out.
     _check_bound_browser_session(client, ledger, browser_session_id)
-    # An independent companion credential must not continue delivering after
-    # the explicitly selected browser session has logged out.
-    if browser_session_id is not None:
-        try:
-            _require_browser_session(client, browser_session_id)
-        except PermissionError:
-            ledger.clear()
-            raise
-        except httpx.HTTPStatusError as error:
-            if error.response.status_code in {401, 403}:
-                ledger.clear()
-            raise
     ledger.sync(tasks)
     if _quiet(prefs, now):
         return 0
