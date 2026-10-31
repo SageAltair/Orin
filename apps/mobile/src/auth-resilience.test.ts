@@ -54,6 +54,7 @@ describe("mobile authentication resilience", () => {
       const api = await withStoredToken();
 
       await expect(api.request("/tasks")).rejects.toMatchObject({ status: 401 });
+      expect(api.wasRefreshCredentialRejected()).toBe(false);
       await expect(api.request<{ ok: boolean }>("/tasks")).resolves.toEqual({ ok: true });
       const lastHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
       expect(lastHeaders.get("Authorization")).toBe("Bearer old-token");
@@ -72,6 +73,7 @@ describe("mobile authentication resilience", () => {
       const api = await withStoredToken();
 
       await expect(api.request("/tasks")).rejects.toMatchObject({ status: 401 });
+      expect(api.wasRefreshCredentialRejected()).toBe(true);
       expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(
         "orin.mobile.access-token.v1",
       );
@@ -117,6 +119,7 @@ describe("mobile authentication resilience", () => {
     const api = await import("./api");
 
     await expect(api.restoreSession()).resolves.toMatchObject(user);
+    expect(api.wasRefreshCredentialRejected()).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
       "orin.mobile.access-token.v1",
@@ -124,6 +127,21 @@ describe("mobile authentication resilience", () => {
     );
     const lastHeaders = new Headers(fetchMock.mock.calls[2]?.[1]?.headers);
     expect(lastHeaders.get("Authorization")).toBe("Bearer new-token");
+  });
+
+  it("resets a rejected-refresh signal on explicit login to a new session", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "new-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(user), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const api = await withStoredToken();
+
+    await expect(api.request("/tasks")).rejects.toMatchObject({ status: 401 });
+    expect(api.wasRefreshCredentialRejected()).toBe(true);
+    await expect(api.login(user.email, "new-password")).resolves.toEqual(user);
+    expect(api.wasRefreshCredentialRejected()).toBe(false);
   });
 
   it("provides actionable physical-device diagnostics on network failure", async () => {
