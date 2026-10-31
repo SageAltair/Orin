@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const KNOWN_HIGH_PACKAGES = ["@expo/cli", "expo", "zod"];
-export const HIGH_BASELINE_CEILING = KNOWN_HIGH_PACKAGES.length;
+// Expo 58.0.22 removes the high-severity Zod chain. Do not permit it to return.
+export const HIGH_BASELINE_CEILING = 0;
 export const KNOWN_HIGH_ADVISORIES = ["ghsa-mrhx-c7xc-m3w5"];
 
 // An unchanged vulnerable package name is not an unchanged vulnerability.
