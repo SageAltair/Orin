@@ -633,3 +633,44 @@ def test_existing_reminder_with_null_categories_stays_unread_without_attention(s
         assert row.read_at is None
         assert row.attention_at is None
         assert row.repeats == 0
+
+
+@pytest.mark.parametrize("invalid_duration", [-1, 10**18])
+def test_corrupt_legacy_focus_duration_does_not_block_other_owners(
+    sessions, invalid_duration
+):
+    """A corrupt active Focus row suppresses only its owner, not the worker tick."""
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    with factory.begin() as session:
+        session.add(
+            FocusSession(
+                user_id=owner,
+                objective="Legacy focus",
+                duration_minutes=invalid_duration,
+                started_at=now,
+                status="active",
+            )
+        )
+        healthy = User(
+            email=f"healthy-focus-{abs(invalid_duration)}@example.test",
+            password_hash="test-hash",
+            display_name="Healthy",
+        )
+        session.add(healthy)
+        session.flush()
+        healthy_owner = healthy.id
+
+    task(factory, owner, now, "Owner with corrupt Focus")
+    task(factory, healthy_owner, now, "Healthy owner")
+    tick(factory, now)
+
+    with factory() as session:
+        affected = session.scalar(
+            select(Notification).where(Notification.user_id == owner)
+        )
+        healthy = session.scalar(
+            select(Notification).where(Notification.user_id == healthy_owner)
+        )
+        assert affected is not None and affected.attention_at is None
+        assert healthy is not None and healthy.attention_at is not None
