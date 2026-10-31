@@ -267,9 +267,13 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
               disabled={!ownerId}
               onChange={async (event) => {
                 if (event.target.checked) {
-                  setWindowsLeaseOptIn(true, ownerId);
-                  setWindowsLeaseEnabled(true);
-                  setNotice("Windows companion browser lease enabled for this tab.");
+                  try {
+                    setWindowsLeaseOptIn(true, ownerId);
+                    setWindowsLeaseEnabled(true);
+                    setNotice("Windows companion browser lease enabled for this tab.");
+                  } catch {
+                    setError("Browser storage is unavailable. Windows companion authorization remains disabled.");
+                  }
                 } else {
                   try {
                     await stopWindowsLease();
