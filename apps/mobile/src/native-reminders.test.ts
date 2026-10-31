@@ -118,6 +118,37 @@ describe("native reminder account isolation and consent", () => {
     expect(stored).toBeNull();
     expect(scheduled).toHaveLength(0);
   });
+  it("does not let a stale consent read revoke the new account's alerts", async () => {
+    await reconcileLocalReminderWorkspace("bob", "workspace-b");
+    await setLocalReminderEnabled("bob", "workspace-b", true, [reminder], policy);
+    const originalId = scheduled[0]!.identifier;
+    let current = true;
+    // The old account's queued check becomes stale while secure storage is
+    // returning the newly opted-in owner's key.
+    vi.mocked(SecureStore.getItemAsync).mockImplementationOnce(async () => {
+      current = false;
+      return stored;
+    });
+    expect(await getLocalReminderEnabled("alice", () => current)).toBe(false);
+    expect(stored).toBe("bob");
+    expect(scopeStored).toBe("bob:workspace-b");
+    expect(scheduled.map((item) => item.identifier)).toEqual([originalId]);
+    expect(Notifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+  });
+
+  it("preserves consent when a stale permission check finishes after a new session", async () => {
+    await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
+    let current = true;
+    vi.mocked(Notifications.getPermissionsAsync).mockImplementationOnce(async () => {
+      current = false;
+      return { granted: false } as never;
+    });
+    expect(await getLocalReminderEnabled("alice", () => current)).toBe(false);
+    expect(stored).toBe("alice");
+    expect(scheduled).toHaveLength(1);
+    expect(Notifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
+  });
+
   it("revokes the opted-in owner's scheduled alerts after confirmed session rejection", async () => {
     await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
     expect(scheduled).toHaveLength(1);
