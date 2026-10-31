@@ -197,3 +197,73 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     return notifications.some(row => row.category === "tasks" && row.source_id === task.id);
   }, { timeout: 45_000, intervals: [1000, 2000, 3000] }).toBe(true);
 });
+
+
+test("isolated PostgreSQL All Tasks includes records beyond the first API page", async ({
+  page,
+  request,
+}) => {
+  test.skip(!enabled, "Run only with the disposable orin-stabilization-acceptance Docker stack");
+  test.setTimeout(180_000);
+
+  const ready = await request.get(`${isolatedApi}/health/ready`);
+  expect(ready.status()).toBe(200);
+
+  const email = `isolated-pagination-${crypto.randomUUID()}@example.com`;
+  const password = `Isolated-pagination-${crypto.randomUUID()}!`;
+  await page.goto(isolatedWeb);
+  await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
+  await page.getByLabel("Your name").fill("Disposable pagination acceptance");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password", { exact: true }).fill(password);
+  await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+
+  const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
+    data: { email, password },
+  });
+  expect(login.status()).toBe(200);
+  const { access_token: token } = (await login.json()) as { access_token: string };
+  const headers = { Authorization: `Bearer ${token}` };
+  const createTask = async (title: string) => {
+    const response = await request.post(`${isolatedApi}/api/v1/tasks`, {
+      headers, data: { title },
+    });
+    expect(response.status(), `creating ${title}`).toBe(201);
+    return (await response.json()) as { id: string };
+  };
+
+  // Create the marker first. The API returns newest records first, so after
+  // 100 later tasks this record must appear only on the second API page.
+  const marker = await createTask("Disposable page two marker");
+  for (let start = 0; start < 100; start += 10) {
+    await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      createTask(`Disposable pagination task ${start + index + 1}`)));
+  }
+
+  const firstResponse = await request.get(`${isolatedApi}/api/v1/tasks?limit=100&offset=0`, { headers });
+  const secondResponse = await request.get(`${isolatedApi}/api/v1/tasks?limit=100&offset=100`, { headers });
+  expect(firstResponse.status()).toBe(200);
+  expect(secondResponse.status()).toBe(200);
+  const first = (await firstResponse.json()) as Array<{ id: string }>;
+  const second = (await secondResponse.json()) as Array<{ id: string }>;
+  expect(first).toHaveLength(100);
+  expect(first.some(row => row.id === marker.id)).toBe(false);
+  expect(second.some(row => row.id === marker.id)).toBe(true);
+
+  await page.reload();
+  await page.getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Tasks", exact: true }).click();
+  const workspace = page.locator(".focus-task-collection");
+  await expect(workspace).toBeVisible();
+  await expect(workspace.getByRole("button", { name: /All tasks/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(workspace.locator(".focus-task-list li")).toHaveCount(101, { timeout: 20_000 });
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable page two marker")).toBeVisible();
+
+  await workspace.getByLabel("Search tasks").fill("page two marker");
+  await expect(workspace.locator(".focus-task-list li")).toHaveCount(1);
+  await expect(workspace.locator(".focus-task-list")
+    .getByText("Disposable page two marker")).toBeVisible();
+});
