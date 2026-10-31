@@ -4,14 +4,13 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime, timedelta, timezone, time
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from orin_api.config import Settings
 from orin_api.database import SessionLocal
-from orin_api.notifications import emit, notification_tick
+from orin_api.notifications import emit, notification_tick, safe_zone
 from orin_api.planning_domain import occurrence, dates
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
@@ -48,8 +47,13 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 source="worker", idempotency_key=f"worker.terminal:{job.id}")
         events = session.scalars(select(CalendarEvent).where(CalendarEvent.reminder_minutes.is_not(None))).all()
         for event in events:
-            start = (datetime.combine(event.start_date, time(9), ZoneInfo(event.timezone)).astimezone(timezone.utc)
-                     if event.is_all_day else utc(event.start_at))
+            if event.is_all_day:
+                zone = safe_zone(event.timezone)
+                if zone is None:
+                    continue  # Invalid legacy timezone: do not block other reminders.
+                start = datetime.combine(event.start_date, time(9), zone).astimezone(timezone.utc)
+            else:
+                start = utc(event.start_at)
             due = start - timedelta(minutes=event.reminder_minutes)
             # Recover missed reminders during an outage, without surfacing old events indefinitely.
             if not due <= current < start + timedelta(hours=1):
@@ -65,9 +69,17 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 pass  # Another API instance delivered the same reminder.
         routines = session.scalars(select(Routine).where(Routine.paused.is_(False), Routine.reminder_minutes.is_not(None))).all()
         for routine in routines:
-            local_day = current.astimezone(ZoneInfo(routine.timezone)).date()
+            zone = safe_zone(routine.timezone)
+            if zone is None:
+                continue
+            local_day = current.astimezone(zone).date()
             for day in dates(local_day - timedelta(days=1), local_day + timedelta(days=1)):
-                start = occurrence(routine, day)
+                try:
+                    start = occurrence(routine, day)
+                except (ValueError, TypeError, KeyError):
+                    # Corrupt legacy time-of-day metadata must not stop the
+                    # entire maintenance transaction for unrelated users.
+                    continue
                 if start is None:
                     continue
                 due = start - timedelta(minutes=routine.reminder_minutes)

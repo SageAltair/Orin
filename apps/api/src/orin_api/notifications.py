@@ -67,10 +67,21 @@ def policy(session, user_id):
     return row
 
 
+def safe_zone(value: str | None) -> ZoneInfo | None:
+    """Legacy invalid timezone values must not abort every user's reminder tick."""
+    try:
+        return ZoneInfo(value)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def attention_allowed(session, prefs, now):
     if not prefs.enabled:
         return False
-    clock = now.astimezone(ZoneInfo(prefs.timezone)).strftime("%H:%M")
+    zone = safe_zone(prefs.timezone)
+    if zone is None:
+        return False  # Never bypass quiet hours with an invented UTC fallback.
+    clock = now.astimezone(zone).strftime("%H:%M")
     if prefs.quiet_enabled:
         start, end = prefs.quiet_start, prefs.quiet_end
         if (
@@ -239,12 +250,18 @@ def relevant(session, row):
     if row.category == "routines":
         if source.paused or source.reminder_minutes is None:
             return False
-        day = utc(row.due_at).astimezone(ZoneInfo(source.timezone)).date()
+        zone = safe_zone(source.timezone)
+        if zone is None:
+            return False
+        day = utc(row.due_at).astimezone(zone).date()
         # Reminder before midnight can refer to the following day.
         from orin_api.planning_domain import occurrence
 
         for local_day in (day, day + timedelta(days=1)):
-            instant = occurrence(source, local_day)
+            try:
+                instant = occurrence(source, local_day)
+            except (ValueError, TypeError, KeyError):
+                return False  # Invalid legacy clock; never interrupt other users.
             if instant and instant.isoformat() in row.delivery_key:
                 return not session.scalar(
                     select(RoutineCheckin.id).where(
@@ -256,13 +273,15 @@ def relevant(session, row):
     if row.category == "calendar":
         if source.reminder_minutes is None:
             return False
-        start = (
-            datetime.combine(
-                source.start_date, time(9), ZoneInfo(source.timezone)
+        if source.is_all_day:
+            zone = safe_zone(source.timezone)
+            if zone is None:
+                return False
+            start = datetime.combine(
+                source.start_date, time(9), zone
             ).astimezone(timezone.utc)
-            if source.is_all_day
-            else utc(source.start_at)
-        )
+        else:
+            start = utc(source.start_at)
         return start - timedelta(minutes=source.reminder_minutes) == utc(row.due_at)
     return True
 
@@ -343,10 +362,13 @@ def notification_tick(session, now):
         project = session.get(Project, milestone.project_id)
         if project and project.status == ProjectStatus.ACTIVE:
             prefs = policy(session, project.owner_id)
-            day = now.astimezone(ZoneInfo(prefs.timezone)).date()
+            zone = safe_zone(prefs.timezone)
+            if zone is None:
+                continue
+            day = now.astimezone(zone).date()
             if day - timedelta(days=7) <= milestone.target_date <= day:
                 due = datetime.combine(
-                    milestone.target_date, datetime.min.time(), ZoneInfo(prefs.timezone)
+                    milestone.target_date, datetime.min.time(), zone
                 ).astimezone(timezone.utc)
                 emit(
                     session,
@@ -366,12 +388,15 @@ def notification_tick(session, now):
         for source in session.scalars(select(model)):
             owner = getattr(source, "user_id", getattr(source, "owner_id", None))
             prefs = policy(session, owner)
-            local_day = now.astimezone(ZoneInfo(prefs.timezone)).date()
+            zone = safe_zone(prefs.timezone)
+            if zone is None:
+                continue
+            local_day = now.astimezone(zone).date()
             for field in date_fields:
                 day = getattr(source, field)
                 if day and local_day - timedelta(days=7) <= day <= local_day:
                     due = datetime.combine(
-                        day, datetime.min.time(), ZoneInfo(prefs.timezone)
+                        day, datetime.min.time(), zone
                     ).astimezone(timezone.utc)
                     key = f"{category}:{source.id}:{field}:{day}"
                     # The source state is checked before delivery and during later escalation.
@@ -463,7 +488,10 @@ def notification_tick(session, now):
             or row.repeats >= prefs.max_repeats
         ):
             continue
-        local_day = now.astimezone(ZoneInfo(prefs.timezone)).date()
+        zone = safe_zone(prefs.timezone)
+        if zone is None:
+            continue
+        local_day = now.astimezone(zone).date()
         if prefs.repeat_day != local_day:
             prefs.repeat_day = local_day
             prefs.repeats_today = 0
