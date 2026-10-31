@@ -329,7 +329,7 @@ jobs:
           exit 1
       - name: Cross-feature real-browser acceptance on disposable data
         working-directory: apps/web
-        run: npm run test:e2e -- e2e/isolated-acceptance.spec.ts --project=chromium --workers=1
+        run: npm run test:e2e -- e2e/isolated-acceptance.spec.ts e2e/worker-stack.spec.ts --project=chromium --workers=1
       - name: Preserve isolated acceptance diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

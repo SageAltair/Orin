@@ -62,10 +62,10 @@ test("real API approval releases a signed job to a live worker and reports its r
     await expect(workers.getByText(/revoked/)).toBeVisible();
   } finally {
     if (worker && worker.exitCode === null) {
-      const exited = new Promise<void>(resolve => worker?.once("exit", () => resolve()));
+      const exited = new Promise<void>(resolve => worker?.once("close", () => resolve()));
       worker.kill();
       await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 5000))]);
     }
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
   }
 });
