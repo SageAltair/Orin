@@ -19,7 +19,7 @@ const WritingStudio = lazy(() =>
   })),
 );
 import { NotificationCenter } from "./NotificationCenter";
-import { activateWindowsLease, clearWindowsLeaseLocalState, isWindowsLeaseOptedIn, renewWindowsLease, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
+import { activateWindowsLease, clearWindowsLeaseLocalState, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
 import {
   useEffect,
   useCallback,
@@ -808,12 +808,13 @@ export default function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const activeWorkspaceRef = useRef(activeWorkspaceId);
   activeWorkspaceRef.current = activeWorkspaceId;
-  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(isWindowsLeaseOptedIn);
+  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(false);
   useEffect(() => {
-    const onToggle = () => setWindowsLeaseEnabled(isWindowsLeaseOptedIn());
+    const onToggle = () => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(user?.id));
+    onToggle();
     window.addEventListener(windowsLeaseToggleEvent, onToggle);
     return () => window.removeEventListener(windowsLeaseToggleEvent, onToggle);
-  }, []);
+  }, [user?.id]);
   const handleWorkspaceChange = useCallback(async (workspace: { id: string; name: string }) => {
     if (windowsLeaseEnabled && activeWorkspaceRef.current &&
         activeWorkspaceRef.current !== workspace.id) {
@@ -930,6 +931,7 @@ export default function App() {
       try { await stopWindowsLease(); } catch { /* Server logout below revokes the session; otherwise lease expires. */ }
       clearWindowsLeaseLocalState();
     }
+    setWindowsLeaseOptIn(false);
     // Hide all account-owned state immediately, even when the API is offline.
     setUser(null);
     setTasks([]);
@@ -1684,7 +1686,7 @@ export default function App() {
                   <AccountSecurity user={user} onUpdated={setUser} />
                 </div>
                 <div hidden={section !== "notifications"} data-orin-control="notification-settings">
-                  <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
+                  <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel ownerId={user?.id} /></Suspense>
                 </div>
                 <div hidden={section !== "privacy"}><AccountPrivacy userId={user.id} /></div>
                 <div hidden={section !== "devices"}><DeviceSettings onApprovalCreated={refreshApprovals} /></div>
