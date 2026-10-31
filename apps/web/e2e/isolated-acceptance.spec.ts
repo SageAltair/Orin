@@ -38,6 +38,52 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const { access_token: token } = (await login.json()) as { access_token: string };
   const headers = { Authorization: `Bearer ${token}` };
 
+  // Real Chromium + disposable PostgreSQL: opt-in browser lease must follow
+  // A -> B -> A without allowing an old companion generation to rearm.
+  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  await page.getByRole("button", { name: "Preferences", exact: true }).click();
+  await page.getByRole("navigation", { name: "Settings sections" })
+    .getByRole("button", { name: "Notifications", exact: true }).click();
+  const notificationSettings = page.getByRole("region", { name: "Notification preferences" });
+  await notificationSettings.getByRole("checkbox", {
+    name: /Authorize the Windows reminder companion/,
+  }).check();
+  await expect(notificationSettings.getByText(/Browser session:/)).toBeVisible();
+  const identifiers = await notificationSettings.locator("code").allTextContents();
+  expect(identifiers).toHaveLength(2);
+  const [browserSessionId, generationA] = identifiers;
+  const leaseUrl = `${isolatedApi}/api/v1/auth/reminder-lease/${browserSessionId}`;
+  const initialLease = await request.get(leaseUrl, { headers });
+  expect(initialLease.status()).toBe(200);
+  const leaseA = await initialLease.json() as { workspace_id: string; generation_id: string };
+  expect(leaseA.generation_id).toBe(generationA);
+
+  await page.getByRole("region", { name: "Workspaces" })
+    .getByRole("button", { name: "New workspace" }).click();
+  await page.getByRole("dialog", { name: "Create a workspace" })
+    .getByLabel("Workspace name").fill("Disposable lease B");
+  await page.getByRole("dialog", { name: "Create a workspace" })
+    .getByRole("button", { name: "Create workspace" }).click();
+  await expect.poll(async () => {
+    const response = await request.get(leaseUrl, { headers });
+    return response.ok() ? (await response.json() as { workspace_id: string }).workspace_id : null;
+  }).not.toBe(leaseA.workspace_id);
+  const leaseB = await (await request.get(leaseUrl, { headers })).json() as {
+    workspace_id: string; generation_id: string;
+  };
+  expect(leaseB.generation_id).not.toBe(generationA);
+  await page.getByRole("region", { name: "Workspaces" })
+    .getByRole("button", { name: "Personal", exact: true }).click();
+  await expect.poll(async () => {
+    const response = await request.get(leaseUrl, { headers });
+    return response.ok() ? (await response.json() as { generation_id: string }).generation_id : null;
+  }).not.toBe(leaseB.generation_id);
+  const leaseAgain = await (await request.get(leaseUrl, { headers })).json() as {
+    workspace_id: string; generation_id: string;
+  };
+  expect(leaseAgain.workspace_id).toBe(leaseA.workspace_id);
+  expect(leaseAgain.generation_id).not.toBe(generationA);
+
   const projectResponse = await request.post(`${isolatedApi}/api/v1/projects`, {
     headers,
     data: { name: "Disposable browser project" },
