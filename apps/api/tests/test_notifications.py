@@ -674,3 +674,44 @@ def test_corrupt_legacy_focus_duration_does_not_block_other_owners(
         )
         assert affected is not None and affected.attention_at is None
         assert healthy is not None and healthy.attention_at is not None
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["null_categories", "object_categories", "invalid_quiet_clock"],
+)
+def test_inbox_read_fails_closed_for_corrupt_legacy_preferences(
+    client, sessions, corruption
+):
+    """A corrupt preference row must not make the authenticated inbox return 500."""
+    factory, owner = sessions
+    now = datetime.now(timezone.utc)
+    task_id = task(factory, owner, now, "Persisted reminder")
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        if corruption == "null_categories":
+            prefs.categories = None
+        elif corruption == "object_categories":
+            prefs.categories = {"tasks": True}
+        else:
+            prefs.quiet_enabled = True
+            prefs.quiet_start = "99:99"
+            prefs.quiet_end = "07:00"
+        session.add(
+            Notification(
+                user_id=owner,
+                category="tasks",
+                source_id=task_id,
+                delivery_key=f"task:{task_id}:{now.isoformat()}",
+                title="Persisted reminder",
+                message="Remain unread until preferences are repaired",
+                due_at=now,
+            )
+        )
+
+    response = client.get("/api/v1/notifications")
+    assert response.status_code == 200, response.text
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["read_at"] is None
+    assert rows[0]["attention_ready"] is False

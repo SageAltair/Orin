@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
 from orin_api.models import Notification, User
-from orin_api.notifications import policy, attention_allowed, CATEGORIES, relevant, utc
+from orin_api.notifications import (
+    policy,
+    attention_allowed,
+    category_enabled,
+    CATEGORIES,
+    relevant,
+    utc,
+)
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
@@ -129,7 +136,7 @@ def list_notifications(
         )
         ready = bool(
             allowed
-            and row.category in prefs.categories
+            and category_enabled(prefs, row.category)
             and row.read_at is None
             and now >= utc(row.due_at) - timedelta(minutes=lead)
             and (row.snoozed_until is None or utc(row.snoozed_until) <= now)
