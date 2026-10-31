@@ -82,6 +82,7 @@ async function sync(owner: string, workspaceId: string, reminders: Reminder[], p
   );
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
   const existing = new Set<string>();
+  const obsolete: string[] = [];
   for (const entry of scheduled) {
     if (entry.content.data?.[TAG] !== true) continue;
     const key = entry.content.data?.key;
@@ -94,25 +95,46 @@ async function sync(owner: string, workspaceId: string, reminders: Reminder[], p
     ) {
       existing.add(key);
     } else {
-      await Notifications.cancelScheduledNotificationAsync(entry.identifier);
+      obsolete.push(entry.identifier);
     }
   }
-  for (const [key, fireAt] of desired) {
+  // Schedule replacements before cancelling old alerts. A transient OS
+  // scheduling failure must not discard an owner's last working reminder.
+  // Roll back any partial additions, leaving the previous schedule intact.
+  const added: string[] = [];
+  try {
+    for (const [key, fireAt] of desired) {
+      if (activeScope !== scope) throw new Error("Reminder workspace changed during scheduling.");
+      if (existing.has(key)) continue;
+      const identifier = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "Orin reminder",
+          body: "Open Orin to review an upcoming reminder.",
+          data: { [TAG]: true, owner, workspace: workspaceId, key },
+          sound: false,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: new Date(fireAt),
+          ...(supportsAndroidChannels() ? { channelId: CHANNEL } : {}),
+        },
+      });
+      added.push(identifier);
+    }
+    if (activeScope !== scope) throw new Error("Reminder workspace changed during scheduling.");
+  } catch (error) {
+    for (const identifier of added) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(identifier);
+      } catch {
+        // The next reconciliation can clean up an OS cancellation failure.
+      }
+    }
+    throw error;
+  }
+  for (const identifier of obsolete) {
     if (activeScope !== scope) return;
-    if (existing.has(key)) continue;
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "Orin reminder",
-        body: "Open Orin to review an upcoming reminder.",
-        data: { [TAG]: true, owner, workspace: workspaceId, key },
-        sound: false,
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
-        date: new Date(fireAt),
-        ...(supportsAndroidChannels() ? { channelId: CHANNEL } : {}),
-      },
-    });
+    await Notifications.cancelScheduledNotificationAsync(identifier);
   }
 }
 
