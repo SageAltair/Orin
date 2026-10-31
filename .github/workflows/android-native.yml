@@ -40,6 +40,15 @@ jobs:
         run: |
           npm ci
           npx expo prebuild --platform android --no-install
+      - name: Verify generated manifest removes the unused overlay permission
+        run: |
+          grep -Eq 'android:name="android.permission.SYSTEM_ALERT_WINDOW"[[:space:]]+tools:node="remove"' apps/mobile/android/app/src/main/AndroidManifest.xml
+      - name: Verify merged release manifest excludes overlay permission
+        working-directory: apps/mobile/android
+        run: |
+          bash ./gradlew :app:processReleaseMainManifest --no-daemon --max-workers=2
+          test -s app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
+          ! grep -q 'android.permission.SYSTEM_ALERT_WINDOW' app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml
       - name: Compile arm64 Android debug APK without device installation
         working-directory: apps/mobile/android
         run: bash ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=arm64-v8a
