@@ -257,7 +257,7 @@ test("calendar search and filters find project tasks and open the original task"
   await expect(taskAfterClear).toBeVisible();
   await taskAfterClear.click({ position: { x: 4, y: 5 } });
   await expect(page.locator('[data-orin-control="nav-tasks"]')).toHaveAttribute("aria-current", "page");
-  await expect(page.getByText("Write project brief").first()).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Write project brief")).toBeVisible();
 });
 
 test("calendar dialogs support Escape and focus return at narrow width with dark and reduced-motion settings", async ({ page }) => {
