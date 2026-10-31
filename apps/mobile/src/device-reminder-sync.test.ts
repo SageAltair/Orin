@@ -180,6 +180,19 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
+  it("passes the live session fence into the queued local opt-in check", async () => {
+    let current = true;
+    vi.mocked(getLocalReminderEnabled).mockImplementationOnce(async (_owner, stillCurrent) => {
+      current = false;
+      expect(stillCurrent?.()).toBe(false);
+      return false;
+    });
+    await refreshDeviceReminders("alice", "workspace-a", () => current);
+    expect(getLocalReminderEnabled).toHaveBeenCalledWith("alice", expect.any(Function));
+    expect(request).not.toHaveBeenCalled();
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
   it("cancels local schedules when policy is disabled even if tasks API is unavailable", async () => {
     vi.mocked(request).mockImplementation(async (path) => {
       if (path === "/notifications/preferences") return { ...policy, enabled: false } as never;
