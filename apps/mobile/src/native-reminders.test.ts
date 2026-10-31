@@ -126,6 +126,34 @@ describe("native reminder account isolation and consent", () => {
     await syncLocalReminders("alice", "workspace-a", [reminder], { ...policy, enabled: false });
     expect(scheduled).toHaveLength(0);
   });
+  it("rolls back partial OS schedules without deleting prior alerts when replacement fails", async () => {
+    await setLocalReminderEnabled("alice", "workspace-a", [reminder], policy);
+    const originalId = scheduled[0]!.identifier;
+    const changed = { ...reminder, revision: 2 };
+    const additional = {
+      ...reminder, id: "rem-2", due_at: new Date(now + 240_000).toISOString(),
+    };
+    vi.mocked(Notifications.scheduleNotificationAsync)
+      .mockImplementationOnce(async (request) => {
+        const identifier = "partial-new-alert";
+        scheduled.push({
+          identifier, content: { data: request.content.data as Record<string, unknown> },
+        });
+        return identifier;
+      })
+      .mockRejectedValueOnce(new Error("OS scheduling unavailable"));
+
+    await expect(syncLocalReminders("alice", "workspace-a", [changed, additional], policy))
+      .rejects.toThrow("OS scheduling unavailable");
+    expect(scheduled.map((item) => item.identifier)).toEqual([originalId]);
+    expect(Notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith("partial-new-alert");
+    expect(Notifications.cancelScheduledNotificationAsync).not.toHaveBeenCalledWith(originalId);
+
+    // A later successful refresh replaces the stale revision normally.
+    await syncLocalReminders("alice", "workspace-a", [changed, additional], policy);
+    expect(scheduled).toHaveLength(2);
+    expect(scheduled.some((item) => item.identifier === originalId)).toBe(false);
+  });
   it("revokes stale opt in when Android permission is removed, preserving unrelated alerts", async () => {
     await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
     expect(await getLocalReminderEnabled("alice")).toBe(true);
