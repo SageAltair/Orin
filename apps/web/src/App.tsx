@@ -1419,6 +1419,13 @@ export default function App() {
     setScheduleTaskId(id);
     selectPage("calendar");
   };
+  const syncSavedTask = (updated: Task) => {
+    // Ignore in-flight mutations from a workspace the user has left.
+    if (activeWorkspaceRef.current !== activeWorkspaceId) return;
+    setTasks(current => current.some(task => task.id === updated.id)
+      ? current.map(task => task.id === updated.id ? updated : task)
+      : [updated, ...current]);
+  };
   const activeProjects = projects
     .filter((project) => project.status === "active")
     .slice(0, 4);
@@ -1709,6 +1716,7 @@ export default function App() {
                     embedded
                     onScheduleTask={scheduleTask}
                     onOpenProject={openProject}
+                    onTaskSaved={syncSavedTask}
                     activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                   /></div>
@@ -1719,14 +1727,7 @@ export default function App() {
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                     onScheduleTask={scheduleTask}
                     onOpenProject={openProject}
-                    onTaskSaved={(updated) => {
-                      // An old workspace's in-flight save must never populate
-                      // the newly selected workspace's dashboard.
-                      if (activeWorkspaceRef.current !== activeWorkspaceId) return;
-                      setTasks(current => current.some(task => task.id === updated.id)
-                        ? current.map(task => task.id === updated.id ? updated : task)
-                        : [updated, ...current]);
-                    }}
+                    onTaskSaved={syncSavedTask}
                   /></div>
                 )
               ) : page === "projects" ? (

@@ -113,6 +113,14 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable scheduled browser task")).toBeVisible();
+  // The parent Home dashboard must immediately see tasks saved in embedded
+  // Personal Tasks, without a reload or workspace switch.
+  await page.getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.locator(".compact-list")
+    .getByText("Disposable scheduled browser task")).toBeVisible();
+  await openTasks();
+  workspace = page.locator(".focus-task-collection");
 
   // Verify date-based navigation against real persisted tasks, not mocked
   // selectors. Overdue can overlap Today; Upcoming must not.
