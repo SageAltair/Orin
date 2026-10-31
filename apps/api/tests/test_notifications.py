@@ -540,7 +540,7 @@ def test_saved_reminder_becomes_ready_immediately_when_quiet_hours_end(
     assert client.get("/api/v1/notifications").json()[0]["attention_ready"]
 
 
-@pytest.mark.parametrize("corruption", ["invalid_quiet_clock", "invalid_categories"])
+@pytest.mark.parametrize("corruption", ["invalid_quiet_clock", "invalid_categories", "null_categories"])
 def test_corrupt_legacy_preferences_do_not_starve_other_owners(sessions, corruption):
     """One owner's malformed settings must not stop another owner's task reminders."""
     factory, owner = sessions
@@ -551,8 +551,10 @@ def test_corrupt_legacy_preferences_do_not_starve_other_owners(sessions, corrupt
             prefs.quiet_enabled = True
             prefs.quiet_start = "99:99"
             prefs.quiet_end = "07:00"
-        else:
+        elif corruption == "invalid_categories":
             prefs.categories = {"tasks": True}  # Legacy malformed JSON object, not a list.
+        else:
+            prefs.categories = None  # Legacy JSON null must not crash the shared tick.
         healthy = User(
             email=f"healthy-{corruption}@example.test",
             password_hash="test-hash",
