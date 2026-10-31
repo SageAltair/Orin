@@ -120,6 +120,19 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await expect(page.locator(".compact-list")
     .getByText("Disposable scheduled browser task")).toBeVisible();
   await openTasks();
+  // Focus Capture also creates a real task; Home must not retain an old
+  // inventory after the user captures an item in the embedded experience.
+  await page.getByRole("navigation", { name: "Focus navigation" })
+    .getByRole("button", { name: "Capture", exact: true }).click();
+  await page.getByLabel("What would you like to remember?")
+    .fill("Disposable focus capture Home task");
+  await page.getByRole("button", { name: "Save and continue" }).click();
+  await expect(page.getByText("Saved. One small step is ready on Now.")).toBeVisible();
+  await page.getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.locator(".compact-list")
+    .getByText("Disposable focus capture Home task")).toBeVisible();
+  await openTasks();
   workspace = page.locator(".focus-task-collection");
 
   // Verify date-based navigation against real persisted tasks, not mocked
