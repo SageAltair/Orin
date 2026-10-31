@@ -113,6 +113,14 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable scheduled browser task")).toBeVisible();
+  // The parent Home dashboard must immediately see tasks saved in embedded
+  // Personal Tasks, without a reload or workspace switch.
+  await page.getByRole("navigation", { name: "Workspace" })
+    .getByRole("button", { name: "Home", exact: true }).click();
+  await expect(page.locator(".compact-list")
+    .getByText("Disposable scheduled browser task")).toBeVisible();
+  await openTasks();
+  workspace = page.locator(".focus-task-collection");
 
   // Verify date-based navigation against real persisted tasks, not mocked
   // selectors. Overdue can overlap Today; Upcoming must not.
@@ -432,38 +440,4 @@ test.describe("Dar es Salaam local task scheduling", () => {
     // Editing unrelated fields must not shift the original instant.
     expect(new Date(revised?.due_at ?? "").toISOString()).toBe("2099-11-02T06:45:00.000Z");
   });
-});
-
-
-test("isolated Personal Tasks creation immediately updates Home without reload", async ({
-  page,
-  request,
-}) => {
-  test.skip(!enabled, "Run only with the disposable orin-stabilization-acceptance Docker stack");
-  test.setTimeout(120_000);
-  expect((await request.get(isolatedApi + "/health/ready")).status()).toBe(200);
-
-  const email = "isolated-home-sync-" + crypto.randomUUID() + "@example.com";
-  const password = "Isolated-home-sync-" + crypto.randomUUID() + "!";
-  await page.goto(isolatedWeb);
-  await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
-  await page.getByLabel("Your name").fill("Disposable Home sync acceptance");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
-
-  const navigation = page.getByRole("navigation", { name: "Workspace" });
-  await navigation.getByRole("button", { name: "Tasks", exact: true }).click();
-  const workspace = page.locator(".focus-task-collection");
-  await expect(workspace).toBeVisible();
-  await workspace.getByRole("button", { name: "New task" }).click();
-  await workspace.getByLabel("Task name").fill("Disposable Personal Home sync task");
-  await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
-  await workspace.getByRole("button", { name: "Save task" }).click();
-  await expect(workspace.getByText("Task created.")).toBeVisible();
-  await expect(workspace.locator(".focus-task-list").getByText("Disposable Personal Home sync task")).toBeVisible();
-
-  await navigation.getByRole("button", { name: "Home", exact: true }).click();
-  await expect(page.locator(".compact-list").getByText("Disposable Personal Home sync task")).toBeVisible();
 });
