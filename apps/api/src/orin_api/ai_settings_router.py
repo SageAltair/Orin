@@ -8,6 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from orin_api.ai import PROVIDER_BASE_URLS, ProviderName
@@ -259,7 +260,15 @@ def update_model(model_id: uuid.UUID, data: ModelUpdate, user: User = Depends(ge
 def _policy(session: Session, user: User) -> AIUserPolicy:
     row = session.get(AIUserPolicy, user.id)
     if row is None:
-        row = AIUserPolicy(user_id=user.id); session.add(row); session.flush()
+        try:
+            # Concurrent first reads may both attempt to create the same owner policy.
+            # Keep the outer transaction usable after the losing insert.
+            with session.begin_nested():
+                row = AIUserPolicy(user_id=user.id)
+                session.add(row)
+                session.flush()
+        except IntegrityError:
+            row = session.get(AIUserPolicy, user.id)
     return row
 
 

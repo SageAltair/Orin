@@ -13,7 +13,7 @@ from orin_api.auth import get_current_user
 from orin_api.config import Settings, get_settings
 from orin_api.database import Base, get_session
 from orin_api.main import app
-from orin_api.models import AIProviderConnection, User
+from orin_api.models import AIProviderConnection, AIUserPolicy, User
 
 
 @pytest.fixture
@@ -168,6 +168,37 @@ def test_automatic_routing_silently_recovers_from_quota_with_a_free_model(client
     assert usage["rate_limit_events"] == 1
     assert any(row["model_id"] == "community-model:free" and row["fallbacks"] == 1 for row in usage["by_model"])
 
+
+
+def test_routing_policy_first_read_recovers_from_concurrent_insert(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Another request committed the owner row after this request's initial read.
+    existing = client.get("/api/v1/intelligence/routing-policy")
+    assert existing.status_code == 200, existing.text
+
+    original_get = Session.get
+    stale_read_seen = False
+
+    def stale_first_policy_read(session, entity, ident, *args, **kwargs):
+        nonlocal stale_read_seen
+        if entity is AIUserPolicy and not stale_read_seen:
+            stale_read_seen = True
+            return None
+        return original_get(session, entity, ident, *args, **kwargs)
+
+    monkeypatch.setattr(Session, "get", stale_first_policy_read)
+    response = client.get("/api/v1/intelligence/routing-policy")
+    assert stale_read_seen
+    assert response.status_code == 200, response.text
+    assert response.json() == existing.json()
+
+    # The unique-key collision must not poison the surrounding transaction.
+    updated = client.put("/api/v1/intelligence/routing-policy", json={
+        "auto_enabled": False, "fallback_model_ids": [], "task_model_ids": {},
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["auto_enabled"] is False
 
 def test_routing_policy_rejects_another_users_model(client: TestClient) -> None:
     response = client.put("/api/v1/intelligence/routing-policy", json={
