@@ -419,6 +419,10 @@ test.describe("Dar es Salaam local task scheduling", () => {
     await expect(tasks.getByLabel("Due date and time (local)")).toHaveValue("2099-11-02T09:45");
     await tasks.getByLabel("Task name").fill("Disposable Dar timezone task revised");
     await tasks.getByRole("button", { name: "Save task" }).click();
+    // Wait for the awaited PATCH to commit before reading PostgreSQL via the API.
+    await expect(tasks.getByText("Task updated.")).toBeVisible();
+    await expect(tasks.locator(".focus-task-list")
+      .getByText("Disposable Dar timezone task revised")).toBeVisible();
 
     const afterEdit = await request.get(`${isolatedApi}/api/v1/tasks`, { headers });
     expect(afterEdit.status()).toBe(200);
