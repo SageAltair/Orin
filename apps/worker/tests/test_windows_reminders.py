@@ -941,6 +941,58 @@ def test_registration_diagnostic_fails_closed_without_modifying_shortcut(tmp_pat
         check_toast_registration()
 
 
+def test_manual_toast_probe_requires_explicit_opt_in(monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.delenv("ORIN_WINDOWS_REMINDERS_TEST_TOAST", raising=False)
+    monkeypatch.setattr(windows_reminders, "_windows_toast",
+                        lambda **kwargs: pytest.fail("no toast without explicit consent"))
+    with pytest.raises(SystemExit, match="Test toast is disabled"):
+        windows_reminders.test_toast_delivery()
+
+
+def test_manual_toast_probe_uses_test_content_and_requires_visual_confirmation(
+    tmp_path, monkeypatch, capsys,
+):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TEST_TOAST", "1")
+    calls = []
+    monkeypatch.setattr(windows_reminders, "_windows_toast",
+                        lambda **kwargs: calls.append(kwargs))
+    windows_reminders.test_toast_delivery()
+    assert calls == [{"test_mode": True}]
+    assert "does not prove visibility" in capsys.readouterr().out
+
+    script = _toast_script("Orin.Desktop", tmp_path / "Orin.lnk", test_mode=True)
+    assert "This is a test notification." in script
+    assert "You have a scheduled task." not in script
+    assert "ExtendedProperty('System.AppUserModel.ID')" in script
+    assert script.index("AppUserModelID mismatch") < script.index("CreateToastNotifier")
+
+
+def test_manual_toast_probe_failure_never_claims_visible_delivery(monkeypatch):
+    class WindowsOS:
+        name = "nt"
+        environ = os.environ
+        getenv = staticmethod(os.getenv)
+
+    monkeypatch.setattr(windows_reminders, "os", WindowsOS)
+    monkeypatch.setenv("ORIN_WINDOWS_REMINDERS_TEST_TOAST", "1")
+    monkeypatch.setattr(windows_reminders, "_windows_toast",
+                        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("No shortcut")))
+    with pytest.raises(SystemExit, match="No visible delivery was confirmed"):
+        windows_reminders.test_toast_delivery()
+
+
 @pytest.mark.parametrize("change", ["completed", "cancelled", "rescheduled", "deleted"])
 def test_late_task_state_change_cannot_emit_stale_windows_toast(tmp_path, change):
     """A task can change after the initial snapshot and live policy recheck."""
