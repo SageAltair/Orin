@@ -49,8 +49,10 @@ jobs:
           npm run export:android -- --source-maps
       - name: Check Metro source map exposure report
         run: |
-          node --test scripts/report-mobile-metro-exposure.test.mjs
+          node --test scripts/report-mobile-metro-exposure.test.mjs scripts/check-mobile-metro-exposure.test.mjs
           node scripts/report-mobile-metro-exposure.mjs apps/mobile/dist apps/mobile/mobile-runtime-js-exposure.json
+          # A conservative JS-graph regression gate, not native APK or build-tool security clearance.
+          node scripts/check-mobile-metro-exposure.mjs apps/mobile/mobile-runtime-js-exposure.json
       - name: Preserve Android JS exposure evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
