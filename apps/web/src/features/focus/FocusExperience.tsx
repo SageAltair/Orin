@@ -23,7 +23,7 @@ function readStored<T>(key: string, fallback: T): T {
   catch { return fallback; }
 }
 
-export function FocusExperience({ name, onSignOut, embedded = false, onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { name: string; onSignOut: () => void; embedded?: boolean; onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
+export function FocusExperience({ name, onSignOut, embedded = false, onScheduleTask, onOpenProject, onTaskSaved, onTaskInventoryChanged, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { name: string; onSignOut: () => void; embedded?: boolean; onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; onTaskInventoryChanged?: () => Promise<void>; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const focus = useFocusWorkspace();
   // The main application Tasks route must open All Tasks, not the Focus Now screen.
   const [surface, setSurface] = useState<Surface>(embedded ? "tasks" : "now");
@@ -89,7 +89,13 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
   const capture = async (title: string, details: { first_step?: string; energy_level?: "low" | "medium" | "high" }) => {
     setCaptureMessage("");
     const task = await focus.capture(title, details);
-    if (task) setCaptureMessage("Saved to Inbox.");
+    if (task) {
+      setCaptureMessage("Saved to Inbox.");
+      // Focus Capture writes directly to the API, outside TaskCollection.
+      // Reconcile the parent Home inventory before reporting completion.
+      try { await onTaskInventoryChanged?.(); }
+      catch { /* The capture succeeded; a dashboard refresh failure must not undo it. */ }
+    }
     return task;
   };
   const suggestCapture = (title: string) => request<CaptureSuggestion>("/focus/capture/suggest", { method: "POST", body: JSON.stringify({ title }) });
