@@ -287,7 +287,10 @@ def _require_browser_session(client: httpx.Client, session_id: str) -> None:
     """
     response = client.get("/auth/sessions")
     response.raise_for_status()
-    sessions = response.json()
+    try:
+        sessions = response.json()
+    except ValueError as error:
+        raise PermissionError("Invalid browser session state") from error
     if not isinstance(sessions, list) or any(not isinstance(item, dict) for item in sessions):
         raise PermissionError("Invalid browser session state")
     matches = [item for item in sessions if item.get("id") == session_id]
