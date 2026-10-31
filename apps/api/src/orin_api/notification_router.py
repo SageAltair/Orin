@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
@@ -63,11 +63,27 @@ class Preferences(BaseModel):
 
 @router.get("/preferences", response_model=Preferences)
 def preferences(
-    user: User = Depends(get_current_user), session: Session = Depends(get_session)
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ):
     row = policy(session, user.id)
+    try:
+        result = Preferences.model_validate(row)
+    except ValidationError:
+        # Legacy database rows may predate validation (or contain corrupt JSON).
+        # Return a conservative, non-delivering projection so settings can load
+        # and be explicitly repaired. Never silently rewrite persisted consent.
+        result = Preferences(
+            enabled=False,
+            categories=[],
+            persistent=False,
+            browser_alerts=False,
+            sound=False,
+        )
+        response.headers["X-Orin-Preferences-Recovery"] = "required"
     session.commit()
-    return row
+    return result
 
 
 @router.put("/preferences", response_model=Preferences)

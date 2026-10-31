@@ -715,3 +715,53 @@ def test_inbox_read_fails_closed_for_corrupt_legacy_preferences(
     assert len(rows) == 1
     assert rows[0]["read_at"] is None
     assert rows[0]["attention_ready"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "corrupt_value"),
+    [
+        ("categories", None),
+        ("categories", {"tasks": True}),
+        ("timezone", "Invalid/Legacy"),
+        ("quiet_start", "99:99"),
+        ("repeat_minutes", 0),
+    ],
+)
+def test_corrupt_legacy_preference_get_is_fail_closed_and_repairable(
+    client, sessions, field, corrupt_value
+):
+    """A corrupt stored policy must not strand the user outside Settings."""
+    factory, owner = sessions
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        setattr(prefs, field, corrupt_value)
+        prefs.enabled = True
+        prefs.browser_alerts = True
+        prefs.sound = True
+
+    response = client.get("/api/v1/notifications/preferences")
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Orin-Preferences-Recovery"] == "required"
+    recovered = response.json()
+    assert recovered["enabled"] is False
+    assert recovered["categories"] == []
+    assert recovered["persistent"] is False
+    assert recovered["browser_alerts"] is False
+    assert recovered["sound"] is False
+
+    # Reading a corrupt policy never silently changes stored consent or settings.
+    with factory() as session:
+        persisted = policy(session, owner)
+        assert getattr(persisted, field) == corrupt_value
+        assert persisted.enabled is True
+        assert persisted.browser_alerts is True
+
+    # Explicitly saving a valid policy repairs the row without a migration.
+    repaired = {**recovered, "enabled": True, "categories": ["tasks"]}
+    saved = client.put("/api/v1/notifications/preferences", json=repaired)
+    assert saved.status_code == 200, saved.text
+    after = client.get("/api/v1/notifications/preferences")
+    assert after.status_code == 200, after.text
+    assert "X-Orin-Preferences-Recovery" not in after.headers
+    assert after.json()["enabled"] is True
+    assert after.json()["categories"] == ["tasks"]
