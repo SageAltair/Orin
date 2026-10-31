@@ -108,11 +108,20 @@ router = APIRouter(prefix="/api/v1", tags=["core"])
 
 
 def ensure_personal_workspace(session: Session, user_id: uuid.UUID) -> Workspace:
-    workspace = session.scalar(select(Workspace).where(Workspace.owner_id == user_id).order_by(Workspace.created_at.asc()))
+    workspace_query = select(Workspace).where(Workspace.owner_id == user_id).order_by(Workspace.created_at.asc())
+    workspace = session.scalar(workspace_query)
     if workspace is None:
-        workspace = Workspace(owner_id=user_id, name="Personal", color="#6b73ff")
-        session.add(workspace)
-        session.flush()
+        try:
+            # Concurrent first requests can both see no workspace. A savepoint
+            # preserves the request transaction if the other insert wins.
+            with session.begin_nested():
+                workspace = Workspace(owner_id=user_id, name="Personal", color="#6b73ff")
+                session.add(workspace)
+                session.flush()
+        except IntegrityError:
+            workspace = session.scalar(workspace_query)
+            if workspace is None:
+                raise
     return workspace
 
 
