@@ -168,6 +168,11 @@ def test_corrupt_legacy_calendar_and_routine_metadata_cannot_abort_maintenance(s
                 delivery_key="routine:legacy-invalid-zone",
                 title="Legacy routine", message="Invalid timezone", due_at=now,
             ),
+            Notification(
+                user_id=owner, category="routines", source_id=invalid_clock.id,
+                delivery_key="routine:legacy-invalid-clock",
+                title="Legacy clock", message="Invalid time of day", due_at=now,
+            ),
         ])
     task(factory, owner, now, "Healthy task survives legacy corruption")
     monkeypatch.setattr(background, "SessionLocal", factory)
@@ -177,6 +182,7 @@ def test_corrupt_legacy_calendar_and_routine_metadata_cannot_abort_maintenance(s
         rows = {row.delivery_key: row for row in session.scalars(select(Notification))}
         assert rows["calendar:legacy-invalid-zone"].read_at is not None
         assert rows["routine:legacy-invalid-zone"].read_at is not None
+        assert rows["routine:legacy-invalid-clock"].read_at is not None
         healthy = [row for row in rows.values() if row.delivery_key.startswith("task:")]
         assert len(healthy) == 1
         assert healthy[0].read_at is None
