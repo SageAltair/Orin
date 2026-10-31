@@ -66,7 +66,7 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     .getByRole("button", { name: "Create workspace" }).click();
   await expect.poll(async () => {
     const response = await request.get(leaseUrl, { headers });
-    return response.ok() ? (await response.json() as { workspace_id: string }).workspace_id : null;
+    return response.ok() ? (await response.json() as { workspace_id: string }).workspace_id : leaseA.workspace_id;
   }).not.toBe(leaseA.workspace_id);
   const leaseB = await (await request.get(leaseUrl, { headers })).json() as {
     workspace_id: string; generation_id: string;
@@ -76,7 +76,7 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     .getByRole("button", { name: "Personal", exact: true }).click();
   await expect.poll(async () => {
     const response = await request.get(leaseUrl, { headers });
-    return response.ok() ? (await response.json() as { generation_id: string }).generation_id : null;
+    return response.ok() ? (await response.json() as { generation_id: string }).generation_id : leaseB.generation_id;
   }).not.toBe(leaseB.generation_id);
   const leaseAgain = await (await request.get(leaseUrl, { headers })).json() as {
     workspace_id: string; generation_id: string;
