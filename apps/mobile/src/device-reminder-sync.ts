@@ -239,12 +239,26 @@ export async function refreshDeviceReminders(
   owner: string,
   workspaceId: string,
   isCurrent: () => boolean = () => true,
+  onSessionRevoked?: (reminderCleanupSucceeded: boolean) => void,
 ): Promise<void> {
   try {
     await refreshDeviceRemindersInternal(owner, workspaceId, isCurrent);
   } catch (error) {
     if (isCurrent() && wasRefreshCredentialRejected()) {
-      await revokeLocalReminderOwner(owner);
+      let cleanupError: unknown;
+      try {
+        // Recheck the auth revision inside the serialized OS queue: a new
+        // login to this same owner must not lose its newly opted-in alerts.
+        await revokeLocalReminderOwner(owner, wasRefreshCredentialRejected);
+      } catch (cause) {
+        cleanupError = cause;
+      }
+      // A stale request may finish after a newer login or workspace switch.
+      // Never sign the newer session out because of the older failure.
+      if (isCurrent() && wasRefreshCredentialRejected()) {
+        onSessionRevoked?.(cleanupError === undefined);
+      }
+      if (cleanupError !== undefined) throw cleanupError;
     }
     throw error;
   }

@@ -127,6 +127,18 @@ describe("native reminder account isolation and consent", () => {
     expect(scheduled).toHaveLength(0);
   });
 
+  it("preserves same-owner alerts when a newer login supersedes queued revocation", async () => {
+    await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
+    let revisionChecks = 0;
+    // Simulate a successful login between the initial revision check and
+    // the secure-storage read in the serialized native cleanup operation.
+    await revokeLocalReminderOwner("alice", () => ++revisionChecks === 1);
+    expect(revisionChecks).toBe(2);
+    expect(stored).toBe("alice");
+    expect(scopeStored).toBe("alice:workspace-a");
+    expect(scheduled).toHaveLength(1);
+  });
+
   it("does not let a stale owner's revocation clear a newer account's alerts", async () => {
     await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
     await reconcileLocalReminderWorkspace("bob", "workspace-b");

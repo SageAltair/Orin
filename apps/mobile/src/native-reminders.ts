@@ -160,11 +160,18 @@ export function reconcileLocalReminderAccount(owner: string | null) {
 // A rejected refresh credential belongs to one owner, not necessarily the
 // account now on screen. Fence queued cleanup against a newer login/workspace
 // before deleting opt-in state or cancelling any Orin-owned OS notifications.
-export function revokeLocalReminderOwner(owner: string): Promise<void> {
+export function revokeLocalReminderOwner(
+  owner: string,
+  stillRejected: () => boolean = () => true,
+): Promise<void> {
   return serialized(async () => {
-    if (activeScope !== null && !activeScope.startsWith(`${owner}:`)) return;
+    // A new login to the same account can supersede the rejected session
+    // while this cleanup waits in the native OS queue. Owner alone is not a
+    // sufficient fence, so check the auth revision before and after I/O.
+    if (!stillRejected() ||
+        (activeScope !== null && !activeScope.startsWith(`${owner}:`))) return;
     const storedOwner = await SecureStore.getItemAsync(OPT_IN_KEY);
-    if (storedOwner !== owner ||
+    if (!stillRejected() || storedOwner !== owner ||
         (activeScope !== null && !activeScope.startsWith(`${owner}:`))) return;
     activeScope = null;
     await revokeLocalOptIn();
