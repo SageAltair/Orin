@@ -814,3 +814,64 @@ def test_corrupt_legacy_repeat_policy_cannot_escalate_or_block_other_owners(
         assert affected.repeats == 0
         assert healthy is not None and healthy.attention_at is not None
         assert healthy.repeats == 1
+
+
+@pytest.mark.parametrize("invalid_lead", [-5, 10**13])
+def test_corrupt_legacy_routine_lead_cannot_block_task_reminders(
+    sessions, monkeypatch, invalid_lead
+):
+    """Bad persisted routine offsets cannot crash maintenance or stay actionable."""
+    from orin_api import background
+    from orin_api.models import Routine
+
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 5, tzinfo=timezone.utc)
+    start = now - timedelta(minutes=5)
+    with factory.begin() as session:
+        routine = Routine(
+            user_id=owner,
+            title="Corrupt legacy reminder lead",
+            start_date=now.date(),
+            time_of_day="12:00",
+            timezone="UTC",
+            reminder_minutes=invalid_lead,
+        )
+        session.add(routine)
+        session.flush()
+        key = f"routine:{routine.id}:{start.isoformat()}:{invalid_lead}"
+        session.add(
+            Notification(
+                user_id=owner,
+                category="routines",
+                source_id=routine.id,
+                delivery_key=key,
+                title="Old routine reminder",
+                message="Must be quarantined",
+                due_at=now,
+            )
+        )
+    task(factory, owner, now, "Healthy task survives invalid routine lead")
+    monkeypatch.setattr(background, "SessionLocal", factory)
+    monkeypatch.setattr(background, "run_due_automations", lambda *_: None)
+    background.maintenance_tick(Settings(_env_file=None), now=now)
+    with factory() as session:
+        rows = {row.delivery_key: row for row in session.scalars(select(Notification))}
+        assert rows[key].read_at is not None
+        healthy = [row for row in rows.values() if row.delivery_key.startswith("task:")]
+        assert len(healthy) == 1
+        assert healthy[0].read_at is None
+        assert healthy[0].attention_at is not None
+
+
+def test_reminder_lead_validation_matches_calendar_and_routine_api_contracts():
+    from orin_api.notifications import valid_reminder_lead
+
+    for lead in (0, 5, 10, 15, 30):
+        assert valid_reminder_lead(lead, "routines")
+    for lead in (5, 10, 15, 30, 60):
+        assert valid_reminder_lead(lead, "calendar")
+    assert not valid_reminder_lead(0, "calendar")
+    assert not valid_reminder_lead(60, "routines")
+    assert not valid_reminder_lead(-5, "routines")
+    assert not valid_reminder_lead(10**13, "calendar")
+    assert not valid_reminder_lead(None, "routines")

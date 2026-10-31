@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from orin_api.config import Settings
 from orin_api.database import SessionLocal
-from orin_api.notifications import emit, notification_tick, safe_zone
+from orin_api.notifications import emit, notification_tick, safe_zone, valid_reminder_lead
 from orin_api.planning_domain import occurrence, dates
 from orin_api.knowledge_extraction import process_extraction_job
 from orin_api.services import add_activity
@@ -47,6 +47,8 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 source="worker", idempotency_key=f"worker.terminal:{job.id}")
         events = session.scalars(select(CalendarEvent).where(CalendarEvent.reminder_minutes.is_not(None))).all()
         for event in events:
+            if not valid_reminder_lead(event.reminder_minutes, "calendar"):
+                continue  # Corrupt legacy offsets must not abort the shared tick.
             if event.is_all_day:
                 zone = safe_zone(event.timezone)
                 if zone is None:
@@ -69,6 +71,8 @@ def maintenance_tick(settings: Settings, *, now: datetime | None = None) -> None
                 pass  # Another API instance delivered the same reminder.
         routines = session.scalars(select(Routine).where(Routine.paused.is_(False), Routine.reminder_minutes.is_not(None))).all()
         for routine in routines:
+            if not valid_reminder_lead(routine.reminder_minutes, "routines"):
+                continue  # Never schedule a reminder with an invented lead time.
             zone = safe_zone(routine.timezone)
             if zone is None:
                 continue
