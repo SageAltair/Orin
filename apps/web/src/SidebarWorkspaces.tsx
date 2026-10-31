@@ -10,7 +10,7 @@ export function workspaceStorageKey(userId: string) {
   return `orin.sidebar-workspaces.${userId}.v1`;
 }
 
-export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; onActiveChange: (workspace: SidebarWorkspace) => void }) {
+export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; onActiveChange: (workspace: SidebarWorkspace) => void | boolean | Promise<void | boolean> }) {
   const [items, setItems] = useState<SidebarWorkspace[]>([]);
   const [activeId, setActiveId] = useState(() => localStorage.getItem(`${workspaceStorageKey(userId)}.active`) || "");
   const [creating, setCreating] = useState(false);
@@ -23,23 +23,30 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
       const rows = Array.isArray(response) && response.length ? response : [{ id: "", name: "Personal", color: palette[0] }];
       setItems(rows);
       const selected = rows.find(item => item.id === activeId) || rows[0];
-      if (selected) select(selected);
+      if (selected) void select(selected);
     }).catch(() => {
       const fallback = { id: "", name: "Personal", color: palette[0] };
       setItems([fallback]);
-      select(fallback);
+      void select(fallback);
     });
   }, [userId]);
 
-  useEffect(() => {
-    const active = items.find(item => item.id === activeId);
-    if (active) onActiveChange(active);
-  }, [activeId, items, onActiveChange]);
-
-  const select = (item: SidebarWorkspace) => {
-    setActiveId(item.id);
-    setActiveWorkspace(item.id);
-    localStorage.setItem(`${workspaceStorageKey(userId)}.active`, item.id);
+  const select = async (item: SidebarWorkspace) => {
+    try {
+      // Parent must revoke the old browser lease before any visible/API
+      // workspace selection changes. Never optimistically switch first.
+      const allowed = await onActiveChange(item);
+      if (allowed === false) {
+        setError("Workspace switch blocked until reminder authorization is revoked.");
+        return;
+      }
+      setError("");
+      setActiveId(item.id);
+      setActiveWorkspace(item.id);
+      localStorage.setItem(`${workspaceStorageKey(userId)}.active`, item.id);
+    } catch {
+      setError("Workspace switch failed. Retry when Orin is reachable.");
+    }
   };
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -49,7 +56,7 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
     try {
       const item = await request<SidebarWorkspace>("/workspaces", { method: "POST", body: JSON.stringify({ name: trimmed.slice(0, 48), color }) });
       setItems(current => [...current, item]);
-      select(item);
+      void select(item);
       setName("");
       setCreating(false);
     } catch (cause) {
@@ -59,8 +66,9 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
 
   return <section className="sidebar-workspaces" aria-label="Workspaces">
     <span className="nav-label">WORKSPACES</span>
+    {error && <p role="alert">{error}</p>}
     <div className="workspace-list">
-      {items.map(item => <button type="button" className={`workspace-item ${activeId === item.id ? "active" : ""}`} key={item.id} onClick={() => select(item)} aria-label={item.name} title={item.name}>
+      {items.map(item => <button type="button" className={`workspace-item ${activeId === item.id ? "active" : ""}`} key={item.id} onClick={() => void select(item)} aria-label={item.name} title={item.name}>
         <span className="workspace-item-icon" style={{ "--workspace-color": item.color } as CSSProperties}>{item.name.slice(0, 1).toUpperCase()}</span>
         <span className="workspace-item-label">{item.name}</span>
         <span className="workspace-status" style={{ background: item.color }} />

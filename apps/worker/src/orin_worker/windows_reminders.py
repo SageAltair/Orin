@@ -300,6 +300,52 @@ def _require_browser_session(client: httpx.Client, session_id: str) -> None:
         raise PermissionError("Bound browser session is inactive or invalid")
 
 
+def _require_browser_lease(
+    client: httpx.Client, session_id: str, workspace_id: str,
+    generation_id: str, now: int,
+) -> None:
+    """Require an unexpired lease from the current browser workspace.
+
+    A manually bound AuthSession alone is insufficient: it stays active when
+    the browser changes workspaces without logging out.
+    """
+    response = client.get(f"/auth/reminder-lease/{session_id}")
+    if response.status_code in {401, 403, 404, 409}:
+        raise PermissionError("Browser reminder lease is no longer authorized")
+    response.raise_for_status()
+    try:
+        lease = response.json()
+    except ValueError as error:
+        raise PermissionError("Invalid browser reminder lease") from error
+    if (not isinstance(lease, dict) or
+        lease.get("workspace_id") != workspace_id or
+        lease.get("generation_id") != generation_id):
+        raise PermissionError("Browser reminder lease changed")
+    try:
+        expiry = _due_epoch(lease.get("expires_at"))
+    except (ValueError, OverflowError) as error:
+        raise PermissionError("Invalid browser reminder lease expiry") from error
+    if expiry <= now:
+        raise PermissionError("Browser reminder lease expired")
+
+
+def _check_bound_browser_lease(
+    client: httpx.Client, ledger: ReminderLedger,
+    session_id: str | None, generation_id: str | None, now: int,
+) -> None:
+    if session_id is None or generation_id is None:
+        return
+    try:
+        _require_browser_lease(
+            client, session_id, ledger.workspace_id, generation_id, now,
+        )
+    except (PermissionError, httpx.HTTPError, ValueError):
+        # No stale workspace queue may survive a missing, revoked or
+        # unreachable lease; the browser must renew before any new alert.
+        ledger.clear()
+        raise
+
+
 def _check_bound_browser_session(client: httpx.Client, ledger: ReminderLedger,
                                  session_id: str | None) -> None:
     if session_id is None:
@@ -520,8 +566,15 @@ def test_toast_delivery() -> None:
 
 def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast,
              delivery_clock: Callable[[], int] | None = None,
-             browser_session_id: str | None = None) -> int:
+             browser_session_id: str | None = None,
+             browser_lease_generation: str | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
+    # A revoked browser lease must also block *reading* old-workspace tasks.
+    # Check before the first task request, after the snapshot and before toast.
+    if browser_lease_generation is not None:
+        _check_bound_browser_lease(
+            client, ledger, browser_session_id, browser_lease_generation, now,
+        )
     try:
         tasks, prefs = _fetch_snapshot(client, ledger.owner_id, ledger.workspace_id, now)
     except httpx.HTTPStatusError as error:
@@ -534,6 +587,7 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     # An independent companion credential must not continue delivering after
     # the explicitly selected browser session has logged out.
     _check_bound_browser_session(client, ledger, browser_session_id)
+    _check_bound_browser_lease(client, ledger, browser_session_id, browser_lease_generation, now)
     ledger.sync(tasks)
     if _quiet(prefs, now):
         return 0
@@ -595,6 +649,7 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     # Logout can occur during the final task/policy scan. Revalidate the
     # browser session immediately before the native transport.
     _check_bound_browser_session(client, ledger, browser_session_id)
+    _check_bound_browser_lease(client, ledger, browser_session_id, browser_lease_generation, delivery_now)
 
     # One generic toast per poll avoids flooding the user with N alerts.
     notify()
@@ -613,13 +668,17 @@ def main() -> None:
     owner = os.getenv("ORIN_WINDOWS_REMINDERS_OWNER_ID", "")
     workspace = os.getenv("ORIN_WINDOWS_REMINDERS_WORKSPACE_ID", "")
     browser_session = os.getenv("ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID", "")
+    browser_lease = os.getenv("ORIN_WINDOWS_REMINDERS_BROWSER_LEASE_GENERATION", "")
     if not _secure_api(url) or not token or not owner or not workspace:
         raise SystemExit("Secure API URL, token, owner and workspace are required")
     try:
         owner, workspace = _uuid(owner), _uuid(workspace)
         browser_session = _uuid(browser_session) if browser_session else None
+        browser_lease = _uuid(browser_lease) if browser_lease else None
     except ValueError as error:
         raise SystemExit("Owner, workspace and optional browser session must be UUIDs") from error
+    if not browser_session or not browser_lease:
+        raise SystemExit("An active browser session and short-lived workspace lease are required")
     path = Path(os.getenv("ORIN_WINDOWS_REMINDERS_DB", str(Path.home() / ".orin" / "windows-reminders.sqlite3")))
     with single_instance(path):
         ledger = ReminderLedger(path, owner, workspace)
@@ -637,7 +696,8 @@ def main() -> None:
                     try:
                         run_once(client, ledger, now=int(time.time()),
                                  delivery_clock=lambda: int(time.time()),
-                                 browser_session_id=browser_session)
+                                 browser_session_id=browser_session,
+                                 browser_lease_generation=browser_lease)
                     except httpx.HTTPStatusError as error:
                         if error.response.status_code in {401, 403}:
                             logger.error("Reminder authorization revoked; stopping companion")

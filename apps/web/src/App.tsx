@@ -19,6 +19,7 @@ const WritingStudio = lazy(() =>
   })),
 );
 import { NotificationCenter } from "./NotificationCenter";
+import { activateWindowsLease, clearWindowsLeaseLocalState, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
 import {
   useEffect,
   useCallback,
@@ -71,6 +72,8 @@ import {
   request,
   requestBlob,
   restoreSession,
+  revokeReminderLeaseOnPageHide,
+  setActiveWorkspace,
 } from "./api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -807,13 +810,54 @@ export default function App() {
   const [activeWorkspaceId, setActiveWorkspaceId] = useState("");
   const activeWorkspaceRef = useRef(activeWorkspaceId);
   activeWorkspaceRef.current = activeWorkspaceId;
-  const handleWorkspaceChange = useCallback((workspace: { id: string; name: string }) => {
+  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(false);
+  useEffect(() => {
+    const onToggle = () => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(user?.id));
+    onToggle();
+    window.addEventListener(windowsLeaseToggleEvent, onToggle);
+    return () => window.removeEventListener(windowsLeaseToggleEvent, onToggle);
+  }, [user?.id]);
+  useEffect(() => {
+    if (!user || !windowsLeaseEnabled) return;
+    window.addEventListener("pagehide", revokeReminderLeaseOnPageHide);
+    return () => window.removeEventListener("pagehide", revokeReminderLeaseOnPageHide);
+  }, [user?.id, windowsLeaseEnabled]);
+  const handleWorkspaceChange = useCallback(async (workspace: { id: string; name: string }) => {
+    if (windowsLeaseEnabled && activeWorkspaceRef.current &&
+        activeWorkspaceRef.current !== workspace.id) {
+      try {
+        // Do not show B until the server has revoked A's lease.
+        await stopWindowsLease();
+      } catch {
+        setLoadError("Cannot switch workspaces until the Windows reminder lease is revoked. Retry when Orin is reachable.");
+        return false;
+      }
+    }
+    setActiveWorkspace(workspace.id);
     setActiveWorkspaceName(workspace.name);
     setActiveWorkspaceId(current => {
       if (current && current !== workspace.id) setPage("home");
       return workspace.id;
     });
-  }, []);
+    return true;
+  }, [windowsLeaseEnabled]);
+  useEffect(() => {
+    if (!user || !activeWorkspaceId || !windowsLeaseEnabled) return;
+    let cancelled = false;
+    let generation: string | null = null;
+    void activateWindowsLease(activeWorkspaceId).then(id => {
+      if (!cancelled) generation = id;
+    }).catch(() => clearWindowsLeaseLocalState());
+    const timer = window.setInterval(() => {
+      if (!cancelled && generation) {
+        void renewWindowsLease(activeWorkspaceId, generation).catch(() => {
+          generation = null;
+          clearWindowsLeaseLocalState();
+        });
+      }
+    }, 10000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [user?.id, activeWorkspaceId, windowsLeaseEnabled]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -892,6 +936,11 @@ export default function App() {
     if (signOutInFlight.current) return;
     signOutInFlight.current = true;
     setSigningOut(true);
+    if (windowsLeaseEnabled) {
+      try { await stopWindowsLease(); } catch { /* Server logout below revokes the session; otherwise lease expires. */ }
+      clearWindowsLeaseLocalState();
+    }
+    setWindowsLeaseOptIn(false);
     // Hide all account-owned state immediately, even when the API is offline.
     setUser(null);
     setTasks([]);
@@ -921,7 +970,7 @@ export default function App() {
       setSigningOut(false);
       signOutInFlight.current = false;
     }
-  }, []);
+  }, [windowsLeaseEnabled]);
   const handleAuthenticated = useCallback((authenticated: User) => {
     clearSignOutUnconfirmed();
     setSignOutWarning("");
@@ -1646,7 +1695,7 @@ export default function App() {
                   <AccountSecurity user={user} onUpdated={setUser} />
                 </div>
                 <div hidden={section !== "notifications"} data-orin-control="notification-settings">
-                  <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel /></Suspense>
+                  <Suspense fallback={<p role="status">Loading notification settings…</p>}><NotificationPreferencesPanel ownerId={user?.id} /></Suspense>
                 </div>
                 <div hidden={section !== "privacy"}><AccountPrivacy userId={user.id} /></div>
                 <div hidden={section !== "devices"}><DeviceSettings onApprovalCreated={refreshApprovals} /></div>

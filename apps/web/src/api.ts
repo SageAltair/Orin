@@ -71,6 +71,20 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   return response.json() as Promise<T>;
 }
 
+/** Best-effort authenticated revocation when a browser tab is closing.
+
+    No credential is persisted. If delivery fails, the server lease still
+    expires automatically; browser close cannot guarantee instant revocation. */
+export function revokeReminderLeaseOnPageHide(): void {
+  if (!accessToken) return;
+  void fetch(`${baseUrl}/api/v1/auth/reminder-lease`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    credentials: "include",
+    keepalive: true,
+  }).catch(() => undefined);
+}
+
 export async function requestBlob(path: string): Promise<Blob> {
   const fetchBlob = async (retry: boolean): Promise<Blob> => {
     const headers = new Headers();
