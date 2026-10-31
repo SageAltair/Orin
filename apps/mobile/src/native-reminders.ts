@@ -62,8 +62,15 @@ async function revokeLocalOptIn() {
   await SecureStore.deleteItemAsync(SCOPE_KEY);
 }
 
-async function ownerEnabled(owner: string): Promise<boolean> {
+async function ownerEnabled(
+  owner: string,
+  stillCurrent: () => boolean = () => true,
+): Promise<boolean> {
+  // A queued refresh for an old account must not revoke a newer account's
+  // opt-in when secure-storage reads finish after a login/workspace switch.
+  if (!stillCurrent()) return false;
   const stored = await SecureStore.getItemAsync(OPT_IN_KEY);
+  if (!stillCurrent()) return false;
   if (stored === owner) return true;
   if (stored !== null) await revokeLocalOptIn();
   return false;
@@ -71,9 +78,9 @@ async function ownerEnabled(owner: string): Promise<boolean> {
 
 async function sync(owner: string, workspaceId: string, reminders: Reminder[], policy: NotificationPolicy, tasks: Task[] = []) {
   const scope = scopeFor(owner, workspaceId);
-  if (activeScope !== scope || !(await ownerEnabled(owner)) || activeScope !== scope) return;
+  if (activeScope !== scope || !(await ownerEnabled(owner, () => activeScope === scope)) || activeScope !== scope) return;
   if (!(await canDeliverLocally())) {
-    await revokeLocalOptIn();
+    if (activeScope === scope) await revokeLocalOptIn();
     return;
   }
   if (activeScope !== scope) return;
@@ -193,13 +200,16 @@ export function reconcileLocalReminderWorkspace(owner: string, workspaceId: stri
   });
 }
 
-export function getLocalReminderEnabled(owner: string) {
+export function getLocalReminderEnabled(
+  owner: string,
+  stillCurrent: () => boolean = () => true,
+) {
   return serialized(async () => {
-    if (!(await ownerEnabled(owner))) return false;
-    if (await canDeliverLocally()) return true;
-    // Android may revoke the app permission or disable only Orin's channel.
-    // Neither state may appear as an enabled reminder switch.
-    await revokeLocalOptIn();
+    if (!stillCurrent() || !(await ownerEnabled(owner, stillCurrent)) || !stillCurrent()) return false;
+    if (await canDeliverLocally()) return stillCurrent();
+    // Permission/channel checks are asynchronous. A newer login may have
+    // opted in while this old refresh was queued; never clear its alerts.
+    if (stillCurrent()) await revokeLocalOptIn();
     return false;
   });
 }
