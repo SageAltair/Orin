@@ -82,9 +82,15 @@ export function stopWindowsLease(): Promise<void> {
   return serialize(async () => {
     // A stale tab cannot revoke another tab's newer workspace generation.
     const generation = getWindowsLeaseIdentifiers()?.generation;
+    // No local generation means this tab does not own the server lease.
+    // An unscoped DELETE could revoke a different tab's active workspace.
+    if (!generation) {
+      publishStatus(null, null);
+      return;
+    }
     await request<void>("/auth/reminder-lease", {
       method: "DELETE", signal: AbortSignal.timeout(8000),
-      ...(generation ? { body: JSON.stringify({ generation_id: generation }) } : {}),
+      body: JSON.stringify({ generation_id: generation }),
     });
     publishStatus(null, null);
   });
