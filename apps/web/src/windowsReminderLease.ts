@@ -7,14 +7,16 @@ const sessionKey = "orin:windows-reminder-lease-session";
 export const windowsLeaseToggleEvent = "orin:windows-reminder-lease-toggle";
 export const windowsLeaseStatusEvent = "orin:windows-reminder-lease-status";
 
-export function isWindowsLeaseOptedIn(): boolean {
-  try { return sessionStorage.getItem(windowsLeaseOptInKey) === "1"; }
+export function isWindowsLeaseOptedIn(ownerId?: string): boolean {
+  try { return Boolean(ownerId) && sessionStorage.getItem(windowsLeaseOptInKey) === ownerId; }
   catch { return false; }
 }
 
-export function setWindowsLeaseOptIn(enabled: boolean): void {
-  if (enabled) sessionStorage.setItem(windowsLeaseOptInKey, "1");
-  else sessionStorage.removeItem(windowsLeaseOptInKey);
+export function setWindowsLeaseOptIn(enabled: boolean, ownerId?: string): void {
+  if (enabled) {
+    if (!ownerId) throw new Error("A signed-in owner is required for Windows reminder opt-in");
+    sessionStorage.setItem(windowsLeaseOptInKey, ownerId);
+  } else sessionStorage.removeItem(windowsLeaseOptInKey);
   window.dispatchEvent(new Event(windowsLeaseToggleEvent));
 }
 
