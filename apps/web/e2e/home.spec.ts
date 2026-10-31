@@ -280,6 +280,22 @@ test("calendar deep-link opens the original task on a later UI page", async ({ p
   await expect(collection.locator(".focus-task-list").getByText("Write project brief")).toBeVisible();
 });
 
+test("creating a task from a later page reveals the newly created item", async ({ page }) => {
+  await mockApi(page, true, true, 11);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator('[data-orin-control="nav-tasks"]').click();
+  const collection = page.locator(".focus-task-collection");
+  const pages = collection.getByRole("navigation", { name: "Task list pages" });
+  await pages.getByRole("button", { name: "Next page" }).click();
+  await expect(pages).toContainText("Page 2 of 2");
+  await collection.getByRole("button", { name: "New task" }).click();
+  await collection.getByLabel("Task name").fill("Freshly created from page two");
+  await collection.getByRole("button", { name: "Save task" }).click();
+  await expect(pages).toContainText("Page 1 of 2");
+  await expect(collection.locator(".focus-task-list").getByText("Freshly created from page two")).toBeVisible();
+});
+
 test("calendar dialogs support Escape and focus return at narrow width with dark and reduced-motion settings", async ({ page }) => {
   await mockApi(page);
   await page.setViewportSize({ width: 320, height: 740 });
