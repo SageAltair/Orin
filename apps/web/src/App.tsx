@@ -1723,6 +1723,7 @@ export default function App() {
                     onScheduleTask={scheduleTask}
                     onOpenProject={openProject}
                     onTaskSaved={syncSavedTask}
+                    initialTaskId={taskToOpen}
                     onTaskInventoryChanged={refreshTaskInventory}
                     activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
@@ -1735,6 +1736,7 @@ export default function App() {
                     onScheduleTask={scheduleTask}
                     onOpenProject={openProject}
                     onTaskSaved={syncSavedTask}
+                    initialTaskId={taskToOpen}
                   /></div>
                 )
               ) : page === "projects" ? (

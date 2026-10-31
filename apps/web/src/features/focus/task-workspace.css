@@ -327,3 +327,21 @@
 .focus-priority-row-actions button:disabled { opacity: 0.55; cursor: wait; }
 .focus-priority-row-actions button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 @media (max-width: 600px) { .focus-priority-list li > .focus-priority-row-actions { justify-content: flex-start; } }
+
+/* Compact accessible row actions and bounded task navigation. */
+.orin-shell .focus-embedded .focus-task-row-actions button,
+.orin-shell .focus-embedded .focus-priority-row-actions button {
+  width:36px; min-width:36px; height:36px; min-height:36px;
+  display:inline-grid; place-items:center; padding:0;
+  border:0; border-radius:8px; background:transparent; color:var(--muted);
+}
+.orin-shell .focus-embedded .focus-task-row-actions button:hover,
+.orin-shell .focus-embedded .focus-priority-row-actions button:hover { background:var(--hover); color:var(--text); }
+.orin-shell .focus-embedded .focus-task-pagination { display:flex; align-items:center; justify-content:center; gap:14px; padding:20px 0 8px; }
+.orin-shell .focus-embedded .focus-task-pagination button { display:grid; place-items:center; width:36px; height:36px; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--text); }
+.orin-shell .focus-embedded .focus-task-pagination span { font-size:12px; color:var(--muted); }
+
+.orin-shell .focus-embedded .focus-priority-disclosure { margin:16px 0; border:1px solid var(--line); border-radius:10px; }
+.orin-shell .focus-embedded .focus-priority-disclosure > summary { cursor:pointer; padding:13px 16px; font-size:13px; font-weight:600; }
+.orin-shell .focus-embedded .focus-priority-disclosure > summary span { margin-left:12px; color:var(--muted); font-size:12px; font-weight:400; }
+.orin-shell .focus-embedded .focus-priority-disclosure > .focus-priority-overview { margin:0; border:0; }

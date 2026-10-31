@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Check, Pencil, Plus, RotateCcw, X } from "lucide-react";
+import { CalendarClock, Check, ChevronLeft, ChevronRight, Pencil, Play, Plus, RotateCcw, X } from "lucide-react";
 import { ApiError, request, type Project, type Task } from "../../api";
 import { filterTasksForView, type TaskView } from "./taskViews";
 import { blankTaskDraft, draftFromTask, nextTaskStatus, taskPayload, type TaskDraft } from "./taskEditor";
 import { fetchAllPagesWithIdentityCheck } from "./taskPagination";
 import { PriorityOverview } from "./PriorityOverview";
+import { paginateTaskList } from "./taskListPage";
 import type { PriorityGuidanceMode } from "./priorityIntelligence";
 import "./task-workspace.css";
 
@@ -23,11 +24,13 @@ const fetchAllProjects = () => fetchAllPagesWithIdentityCheck<Project>(
   (project) => project.id,
 );
 
-export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
+export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, initialTaskId = null, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; initialTaskId?: string | null; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -41,6 +44,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
   const mutationVersion = useRef(0);
   const mutationActive = useRef(false);
   const editingBaseline = useRef<Task | null>(null);
+  const handledDeepLink = useRef<string | null>(null);
 
   const loadProjects = async () => {
     setProjectError("");
@@ -100,6 +104,22 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
   }, []);
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
+  const { pageCount, currentPage, pageTasks } = paginateTaskList(visibleTasks, page, pageSize);
+  // External Calendar and notification links must reveal the target even when
+  // it is on a later page. Handle each link once; polling must not steal navigation.
+  useEffect(() => {
+    if (!initialTaskId || loading || handledDeepLink.current === initialTaskId) return;
+    const index = tasks.findIndex(task => task.id === initialTaskId);
+    if (index < 0) return;
+    handledDeepLink.current = initialTaskId;
+    setView("all");
+    setSearch("");
+    setPage(Math.floor(index / pageSize) + 1);
+  }, [initialTaskId, loading, tasks]);
+  useEffect(() => {
+    if (!initialTaskId || !pageTasks.some(task => task.id === initialTaskId)) return;
+    document.getElementById(`task-${initialTaskId}`)?.scrollIntoView({ block: "center" });
+  }, [initialTaskId, currentPage, loading]);
   // Index project labels once, even when a workspace has thousands of tasks.
   const projectNames = new Map(projects.map(project => [project.id, project.name]));
   const projectNameFor = (id: string) => projectNames.get(id) ?? "Project task";
@@ -125,6 +145,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
       });
       setTasks(current => isNew ? [saved, ...current] : current.map(item => item.id === saved.id ? saved : item));
+      if (isNew) { setView("all"); setSearch(""); setPage(1); }
       onTaskSaved?.(saved);
       setTaskRevision(value => value + 1);
       setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
@@ -153,16 +174,18 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
       <button type="button" className="focus-primary" onClick={() => begin()} disabled={Boolean(busyId)}><Plus size={17} /> New task</button>
     </div>
     <nav className="focus-task-views" aria-label="Task views">{views.map(([id, label]) =>
-      <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>
+      <button key={id} type="button" aria-pressed={view === id} onClick={() => { setView(id); setPage(1); }}>
         {label}<span>{filterTasksForView(tasks, id, "", now).length}</span>
       </button>)}</nav>
+    <details className="focus-priority-disclosure"><summary>Priority insights <span>Optional planning suggestions</span></summary>
     <PriorityOverview tasks={tasks} activeWorkspaceId={activeWorkspaceId} mode={priorityGuidanceMode} now={now}
       onEditTask={begin} onScheduleTask={onScheduleTask}
       onStartTask={task => { void changeStatus(task, "in_progress"); }}
       onCompleteTask={task => { void changeStatus(task, "done"); }}
       actionsBusy={Boolean(busyId)} taskRevision={taskRevision} />
+    </details>
     <label className="focus-task-search-label" htmlFor="focus-task-search">Search tasks</label>
-    <input id="focus-task-search" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search all task titles and descriptions" />
+    <input id="focus-task-search" type="search" value={search} onChange={event => { setSearch(event.target.value); setPage(1); }} placeholder="Search all task titles and descriptions" />
     {error && <p className="focus-error" role="alert">{error} <button type="button" className="focus-text-button" onClick={() => void load()}>Reload</button></p>}
     {notice && <p role="status" className="focus-quiet-message">{notice}</p>}
     {editingId && <form className="focus-task-editor" onSubmit={event => void save(event)} aria-label={editingId === "new" ? "Create task" : "Edit task"}>
@@ -184,7 +207,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
     </form>}
     {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ?
       <div className="focus-task-empty"><h2>{tasks.length === 0 ? "No tasks yet" : "Nothing in this view"}</h2><p>{tasks.length === 0 ? "Create your first task to start planning." : "Try another view or search."}</p></div> :
-      <ul className="focus-task-list">{visibleTasks.map(task => <li key={task.id}>
+      <ul className="focus-task-list">{pageTasks.map(task => <li key={task.id} id={`task-${task.id}`}>
         <button type="button" className="focus-task-status" aria-label={`${task.status === "done" || task.status === "cancelled" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" || task.status === "cancelled" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
         <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
           <span>{task.project_id ? (onOpenProject && projectNames.has(task.project_id)
@@ -197,10 +220,12 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
             {task.status !== "todo" ? ` · ${task.status.replace("_", " ")}` : ""}</span>
         </div>
         <div className="focus-task-row-actions">
-          <button type="button" className="focus-task-schedule" aria-label={`Edit ${task.title}`} disabled={Boolean(busyId)} onClick={() => begin(task)}><Pencil size={15} /> Edit</button>
-          {onScheduleTask && task.status !== "done" && task.status !== "cancelled" && <button type="button" className="focus-task-schedule" onClick={() => onScheduleTask(task.id)}>Calendar</button>}
+          <button type="button" className="focus-task-schedule" aria-label={`Edit ${task.title}`} disabled={Boolean(busyId)} title="Edit task" onClick={() => begin(task)}><Pencil size={16} /></button>
+          {onScheduleTask && task.status !== "done" && task.status !== "cancelled" && <button type="button" className="focus-task-schedule" aria-label={"Schedule " + task.title} title="Schedule task" disabled={Boolean(busyId)} onClick={() => onScheduleTask(task.id)}><CalendarClock size={16} /></button>}
+          {task.status === "todo" && <button type="button" className="focus-task-schedule" aria-label={"Start " + task.title} title="Start task" disabled={Boolean(busyId)} onClick={() => void changeStatus(task, "in_progress")}><Play size={16} /></button>}
         </div>
       </li>)}</ul>}
+    {!loading && visibleTasks.length > pageSize && <nav className="focus-task-pagination" aria-label="Task list pages"><button type="button" aria-label="Previous page" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={17}/></button><span>Page {currentPage} of {pageCount}</span><button type="button" aria-label="Next page" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}><ChevronRight size={17}/></button></nav>}
     <p className="focus-task-hint">{loading ? "Loading…" : `Showing ${visibleTasks.length} of ${tasks.length} tasks`}</p>
   </section>;
 }

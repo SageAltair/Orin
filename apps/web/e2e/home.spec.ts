@@ -5,9 +5,12 @@ async function settingsSection(page: Page, name: string) {
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name, exact: true }).click();
 }
 
-async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject = false) {
+async function mockApi(page: Page, seedCalendarTask = false, seedCalendarProject = false, extraTasks = 0) {
   let preferences = { density: "comfortable", theme: "light", locale: "en", visible_capabilities: ["home", "tasks", "calendar", "projects", "activity"], hidden_capabilities: [], pinned_capabilities: ["home", "tasks"], autonomy_mode: "balanced", custom_autonomy: {} };
   const tasks: Record<string, unknown>[] = seedCalendarTask ? [{ id: "calendar-task-1", owner_id: "user-1", project_id: seedCalendarProject ? "project-1" : null, assignee_id: null, title: "Write project brief", description: null, status: "todo", priority: "normal", due_at: null, estimated_minutes: 45, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }] : [];
+  for (let index = 0; index < extraTasks; index++) {
+    tasks.unshift({ id: `extra-task-${index}`, owner_id: "user-1", project_id: null, title: `Other task ${index}`, description: null, status: "todo", priority: "normal", due_at: null, created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" });
+  }
   const projects: Record<string, unknown>[] = seedCalendarProject ? [{ id: "project-1", name: "Orin planning", description: null, objective: null, status: "active", created_at: "2026-10-08T00:00:00Z", updated_at: "2026-10-08T00:00:00Z" }] : [];
   const memories: Record<string, unknown>[] = [];
   const environment: Record<string, unknown>[] = [];
@@ -257,7 +260,40 @@ test("calendar search and filters find project tasks and open the original task"
   await expect(taskAfterClear).toBeVisible();
   await taskAfterClear.click({ position: { x: 4, y: 5 } });
   await expect(page.locator('[data-orin-control="nav-tasks"]')).toHaveAttribute("aria-current", "page");
-  await expect(page.getByText("Write project brief").first()).toBeVisible();
+  await expect(page.locator(".focus-task-list").getByText("Write project brief")).toBeVisible();
+});
+
+test("calendar deep-link opens the original task on a later UI page", async ({ page }) => {
+  await mockApi(page, true, true, 11);
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("navigation").getByRole("button", { name: "Calendar" }).click();
+  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule task" }).first().click();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("calendar-task-1");
+  await page.getByRole("button", { name: "Save schedule" }).click();
+  const calendarTask = page.getByRole("button", { name: "Write project brief" }).first();
+  await calendarTask.scrollIntoViewIfNeeded();
+  await calendarTask.click({ position: { x: 4, y: 5 } });
+  const collection = page.locator(".focus-task-collection");
+  await expect(collection.getByRole("navigation", { name: "Task list pages" })).toContainText("Page 2 of 2");
+  await expect(collection.locator(".focus-task-list").getByText("Write project brief")).toBeVisible();
+});
+
+test("creating a task from a later page reveals the newly created item", async ({ page }) => {
+  await mockApi(page, true, true, 11);
+  await page.goto("/");
+  await signIn(page);
+  await page.locator('[data-orin-control="nav-tasks"]').click();
+  const collection = page.locator(".focus-task-collection");
+  const pages = collection.getByRole("navigation", { name: "Task list pages" });
+  await pages.getByRole("button", { name: "Next page" }).click();
+  await expect(pages).toContainText("Page 2 of 2");
+  await collection.getByRole("button", { name: "New task" }).click();
+  await collection.getByLabel("Task name").fill("Freshly created from page two");
+  await collection.getByRole("button", { name: "Save task" }).click();
+  await expect(pages).toContainText("Page 1 of 2");
+  await expect(collection.locator(".focus-task-list").getByText("Freshly created from page two")).toBeVisible();
 });
 
 test("calendar dialogs support Escape and focus return at narrow width with dark and reduced-motion settings", async ({ page }) => {

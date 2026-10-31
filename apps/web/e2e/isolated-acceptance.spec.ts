@@ -279,9 +279,20 @@ test("isolated PostgreSQL All Tasks includes records beyond the first API page",
   await expect(workspace).toBeVisible();
   await expect(workspace.getByRole("button", { name: /All tasks/ }))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(workspace.locator(".focus-task-list li")).toHaveCount(101, { timeout: 20_000 });
-  await expect(workspace.locator(".focus-task-list")
-    .getByText("Disposable page two marker")).toBeVisible();
+  // API pagination and bounded UI pagination are distinct acceptance gates.
+  await expect(workspace.locator(".focus-task-list li")).toHaveCount(10, { timeout: 20_000 });
+  const pages = workspace.getByRole("navigation", { name: "Task list pages" });
+  await expect(pages).toContainText("Page 1 of 11");
+  await expect(workspace.locator(".focus-task-list").getByText("Disposable page two marker")).toHaveCount(0);
+  for (let pageNumber = 2; pageNumber <= 11; pageNumber++) {
+    await pages.getByRole("button", { name: "Next page" }).click();
+    await expect(pages).toContainText(`Page ${pageNumber} of 11`);
+  }
+  await expect(workspace.locator(".focus-task-list li")).toHaveCount(1);
+  await expect(workspace.locator(".focus-task-list").getByText("Disposable page two marker")).toBeVisible();
+  await expect(pages.getByRole("button", { name: "Next page" })).toBeDisabled();
+  await pages.getByRole("button", { name: "Previous page" }).click();
+  await expect(pages).toContainText("Page 10 of 11");
 
   await workspace.getByLabel("Search tasks").fill("page two marker");
   await expect(workspace.locator(".focus-task-list li")).toHaveCount(1);
