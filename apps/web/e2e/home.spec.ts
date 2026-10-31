@@ -1032,3 +1032,40 @@ test("home dashboard counts completed tasks beyond the first API page", async ({
   await expect.poll(() => offsets.filter(offset => offset === 100).length)
     .toBeGreaterThan(secondPagesBeforeCommand);
 });
+
+
+test("notification settings explains corrupt saved preferences and clears warning after repair", async ({ page }) => {
+  await mockApi(page);
+  const fallback = {
+    enabled: false, categories: [], persistent: false, repeat_minutes: 15,
+    max_repeats: 3, timezone: "UTC", quiet_enabled: false,
+    quiet_start: "22:00", quiet_end: "07:00", respect_focus: true,
+    browser_alerts: false, sound: false,
+  };
+  let savedCount = 0;
+  await page.route("**/api/v1/notifications/preferences", async route => {
+    if (route.request().method() === "PUT") {
+      const saved = route.request().postDataJSON() as typeof fallback;
+      expect(saved.enabled).toBe(true);
+      expect(saved.categories).toContain("tasks");
+      savedCount++;
+      return route.fulfill({ json: saved });
+    }
+    return route.fulfill({
+      headers: { "X-Orin-Preferences-Recovery": "required" },
+      json: fallback,
+    });
+  });
+  await page.goto("/");
+  await signIn(page);
+  await page.getByRole("button", { name: "Preferences" }).click();
+  await settingsSection(page, "Notifications");
+  const recovery = page.getByRole("alert").filter({ hasText: "Some saved notification settings" });
+  await expect(recovery).toBeVisible();
+  await page.getByRole("checkbox", { name: "Enable automatic notifications" }).check();
+  await page.getByRole("checkbox", { name: "tasks", exact: true }).check();
+  await page.getByRole("button", { name: "Save notification preferences" }).click();
+  await expect(recovery).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Notification preferences saved." })).toBeVisible();
+  expect(savedCount).toBe(1);
+});
