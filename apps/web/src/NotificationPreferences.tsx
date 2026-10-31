@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { request } from "./api";
+import { getWindowsLeaseIdentifiers, isWindowsLeaseOptedIn, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseStatusEvent } from "./windowsReminderLease";
 import {
   defaultNotificationPolicy,
   notificationCategories,
@@ -17,6 +18,13 @@ export function NotificationPreferencesPanel() {
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [recoveryRequired, setRecoveryRequired] = useState(false);
+  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(isWindowsLeaseOptedIn);
+  const [windowsLeaseIds, setWindowsLeaseIds] = useState(getWindowsLeaseIdentifiers);
+  useEffect(() => {
+    const update = () => setWindowsLeaseIds(getWindowsLeaseIdentifiers());
+    window.addEventListener(windowsLeaseStatusEvent, update);
+    return () => window.removeEventListener(windowsLeaseStatusEvent, update);
+  }, []);
   const loadGeneration = useRef(0);
   const refresh = async (): Promise<void> => {
     const generation = ++loadGeneration.current;
@@ -251,6 +259,43 @@ export function NotificationPreferencesPanel() {
             />{" "}
             Browser alerts while Orin is open
           </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={windowsLeaseEnabled}
+              onChange={async (event) => {
+                if (event.target.checked) {
+                  setWindowsLeaseOptIn(true);
+                  setWindowsLeaseEnabled(true);
+                  setNotice("Windows companion browser lease enabled for this tab.");
+                } else {
+                  try {
+                    await stopWindowsLease();
+                    setWindowsLeaseOptIn(false);
+                    setWindowsLeaseEnabled(false);
+                    setNotice("Windows companion browser lease disabled.");
+                  } catch {
+                    setError("Cannot disable the Windows lease until the server confirms revocation. Retry when online.");
+                  }
+                }
+              }}
+            />{" "}
+            Authorize the Windows reminder companion while this browser tab is active
+          </label>
+          <p>
+            Optional and off by default. The browser renews a short workspace-scoped
+            lease; changing workspaces revokes the previous one. This does not install
+            or start a Windows service. The companion still requires a separately
+            authorized foreground launch and cannot promise closed-browser delivery.
+          </p>
+          {windowsLeaseEnabled && windowsLeaseIds && (
+            <p>
+              Browser session: <code>{windowsLeaseIds.sessionId}</code>
+              {" "} Lease generation: <code>{windowsLeaseIds.generation}</code>.
+              These identifiers are not access tokens. Use only with the matching
+              workspace and a separately obtained short-lived companion token.
+            </p>
+          )}
           <button
             type="button"
             className="text-action"
