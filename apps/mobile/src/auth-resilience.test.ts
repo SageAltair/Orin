@@ -96,11 +96,29 @@ describe("mobile authentication resilience", () => {
     const api = await import("./api");
 
     await expect(api.restoreSession()).resolves.toBeNull();
+    expect(api.wasRefreshCredentialRejected()).toBe(false);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
     await api.request("/tasks");
     const lastHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
     expect(lastHeaders.get("Authorization")).toBe("Bearer old-token");
+  });
+
+  it("marks a definitively rejected startup refresh for OS reminder cleanup", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.mocked(SecureStore.getItemAsync)
+      .mockResolvedValueOnce("expired-token")
+      .mockResolvedValueOnce("workspace-1");
+    const api = await import("./api");
+
+    await expect(api.restoreSession()).resolves.toBeNull();
+    expect(api.wasRefreshCredentialRejected()).toBe(true);
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith(
+      "orin.mobile.access-token.v1",
+    );
   });
 
   it("refreshes an expired token and restores the authenticated user", async () => {
