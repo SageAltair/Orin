@@ -1,5 +1,6 @@
 """Deterministic relevance rules, deduplication and bounded opt-in escalation."""
 
+import re
 import uuid
 from datetime import datetime, timedelta, timezone, time
 from zoneinfo import ZoneInfo
@@ -75,6 +76,11 @@ def safe_zone(value: str | None) -> ZoneInfo | None:
         return None
 
 
+def category_enabled(prefs, category: str) -> bool:
+    """Fail closed for corrupt legacy JSON category preferences."""
+    return bool(prefs.enabled and isinstance(prefs.categories, list) and category in prefs.categories)
+
+
 def attention_allowed(session, prefs, now):
     if not prefs.enabled:
         return False
@@ -84,6 +90,13 @@ def attention_allowed(session, prefs, now):
     clock = now.astimezone(zone).strftime("%H:%M")
     if prefs.quiet_enabled:
         start, end = prefs.quiet_start, prefs.quiet_end
+        # Invalid legacy wall clocks must never silently bypass quiet hours.
+        if not all(
+            isinstance(value, str)
+            and re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", value)
+            for value in (start, end)
+        ):
+            return False
         if (
             (start < end and start <= clock < end)
             or (start > end and (clock >= start or clock < end))
@@ -119,7 +132,7 @@ def emit(
     event_id=None,
 ):
     prefs = policy(session, user_id)
-    if not prefs.enabled or category not in prefs.categories:
+    if not category_enabled(prefs, category):
         return
     if session.scalar(select(Notification.id).where(Notification.delivery_key == key)):
         return
@@ -464,7 +477,7 @@ def notification_tick(session, now):
         ) or not relevant(session, row):
             row.read_at = now
             continue
-        if not prefs.enabled or row.category not in prefs.categories:
+        if not category_enabled(prefs, row.category):
             continue
         if row.snoozed_until and utc(row.snoozed_until) > now:
             continue
@@ -482,9 +495,8 @@ def notification_tick(session, now):
         # Shared preferences lock serializes the daily per-user repeat budget across API instances.
         session.refresh(prefs, with_for_update=True)
         if (
-            not prefs.enabled
+            not category_enabled(prefs, row.category)
             or not prefs.persistent
-            or row.category not in prefs.categories
             or row.repeats >= prefs.max_repeats
         ):
             continue
