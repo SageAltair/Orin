@@ -78,7 +78,11 @@ def safe_zone(value: str | None) -> ZoneInfo | None:
 
 def category_enabled(prefs, category: str) -> bool:
     """Fail closed for corrupt legacy JSON category preferences."""
-    return bool(prefs.enabled and isinstance(prefs.categories, list) and category in prefs.categories)
+    return bool(
+        prefs.enabled
+        and isinstance(prefs.categories, list)
+        and category in prefs.categories
+    )
 
 
 def attention_allowed(session, prefs, now):
