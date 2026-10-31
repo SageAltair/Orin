@@ -68,3 +68,26 @@ def test_expired_lease_requires_new_generation(auth_client, monkeypatch):
         "workspace_id": workspace, "generation_id": second, "rotate": True,
     }).status_code == 200
     assert browser.get(f"{endpoint}/{session_id}").json()["generation_id"] == second
+
+
+def test_stale_tab_close_cannot_revoke_newer_workspace_lease(auth_client):
+    """Tab A's delayed pagehide must not delete tab B's newer lease."""
+    browser = auth_client
+    register(browser, "lease-tabs@example.com")
+    access = login(browser, "lease-tabs@example.com")
+    authenticate(browser, str(access["access_token"]))
+    session_id = next(s["id"] for s in browser.get("/api/v1/auth/sessions").json() if s["current"])
+    a = browser.post("/api/v1/workspaces", json={"name": "Tab A"}).json()["id"]
+    b = browser.post("/api/v1/workspaces", json={"name": "Tab B"}).json()["id"]
+    generation_a, generation_b = str(uuid.uuid4()), str(uuid.uuid4())
+    endpoint = "/api/v1/auth/reminder-lease"
+    assert browser.put(endpoint, json={"workspace_id": a, "generation_id": generation_a, "rotate": True}).status_code == 200
+    assert browser.put(endpoint, json={"workspace_id": b, "generation_id": generation_b, "rotate": True}).status_code == 200
+    # This is the request emitted by tab A after tab B has taken ownership.
+    stale_revoke = browser.request("DELETE", endpoint, json={"generation_id": generation_a})
+    assert stale_revoke.status_code == 409, stale_revoke.text
+    current = browser.get(f"{endpoint}/{session_id}")
+    assert current.status_code == 200, current.text
+    assert current.json()["generation_id"] == generation_b
+    assert browser.request("DELETE", endpoint, json={"generation_id": generation_b}).status_code == 204
+    assert browser.get(f"{endpoint}/{session_id}").status_code == 404
