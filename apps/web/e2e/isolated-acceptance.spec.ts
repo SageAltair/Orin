@@ -267,3 +267,91 @@ test("isolated PostgreSQL All Tasks includes records beyond the first API page",
   await expect(workspace.locator(".focus-task-list")
     .getByText("Disposable page two marker")).toBeVisible();
 });
+
+
+test("isolated PostgreSQL keeps task and project inventories within owner and workspace", async ({
+  page,
+  request,
+  browser,
+}) => {
+  test.skip(!enabled, "Run only with the disposable orin-stabilization-acceptance Docker stack");
+  test.setTimeout(120_000);
+
+  const signUp = async (target: typeof page, label: string) => {
+    const email = `isolated-scope-${crypto.randomUUID()}@example.com`;
+    const password = `Isolated-scope-${crypto.randomUUID()}!`;
+    await target.goto(isolatedWeb);
+    await target.getByRole("button", { name: "New to Orin? Create an account" }).click();
+    await target.getByLabel("Your name").fill(label);
+    await target.getByLabel("Email").fill(email);
+    await target.getByLabel("Password", { exact: true }).fill(password);
+    await target.getByRole("button", { name: "Create account" }).click();
+    await expect(target.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+    const response = await request.post(`${isolatedApi}/api/v1/auth/login`, {
+      data: { email, password },
+    });
+    expect(response.status()).toBe(200);
+    const { access_token: token } = (await response.json()) as { access_token: string };
+    return { Authorization: `Bearer ${token}` };
+  };
+
+  const ownerA = await signUp(page, "Disposable workspace owner A");
+  const workspaces = await request.get(`${isolatedApi}/api/v1/workspaces`, { headers: ownerA });
+  expect(workspaces.status()).toBe(200);
+  const personal = (await workspaces.json()) as Array<{ id: string; name: string }>;
+  expect(personal.length).toBeGreaterThan(0);
+  const personalId = personal[0].id;
+
+  const newWorkspace = await request.post(`${isolatedApi}/api/v1/workspaces`, {
+    headers: ownerA, data: { name: "Disposable isolated office" },
+  });
+  expect(newWorkspace.status()).toBe(201);
+  const { id: officeId } = (await newWorkspace.json()) as { id: string };
+  const personalHeaders = { ...ownerA, "X-Orin-Workspace-Id": personalId };
+  const officeHeaders = { ...ownerA, "X-Orin-Workspace-Id": officeId };
+
+  const projectResponse = await request.post(`${isolatedApi}/api/v1/projects`, {
+    headers: officeHeaders, data: { name: "Disposable private project" },
+  });
+  expect(projectResponse.status()).toBe(201);
+  const { id: projectId } = (await projectResponse.json()) as { id: string };
+  const officeTask = await request.post(`${isolatedApi}/api/v1/tasks`, {
+    headers: officeHeaders, data: { title: "Office-only task", project_id: projectId },
+  });
+  expect(officeTask.status()).toBe(201);
+  const personalTask = await request.post(`${isolatedApi}/api/v1/tasks`, {
+    headers: personalHeaders, data: { title: "Personal-only task" },
+  });
+  expect(personalTask.status()).toBe(201);
+
+  const titlesFor = async (headers: Record<string, string>) => {
+    const response = await request.get(`${isolatedApi}/api/v1/tasks`, { headers });
+    expect(response.status()).toBe(200);
+    return ((await response.json()) as Array<{ title: string }>).map(task => task.title);
+  };
+  expect(await titlesFor(officeHeaders)).toContain("Office-only task");
+  expect(await titlesFor(officeHeaders)).not.toContain("Personal-only task");
+  expect(await titlesFor(personalHeaders)).toContain("Personal-only task");
+  expect(await titlesFor(personalHeaders)).not.toContain("Office-only task");
+
+  const wrongWorkspaceProject = await request.post(`${isolatedApi}/api/v1/tasks`, {
+    headers: personalHeaders, data: { title: "Should be rejected", project_id: projectId },
+  });
+  expect(wrongWorkspaceProject.status()).toBe(422);
+
+  const secondPage = await browser.newPage();
+  try {
+    const ownerB = await signUp(secondPage, "Disposable workspace owner B");
+    expect(await titlesFor(ownerB)).toEqual([]);
+    const foreignWorkspace = await request.get(`${isolatedApi}/api/v1/tasks`, {
+      headers: { ...ownerB, "X-Orin-Workspace-Id": officeId },
+    });
+    expect(foreignWorkspace.status()).toBe(404);
+    const foreignProject = await request.post(`${isolatedApi}/api/v1/tasks`, {
+      headers: ownerB, data: { title: "Should also be rejected", project_id: projectId },
+    });
+    expect(foreignProject.status()).toBe(422);
+  } finally {
+    await secondPage.close();
+  }
+});
