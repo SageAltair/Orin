@@ -258,7 +258,10 @@ def relevant(session, row):
         from orin_api.planning_domain import occurrence
 
         for local_day in (day, day + timedelta(days=1)):
-            instant = occurrence(source, local_day)
+            try:
+                instant = occurrence(source, local_day)
+            except (ValueError, TypeError, KeyError):
+                return False  # Invalid legacy clock; never interrupt other users.
             if instant and instant.isoformat() in row.delivery_key:
                 return not session.scalar(
                     select(RoutineCheckin.id).where(
