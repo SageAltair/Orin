@@ -119,7 +119,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, ini
   useEffect(() => {
     if (!initialTaskId || !pageTasks.some(task => task.id === initialTaskId)) return;
     document.getElementById(`task-${initialTaskId}`)?.scrollIntoView({ block: "center" });
-  }, [initialTaskId, pageTasks]);
+  }, [initialTaskId, currentPage, loading]);
   // Index project labels once, even when a workspace has thousands of tasks.
   const projectNames = new Map(projects.map(project => [project.id, project.name]));
   const projectNameFor = (id: string) => projectNames.get(id) ?? "Project task";
