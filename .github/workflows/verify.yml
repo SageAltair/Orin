@@ -209,7 +209,7 @@ jobs:
           # Include dev dependencies and fail on moderate advisories as well.
           npm audit --audit-level=moderate
       - name: Verify mobile audit regression policy
-        run: node --test scripts/check-mobile-audit.test.mjs
+        run: node --test scripts/check-mobile-audit.test.mjs scripts/check-mobile-permissions.test.mjs
       - name: Audit mobile locked dependencies (critical zero, high baseline ceiling)
         working-directory: apps/mobile
         run: |
