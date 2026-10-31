@@ -51,7 +51,8 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   The companion must be started with the browser's current session UUID and
   lease-generation UUID shown in Notifications settings. These IDs are not
   access credentials; the companion still needs its own short-lived bearer.
-  Browser tab closure and sleep are bounded by lease expiry, **not** guaranteed
+  Browser tab closure attempts a best-effort authenticated revoke request,
+  but closure and sleep are bounded by lease expiry, **not** guaranteed
   immediate revocation. Failed server logout cannot be guaranteed instantaneous
   if the browser cannot contact the API. The browser must remain active for
   renewals, and a renewed browser lease does not renew the companion's access
