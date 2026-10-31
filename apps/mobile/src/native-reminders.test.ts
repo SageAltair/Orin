@@ -127,7 +127,7 @@ describe("native reminder account isolation and consent", () => {
     expect(scheduled).toHaveLength(0);
   });
   it("rolls back partial OS schedules without deleting prior alerts when replacement fails", async () => {
-    await setLocalReminderEnabled("alice", "workspace-a", [reminder], policy);
+    await setLocalReminderEnabled("alice", "workspace-a", true, [reminder], policy);
     const originalId = scheduled[0]!.identifier;
     const changed = { ...reminder, revision: 2 };
     const additional = {
