@@ -26,6 +26,16 @@ describe("Windows reminder browser lease", () => {
         : undefined);
   });
 
+  it("never revokes another tab's lease when this tab has no generation", async () => {
+    // An opted-in tab can be closing before its own activation completed.
+    // A DELETE without a generation would revoke the active lease of another tab.
+    setWindowsLeaseOptIn(true, "owner-a");
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
+    await stopWindowsLease();
+    expect(apiRequest).not.toHaveBeenCalled();
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
+  });
+
   it("requires explicit opt-in and serializes A revoke before B activation", async () => {
     expect(isWindowsLeaseOptedIn("owner-a")).toBe(false);
     setWindowsLeaseOptIn(true, "owner-a");
