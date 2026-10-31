@@ -111,6 +111,34 @@ was visible or that Windows allows notifications. Interactive delivery
 acceptance remains mandatory. See Microsoft's
 [desktop toast AppUserModelID requirements](https://learn.microsoft.com/en-us/windows/win32/shell/enable-desktop-toast-with-appusermodelid).
 
+## Manual visible-toast acceptance (one shot, explicit consent)
+
+After the **read-only** registration diagnostic passes on the signed-in Windows
+desktop, the user can request **one generic test toast** without an API token,
+task, reminder database or running companion. This is never invoked by CI,
+the scheduler or the shortcut installer. Set the existing
+`ORIN_WINDOWS_REMINDERS_APP_ID` and `ORIN_WINDOWS_REMINDERS_SHORTCUT` to
+the already registered identity, then deliberately opt in for this one test:
+
+~~~powershell
+$env:ORIN_WINDOWS_REMINDERS_TEST_TOAST = '1'
+try {
+    orin-windows-reminders-test
+} finally {
+    Remove-Item Env:\ORIN_WINDOWS_REMINDERS_TEST_TOAST -ErrorAction SilentlyContinue
+}
+~~~
+
+The toast body says **"This is a test notification."** It never contains task
+names or secrets. The command checks the existing shortcut's AppUserModelID
+before calling the Windows toast API and does not install or register anything.
+A successful command means only that Windows accepted the *request*. Verify
+the banner and Notification Center **visually** in the interactive desktop
+session, with Windows app notifications enabled and Focus/Do Not Disturb
+settings noted. Record whether it appeared and any OS suppression. If no toast
+appears, do not mark the native release gate as passed. This test does not
+prove background, locked-screen, silent/DND, scheduled or closed-app delivery.
+
 ## Developer-only manual opt-in (after local Windows acceptance)
 
 Install the worker in a virtual environment and launch
