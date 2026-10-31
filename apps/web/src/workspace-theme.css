@@ -718,3 +718,10 @@
 .orin-shell:has(.writing-studio) > .sidebar { left:0; right:auto; }
 .orin-shell:has(.writing-studio) .writing-studio { direction:ltr; }
 .orin-shell:has(.writing-studio) .writing-workspace { direction:ltr; }
+
+/* Keep the global sidebar identical when Writing is selected. */
+.orin-shell:has(.writing-studio):not(.sidebar-collapsed) > .sidebar .brand { justify-content:flex-start; gap:10px; }
+.orin-shell:has(.writing-studio):not(.sidebar-collapsed) > .sidebar .brand > span:last-child { display:inline; }
+.orin-shell:has(.writing-studio):not(.sidebar-collapsed) > .sidebar .nav-link { justify-content:flex-start; gap:11px; text-align:left; }
+.orin-shell:has(.writing-studio):not(.sidebar-collapsed) > .sidebar .nav-link-label { display:inline; flex:0 1 auto; margin:0; text-align:left; }
+.orin-shell:has(.writing-studio):not(.sidebar-collapsed) > .sidebar .nav-icon { flex:0 0 17px; margin:0; }
