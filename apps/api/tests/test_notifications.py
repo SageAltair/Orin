@@ -715,3 +715,38 @@ def test_inbox_read_fails_closed_for_corrupt_legacy_preferences(
     assert len(rows) == 1
     assert rows[0]["read_at"] is None
     assert rows[0]["attention_ready"] is False
+
+
+@pytest.mark.parametrize("corruption", ["categories", "timezone", "quiet_clock"])
+def test_invalid_saved_preferences_require_explicit_safe_repair(
+    client, sessions, corruption
+):
+    """GET never silently rewrites legacy settings; explicit PUT restores access."""
+    factory, owner = sessions
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        if corruption == "categories":
+            prefs.categories = None
+        elif corruption == "timezone":
+            prefs.timezone = "Invalid/Legacy"
+        else:
+            prefs.quiet_enabled = True
+            prefs.quiet_start = "99:99"
+
+    response = client.get("/api/v1/notifications/preferences")
+    assert response.status_code == 409, response.text
+    assert "Restore safe defaults" in response.json()["detail"]
+
+    # The repair is an explicit, disabled-by-default user action, not a GET side effect.
+    repaired = client.put(
+        "/api/v1/notifications/preferences",
+        json={"enabled": False, "categories": [], "timezone": "UTC"},
+    )
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["enabled"] is False
+    assert repaired.json()["categories"] == []
+
+    restored = client.get("/api/v1/notifications/preferences")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["enabled"] is False
+    assert restored.json()["categories"] == []
