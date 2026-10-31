@@ -16,7 +16,10 @@ export function setWindowsLeaseOptIn(enabled: boolean, ownerId?: string): void {
   if (enabled) {
     if (!ownerId) throw new Error("A signed-in owner is required for Windows reminder opt-in");
     sessionStorage.setItem(windowsLeaseOptInKey, ownerId);
-  } else sessionStorage.removeItem(windowsLeaseOptInKey);
+  } else {
+    try { sessionStorage.removeItem(windowsLeaseOptInKey); }
+    catch { /* Storage unavailable: no new lease may be activated. */ }
+  }
   window.dispatchEvent(new Event(windowsLeaseToggleEvent));
 }
 
@@ -32,9 +35,11 @@ function publishStatus(sessionId: string | null, generation: string | null): voi
 }
 
 export function getWindowsLeaseIdentifiers(): { sessionId: string; generation: string } | null {
-  const sessionId = sessionStorage.getItem(sessionKey);
-  const generation = sessionStorage.getItem(generationKey);
-  return sessionId && generation ? { sessionId, generation } : null;
+  try {
+    const sessionId = sessionStorage.getItem(sessionKey);
+    const generation = sessionStorage.getItem(generationKey);
+    return sessionId && generation ? { sessionId, generation } : null;
+  } catch { return null; }
 }
 
 // Serialize renew/revoke/rotate so an in-flight A heartbeat cannot resurrect
