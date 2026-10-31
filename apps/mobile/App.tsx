@@ -98,10 +98,28 @@ export default function App() {
   useEffect(() => {
     if (!user || !workspace) return;
     let current = true;
+    let sessionExpired = false;
     const refresh = () => {
-      void refreshDeviceReminders(user.id, workspace.id, () => current).catch(() => {
-        // Preserve previously scheduled alerts on transient network failure.
-        // The Notifications screen provides an explicit retry and error message.
+      void refreshDeviceReminders(user.id, workspace.id, () => current, (cleaned) => {
+        if (!current || sessionExpired) return;
+        sessionExpired = true;
+        // A confirmed refresh-credential rejection is an actual sign-out,
+        // unlike an offline or 5xx failure. Do not leave stale account data
+        // visible behind a login-invalid session.
+        setUser(null);
+        setWorkspace(null);
+        setWorkspaces([]);
+        setTab("home");
+        setError("");
+        Alert.alert(
+          "Session expired",
+          cleaned
+            ? "Your session has expired. Sign in again."
+            : "Your session has expired. Sign in again. Orin could not clear device reminders; disable Orin notifications in Android settings.",
+        );
+      }).catch(() => {
+        // Transient network errors preserve opted-in OS alerts and the session.
+        // The Notifications screen provides an explicit retry and error.
       });
     };
     void reconcileLocalReminderWorkspace(user.id, workspace.id)
