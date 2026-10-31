@@ -27,9 +27,10 @@ describe("Windows reminder browser lease", () => {
   });
 
   it("requires explicit opt-in and serializes A revoke before B activation", async () => {
-    expect(isWindowsLeaseOptedIn()).toBe(false);
-    setWindowsLeaseOptIn(true);
-    expect(isWindowsLeaseOptedIn()).toBe(true);
+    expect(isWindowsLeaseOptedIn("owner-a")).toBe(false);
+    setWindowsLeaseOptIn(true, "owner-a");
+    expect(isWindowsLeaseOptedIn("owner-a")).toBe(true);
+    expect(isWindowsLeaseOptedIn("owner-b")).toBe(false);
     const first = await activateWindowsLease("workspace-a");
     expect(getWindowsLeaseIdentifiers()).toEqual({
       sessionId: "browser-session", generation: first,
