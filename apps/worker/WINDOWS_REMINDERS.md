@@ -39,9 +39,21 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   syntax with explicit timezone offsets no greater than 14 hours. Malformed
   deadlines fail closed before replacing the reminder queue; Python's permissive
   ISO parser alone would accept invalid offsets such as `+15:00`.
-- The current Orin web logout flow does not necessarily revoke an independently
-  supplied bearer token. Stop this process and revoke its token on logout or
-  account change. A fully integrated session lifecycle is **not implemented**.
+- **Optional browser-session binding:** Set
+  `ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID` to the UUID of the *browser's*
+  existing auth session (from the authenticated `GET /api/v1/auth/sessions`
+  response, the row with `current: true`). The companion checks that session
+  through its own authenticated token before syncing and again immediately
+  before each due toast. A logout/revocation of the bound browser session
+  clears the local reminder queue and stops the companion, even when its own
+  independently issued bearer token remains valid. Missing, revoked, duplicate
+  or malformed session state fails closed; an unavailable API cannot deliver.
+  This UUID is not an access token and must belong to the same authenticated
+  account. **This binding is manual and opt-in**; without it, the foreground
+  companion retains its existing behavior and must be stopped/revoked on logout.
+  Browser tab closure without logout does not revoke the session, and this is
+  **not** an automatic browser bridge, renewable lease or background service.
+  A fully integrated session lifecycle is **not implemented**.
 - Windows toast attempts now fail closed unless an existing absolute Start Menu
   `.lnk` path and a syntactically valid AppUserModelID are explicitly configured.
   The PowerShell transport checks that the shortcut exposes the same registered
@@ -148,6 +160,8 @@ Install the worker in a virtual environment and launch
 `ORIN_WINDOWS_REMINDERS_TOKEN=<short-lived-user-token>`,
 `ORIN_WINDOWS_REMINDERS_OWNER_ID=<owner-uuid>`,
 `ORIN_WINDOWS_REMINDERS_WORKSPACE_ID=<workspace-uuid>`,
+optionally `ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID=<browser-auth-session-uuid>`
+for manual logout binding,
 `ORIN_WINDOWS_REMINDERS_APP_ID=<registered-AppUserModelID>`, and
 `ORIN_WINDOWS_REMINDERS_SHORTCUT=<absolute-Start-Menu-Programs-lnk-path>`.
 The shortcut must already exist in the current-user or all-users Start Menu

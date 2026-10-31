@@ -1148,3 +1148,150 @@ def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, m
     monkeypatch.setattr(windows_reminders, "run_once", poll)
     windows_reminders.main()
     assert len(calls) == 2
+
+
+BROWSER_SESSION = "e4ef9f02-05f8-4c40-b0e4-ff4e99ca9093"
+
+
+def test_bound_browser_logout_during_task_scan_fails_closed(tmp_path):
+    """An independent companion token must not outlive the bound browser session."""
+    queue = ledger(tmp_path)
+    state = {"sessions": 0}
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            state["sessions"] += 1
+            active = state["sessions"] == 1
+            return httpx.Response(200, json=[{
+                "id": BROWSER_SESSION, "active": active,
+                "revoked_at": None if active else "2026-10-29T12:00:00Z",
+            }])
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PermissionError, match="browser session"):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     notify=lambda: pytest.fail("Logged-out session must never toast"))
+    assert state["sessions"] == 2
+    assert queue.due(NOW) == []
+    queue.close()
+
+
+def test_bound_browser_session_still_active_allows_toast(tmp_path):
+    queue = ledger(tmp_path)
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(200, json=[{
+                "id": BROWSER_SESSION, "active": True, "revoked_at": None,
+            }])
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    calls = []
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        assert run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                        notify=lambda: calls.append("toast")) == 1
+    assert calls == ["toast"]
+    queue.close()
+
+
+@pytest.mark.parametrize("payload", [
+    [], [{"id": BROWSER_SESSION, "active": "true", "revoked_at": None}],
+    [{"id": BROWSER_SESSION, "active": True, "revoked_at": "2026-10-29T12:00:00Z"}],
+    [{"id": BROWSER_SESSION, "active": True, "revoked_at": None}] * 2,
+])
+def test_bound_browser_session_malformed_or_missing_fails_closed(tmp_path, payload):
+    queue = ledger(tmp_path)
+    queue.sync({"old": NOW + 60})
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(200, json=payload)
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PermissionError, match="browser session"):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     notify=lambda: pytest.fail("No toast"))
+    assert queue.due(NOW) == []
+    queue.close()
+
+
+@pytest.mark.parametrize("status", [401, 503])
+def test_bound_browser_session_api_failure_never_toasts(tmp_path, status):
+    queue = ledger(tmp_path)
+    queue.sync({"old": NOW + 60})
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(status)
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     notify=lambda: pytest.fail("No toast on session lookup failure"))
+    assert queue.due(NOW) == ([] if status == 401 else [("old", NOW + 60)])
+    queue.close()
+
+
+def test_bound_browser_session_invalid_json_stops_and_clears_queue(tmp_path):
+    queue = ledger(tmp_path)
+    queue.sync({"old": NOW + 60})
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(200, content=b"{invalid-json", headers={"content-type": "application/json"})
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(PermissionError, match="browser session"):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     notify=lambda: pytest.fail("No toast"))
+    assert queue.due(NOW) == []
+    queue.close()
