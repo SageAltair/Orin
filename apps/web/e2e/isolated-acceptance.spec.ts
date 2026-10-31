@@ -40,7 +40,7 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
 
   // Real Chromium + disposable PostgreSQL: opt-in browser lease must follow
   // A -> B -> A without allowing an old companion generation to rearm.
-  await page.getByRole("button", { name: "Open navigation", exact: true }).click();
+  // Desktop sidebar is already visible; the mobile-only Open navigation control is hidden.
   await page.getByRole("button", { name: "Preferences", exact: true }).click();
   await page.getByRole("navigation", { name: "Settings sections" })
     .getByRole("button", { name: "Notifications", exact: true }).click();
