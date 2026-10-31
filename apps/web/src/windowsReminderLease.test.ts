@@ -48,6 +48,7 @@ describe("Windows reminder browser lease", () => {
       }));
     expect(operations.map(operation => operation.method))
       .toEqual(["PUT", "PUT", "DELETE", "PUT"]);
+    expect(operations[2].body).toEqual({ generation_id: first });
     expect(operations[0].body).toMatchObject({
       workspace_id: "workspace-a", generation_id: first, rotate: true,
     });

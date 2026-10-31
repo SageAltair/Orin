@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, login, logout, request, requestBlob, restoreSession, setActiveWorkspace } from "./api";
+import { ApiError, login, logout, request, requestBlob, restoreSession, setActiveWorkspace, revokeReminderLeaseOnPageHide } from "./api";
 
 describe("session restoration", () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -258,5 +258,41 @@ describe("successful response metadata", () => {
     const observe = vi.fn();
     await expect(request("/notifications/preferences", {}, true, observe)).rejects.toMatchObject({ status: 503 });
     expect(observe).not.toHaveBeenCalled();
+  });
+});
+
+
+
+describe("Windows reminder tab-close revocation", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("includes the tab generation so a stale pagehide cannot revoke another tab", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tab-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "owner" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
+    vi.stubGlobal("sessionStorage", { getItem: () => "11111111-1111-4111-8111-111111111111" });
+    vi.stubGlobal("fetch", fetchMock);
+    await login("tab@example.com", "password");
+    revokeReminderLeaseOnPageHide();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const [url, init] = fetchMock.mock.calls[2];
+    expect(String(url)).toContain("/auth/reminder-lease");
+    expect(init.method).toBe("DELETE");
+    expect(init.keepalive).toBe(true);
+    expect(JSON.parse(init.body)).toEqual({ generation_id: "11111111-1111-4111-8111-111111111111" });
+  });
+
+  it("does not revoke any lease when the closing tab has no generation", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tab-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "owner" }), { status: 200 }));
+    vi.stubGlobal("window", { dispatchEvent: vi.fn() });
+    vi.stubGlobal("sessionStorage", { getItem: () => null });
+    vi.stubGlobal("fetch", fetchMock);
+    await login("tab@example.com", "password");
+    revokeReminderLeaseOnPageHide();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

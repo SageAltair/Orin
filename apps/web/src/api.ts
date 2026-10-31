@@ -77,9 +77,15 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
     expires automatically; browser close cannot guarantee instant revocation. */
 export function revokeReminderLeaseOnPageHide(): void {
   if (!accessToken) return;
+  let generation: string | null;
+  try { generation = sessionStorage.getItem("orin:windows-reminder-lease-generation"); }
+  catch { return; }
+  // A tab without a generation cannot safely revoke another tab's lease.
+  if (!generation) return;
   void fetch(`${baseUrl}/api/v1/auth/reminder-lease`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ generation_id: generation }),
     credentials: "include",
     keepalive: true,
   }).catch(() => undefined);

@@ -91,3 +91,9 @@ def test_stale_tab_close_cannot_revoke_newer_workspace_lease(auth_client):
     assert current.json()["generation_id"] == generation_b
     assert browser.request("DELETE", endpoint, json={"generation_id": generation_b}).status_code == 204
     assert browser.get(f"{endpoint}/{session_id}").status_code == 404
+    # Preserve the legacy explicit no-body revocation contract.
+    assert browser.put(endpoint, json={
+        "workspace_id": a, "generation_id": str(uuid.uuid4()), "rotate": True,
+    }).status_code == 200
+    assert browser.delete(endpoint).status_code == 204
+    assert browser.get(f"{endpoint}/{session_id}").status_code == 404

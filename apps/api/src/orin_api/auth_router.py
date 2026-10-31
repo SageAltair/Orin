@@ -234,13 +234,25 @@ def read_reminder_lease(
             "expires_at": as_utc(lease.expires_at).isoformat()}
 
 
+class ReminderLeaseRevoke(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    generation_id: uuid.UUID | None = None
+
+
 @router.delete("/reminder-lease", status_code=status.HTTP_204_NO_CONTENT)
 def stop_reminder_lease(
+    data: ReminderLeaseRevoke | None = None,
     authenticated: AuthenticatedUser = Depends(get_current_authentication),
     session: Session = Depends(get_session),
 ) -> Response:
-    row = session.get(BrowserReminderLease, authenticated.auth_session.id)
+    # A stale tab's delayed pagehide must never delete a newer tab's lease.
+    # Keep the no-body path for deliberate legacy/manual full-session revoke.
+    row = session.scalar(select(BrowserReminderLease).where(
+        BrowserReminderLease.session_id == authenticated.auth_session.id,
+    ).with_for_update())
     if row is not None:
+        if data is not None and data.generation_id is not None and row.generation_id != data.generation_id:
+            raise HTTPException(status_code=409, detail="Reminder lease generation changed")
         session.delete(row)
         session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
