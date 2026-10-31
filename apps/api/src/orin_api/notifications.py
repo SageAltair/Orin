@@ -43,6 +43,17 @@ CATEGORIES = [
 ]
 
 
+REMINDER_LEADS = {
+    "calendar": frozenset((5, 10, 15, 30, 60)),
+    "routines": frozenset((0, 5, 10, 15, 30)),
+}
+
+
+def valid_reminder_lead(value, category: str) -> bool:
+    """Reject corrupt legacy reminder offsets before scheduling or relevance checks."""
+    return type(value) is int and value in REMINDER_LEADS.get(category, ())
+
+
 def utc(value):
     return (
         value.replace(tzinfo=timezone.utc)
@@ -280,7 +291,7 @@ def relevant(session, row):
             )
         return source.status == "failed"
     if row.category == "routines":
-        if source.paused or source.reminder_minutes is None:
+        if source.paused or not valid_reminder_lead(source.reminder_minutes, "routines"):
             return False
         zone = safe_zone(source.timezone)
         if zone is None:
@@ -303,7 +314,7 @@ def relevant(session, row):
                 )
         return False
     if row.category == "calendar":
-        if source.reminder_minutes is None:
+        if not valid_reminder_lead(source.reminder_minutes, "calendar"):
             return False
         if source.is_all_day:
             zone = safe_zone(source.timezone)
