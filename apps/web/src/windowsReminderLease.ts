@@ -80,8 +80,12 @@ export function renewWindowsLease(workspaceId: string, generation: string): Prom
 
 export function stopWindowsLease(): Promise<void> {
   return serialize(async () => {
-    // A failed revocation must not be misrepresented as a successful shutdown.
-    await request<void>("/auth/reminder-lease", { method: "DELETE", signal: AbortSignal.timeout(8000) });
+    // A stale tab cannot revoke another tab's newer workspace generation.
+    const generation = getWindowsLeaseIdentifiers()?.generation;
+    await request<void>("/auth/reminder-lease", {
+      method: "DELETE", signal: AbortSignal.timeout(8000),
+      ...(generation ? { body: JSON.stringify({ generation_id: generation }) } : {}),
+    });
     publishStatus(null, null);
   });
 }
