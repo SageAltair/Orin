@@ -204,6 +204,19 @@ def _focus_active(client: httpx.Client) -> bool:
     the bearer-token owner. Missing or malformed state fails closed.
     """
     response = client.get("/focus-sessions/active")
+    if response.status_code == 405:
+        # Older local APIs lack the authoritative endpoint. The history API
+        # returns at most 50 records; only a shorter list proves completeness.
+        history = client.get("/focus-sessions")
+        history.raise_for_status()
+        rows = history.json()
+        if not isinstance(rows, list) or len(rows) >= 50 or any(
+            not isinstance(row, dict) or row.get("status") not in
+            {"active", "paused", "completed", "cancelled", "expired"}
+            for row in rows
+        ):
+            raise ValueError("Legacy Focus history cannot establish safe state")
+        return any(row["status"] == "active" for row in rows)
     response.raise_for_status()
     state = response.json()
     if not isinstance(state, dict) or type(state.get("active")) is not bool:
@@ -586,8 +599,9 @@ def main() -> None:
                     except PermissionError:
                         logger.error("Reminder account verification failed; stopping companion")
                         break
-                    except (httpx.HTTPError, ValueError, sqlite3.Error, subprocess.SubprocessError, RuntimeError):
-                        logger.warning("Reminder sync or toast failed; no delivery is confirmed")
+                    except (httpx.HTTPError, ValueError, sqlite3.Error, subprocess.SubprocessError, RuntimeError) as error:
+                        # Never log request headers, tokens, task titles, or exception strings.
+                        logger.warning("Reminder sync or toast failed (%s); no delivery is confirmed", type(error).__name__)
                     stopping.wait(POLL_SECONDS)
         finally:
             ledger.close()
