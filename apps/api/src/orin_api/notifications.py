@@ -131,6 +131,14 @@ def emit(
         pass
 
 
+def _source_uuid_in_delivery_key(key: str) -> uuid.UUID | None:
+    """Treat corrupt/legacy reminder keys as stale, not a fatal worker error."""
+    try:
+        return uuid.UUID(key.split(":", 2)[1])
+    except (ValueError, IndexError):
+        return None
+
+
 def relevant(session, row):
     model = {
         "tasks": Task,
@@ -171,7 +179,10 @@ def relevant(session, row):
         if source.status in {TaskStatus.DONE, TaskStatus.CANCELLED}:
             return False
         if row.delivery_key.startswith("task-block:"):
-            block = session.get(TaskSchedule, uuid.UUID(row.delivery_key.split(":")[1]))
+            block_id = _source_uuid_in_delivery_key(row.delivery_key)
+            if block_id is None:
+                return False
+            block = session.get(TaskSchedule, block_id)
             return bool(
                 block
                 and block.task_id == source.id
@@ -187,9 +198,10 @@ def relevant(session, row):
         if source.status != ProjectStatus.ACTIVE:
             return False
         if row.delivery_key.startswith("milestone:"):
-            milestone = session.get(
-                Milestone, uuid.UUID(row.delivery_key.split(":")[1])
-            )
+            milestone_id = _source_uuid_in_delivery_key(row.delivery_key)
+            if milestone_id is None:
+                return False
+            milestone = session.get(Milestone, milestone_id)
             return bool(
                 milestone
                 and milestone.project_id == source.id

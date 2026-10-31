@@ -124,6 +124,43 @@ def test_due_task_is_deduplicated_and_completion_stops_followup(sessions):
         assert session.scalar(select(Notification)).read_at is not None
 
 
+def test_corrupt_task_block_and_milestone_keys_do_not_abort_notification_tick(client, sessions):
+    factory, owner = sessions
+    now = datetime.now(timezone.utc)
+    task_id = task(factory, owner, now)
+    project_id = uuid.UUID(_project(client)["id"])
+    invalid = [
+        ("tasks", task_id, "task-block:not-a-uuid:2026-10-31T12:00:00Z"),
+        ("tasks", task_id, "task-block:"),
+        ("projects", project_id, "milestone:not-a-uuid:2026-10-31"),
+        ("projects", project_id, "milestone:"),
+    ]
+    with factory.begin() as session:
+        session.add_all([
+            Notification(
+                user_id=owner, category=category, source_id=source_id,
+                delivery_key=key, title="Old reminder", message="Stale key",
+                due_at=now,
+            )
+            for category, source_id, key in invalid
+        ])
+
+    # One corrupt persisted row must not stop valid tasks from receiving
+    # reminders or repeatedly crash the worker on every scheduled tick.
+    tick(factory, now)
+    with factory() as session:
+        rows = session.scalars(select(Notification)).all()
+        by_key = {row.delivery_key: row for row in rows}
+        for _, _, key in invalid:
+            assert by_key[key].read_at is not None
+        valid = [
+            row for row in rows
+            if row.category == "tasks" and row.delivery_key.startswith("task:")
+        ]
+        assert len(valid) == 1
+        assert valid[0].read_at is None
+
+
 def test_task_due_time_creates_in_app_reminder_and_rescheduling_invalidates_old_one(client, sessions):
     factory, _ = sessions
     now = datetime.now(timezone.utc)
