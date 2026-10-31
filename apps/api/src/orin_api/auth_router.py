@@ -202,9 +202,10 @@ def renew_reminder_lease(
             raise HTTPException(status_code=409, detail="Reminder lease is stale")
         row.expires_at = now + timedelta(seconds=REMINDER_LEASE_SECONDS)
     session.commit()
+    expires_at = row.expires_at.replace(tzinfo=UTC) if row.expires_at.tzinfo is None else row.expires_at
     return {"workspace_id": str(row.workspace_id),
             "generation_id": str(row.generation_id),
-            "expires_at": row.expires_at.isoformat()}
+            "expires_at": expires_at.isoformat()}
 
 
 @router.get("/reminder-lease/{session_id}")
