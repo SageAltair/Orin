@@ -196,7 +196,7 @@ async function refreshDeviceRemindersInternal(
   isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (!isCurrent()) return;
-  if (!(await getLocalReminderEnabled(owner)) || !isCurrent()) return;
+  if (!(await getLocalReminderEnabled(owner, isCurrent)) || !isCurrent()) return;
   // Revoking the server policy must cancel local alerts even when the task
   // endpoint is unavailable. Do not make a full task scan a prerequisite.
   const policy = await request<NotificationPolicy>("/notifications/preferences");
