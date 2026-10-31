@@ -1176,7 +1176,6 @@ def test_bound_browser_logout_during_task_scan_fails_closed(tmp_path):
                 "quiet_start": "22:00", "quiet_end": "07:00",
             })
         if request.url.path.endswith("/tasks"):
-            state["task_reads"] += 1
             return httpx.Response(200, json=[task("due", NOW + 60)])
         return httpx.Response(404)
     with httpx.Client(base_url="https://orin.example/api/v1",
@@ -1340,6 +1339,7 @@ def test_browser_workspace_lease_fails_closed_before_native_toast(tmp_path, scen
                 "quiet_start": "22:00", "quiet_end": "07:00",
             })
         if request.url.path.endswith("/tasks"):
+            state["task_reads"] += 1
             return httpx.Response(200, json=[task("due", NOW + 60)])
         return httpx.Response(404)
     with httpx.Client(base_url="https://orin.example/api/v1",
