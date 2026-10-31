@@ -20,7 +20,12 @@ function task(id: string, due: string | null, status: Task["status"] = "todo"): 
   };
 }
 const due = "2026-11-02T12:00:00Z";
-const policy = { enabled: true, categories: ["tasks"] } as NotificationPolicy;
+const policy: NotificationPolicy = {
+  enabled: true, categories: ["tasks"], persistent: false, repeat_minutes: 15,
+  max_repeats: 3, timezone: "UTC", quiet_enabled: false,
+  quiet_start: "22:00", quiet_end: "07:00", respect_focus: true,
+  browser_alerts: false, sound: false,
+};
 const inbox: Reminder[] = [];
 
 beforeEach(() => {
@@ -279,8 +284,53 @@ describe("future task device reminder synchronization", () => {
       throw new Error("Unexpected API request");
     });
     await expect(refreshDeviceReminders("alice", "workspace-a"))
-      .rejects.toThrow("Invalid live notification policy");
+      .rejects.toThrow("Invalid notification policy");
     expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed initial suppression policy without touching OS schedules", async () => {
+    for (const bad of [
+      { ...policy, quiet_enabled: "false" },
+      { ...policy, quiet_start: "25:00" },
+      { ...policy, quiet_end: "99:00" },
+      { ...policy, timezone: "Invalid/Timezone" },
+      { ...policy, respect_focus: "true" },
+      { ...policy, categories: ["tasks", 7] },
+    ]) {
+      vi.mocked(request).mockReset().mockResolvedValueOnce(bad as never);
+      await expect(refreshDeviceReminders("alice", "workspace-a"))
+        .rejects.toThrow("Invalid notification policy");
+      expect(syncLocalReminders).not.toHaveBeenCalled();
+    }
+  });
+
+  it("preserves schedules when quiet hours become malformed during a slow sync", async () => {
+    let policyReads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        policyReads += 1;
+        return (policyReads === 1 ? policy : {
+          ...policy, quiet_enabled: true, timezone: "Invalid/Timezone",
+        }) as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("Invalid notification policy");
+    expect(policyReads).toBe(2);
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("still clears alerts on explicit server opt-out with malformed unrelated fields", async () => {
+    const disabled = { enabled: false, quiet_enabled: "invalid", timezone: "Invalid/Timezone" };
+    vi.mocked(request).mockResolvedValueOnce(disabled as never);
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", "workspace-a", [], disabled, [],
+    );
   });
 
   it("synchronizes complete tasks and inbox after a successful owner-scoped fetch", async () => {
