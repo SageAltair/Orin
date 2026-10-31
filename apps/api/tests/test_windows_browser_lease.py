@@ -16,6 +16,7 @@ def test_workspace_switch_revokes_stale_lease(auth_client):
     endpoint = "/api/v1/auth/reminder-lease"
     created = browser.put(endpoint, json={"workspace_id": a, "generation_id": first, "rotate": True})
     assert created.status_code == 200, created.text
+    assert created.json()["expires_at"].endswith("+00:00")
     companion_access = login(browser, "lease-owner@example.com")
     authenticate(browser, str(companion_access["access_token"]))
     read = browser.get(f"{endpoint}/{session_id}")
