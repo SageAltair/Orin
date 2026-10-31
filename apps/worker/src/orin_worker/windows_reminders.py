@@ -310,6 +310,8 @@ def _require_browser_lease(
     the browser changes workspaces without logging out.
     """
     response = client.get(f"/auth/reminder-lease/{session_id}")
+    if response.status_code in {401, 403, 404, 409}:
+        raise PermissionError("Browser reminder lease is no longer authorized")
     response.raise_for_status()
     try:
         lease = response.json()
