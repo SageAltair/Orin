@@ -765,3 +765,52 @@ def test_corrupt_legacy_preference_get_is_fail_closed_and_repairable(
     assert "X-Orin-Preferences-Recovery" not in after.headers
     assert after.json()["enabled"] is True
     assert after.json()["categories"] == ["tasks"]
+
+
+@pytest.mark.parametrize(
+    ("field", "corrupt_value"),
+    [
+        ("repeat_minutes", 0),
+        ("repeat_minutes", -5),
+        ("repeat_minutes", 10**13),
+        ("max_repeats", 0),
+        ("max_repeats", 100),
+        ("repeats_today", -3),
+    ],
+)
+def test_corrupt_legacy_repeat_policy_cannot_escalate_or_block_other_owners(
+    sessions, field, corrupt_value
+):
+    """Malformed persisted repeat limits suppress only that owner's escalation."""
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    with factory.begin() as session:
+        healthy = User(
+            email="healthy-repeat@example.test",
+            password_hash="test-hash",
+            display_name="Healthy",
+        )
+        session.add(healthy)
+        session.flush()
+        healthy_owner = healthy.id
+        affected_prefs = policy(session, owner)
+        affected_prefs.persistent = True
+        affected_prefs.repeat_day = now.date()
+        setattr(affected_prefs, field, corrupt_value)
+        policy(session, healthy_owner).persistent = True
+
+    task(factory, owner, now, "Corrupt repeat settings")
+    task(factory, healthy_owner, now, "Healthy repeat settings")
+    tick(factory, now)
+    tick(factory, now + timedelta(minutes=16))
+    with factory() as session:
+        affected = session.scalar(
+            select(Notification).where(Notification.user_id == owner)
+        )
+        healthy = session.scalar(
+            select(Notification).where(Notification.user_id == healthy_owner)
+        )
+        assert affected is not None and affected.attention_at is not None
+        assert affected.repeats == 0
+        assert healthy is not None and healthy.attention_at is not None
+        assert healthy.repeats == 1
