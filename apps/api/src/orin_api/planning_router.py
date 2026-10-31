@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
 from orin_api.database import get_session
@@ -29,13 +30,23 @@ router = APIRouter(prefix="/api/v1", tags=["planning"])
 
 
 def workspace_for_request(session: Session, user: User, workspace_id: uuid.UUID | None) -> Workspace:
-    workspace = session.scalar(select(Workspace).where(Workspace.owner_id == user.id).order_by(Workspace.created_at.asc())) if workspace_id is None else session.scalar(select(Workspace).where(Workspace.id == workspace_id, Workspace.owner_id == user.id))
-    if workspace is None:
-        workspace = Workspace(owner_id=user.id, name="Personal", color="#6b73ff") if workspace_id is None else None
+    if workspace_id is not None:
+        workspace = session.scalar(select(Workspace).where(Workspace.id == workspace_id, Workspace.owner_id == user.id))
         if workspace is None:
             raise HTTPException(404, "Workspace not found")
-        session.add(workspace)
-        session.flush()
+        return workspace
+    workspace_query = select(Workspace).where(Workspace.owner_id == user.id).order_by(Workspace.created_at.asc())
+    workspace = session.scalar(workspace_query)
+    if workspace is None:
+        try:
+            with session.begin_nested():
+                workspace = Workspace(owner_id=user.id, name="Personal", color="#6b73ff")
+                session.add(workspace)
+                session.flush()
+        except IntegrityError:
+            workspace = session.scalar(workspace_query)
+            if workspace is None:
+                raise
     return workspace
 
 
