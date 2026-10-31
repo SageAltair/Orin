@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { request } from "./api";
-import { getLocalReminderEnabled, syncLocalReminders } from "./native-reminders";
+import { request, wasRefreshCredentialRejected } from "./api";
+import { getLocalReminderEnabled, revokeLocalReminderOwner, syncLocalReminders } from "./native-reminders";
 import { fetchDeviceReminderInbox, fetchDeviceReminderTasks, refreshDeviceReminders } from "./device-reminder-sync";
 import type { NotificationPolicy, Reminder, Task } from "./types";
 
-vi.mock("./api", () => ({ request: vi.fn() }));
+vi.mock("./api", () => ({ request: vi.fn(), wasRefreshCredentialRejected: vi.fn() }));
 vi.mock("./native-reminders", () => ({
   getLocalReminderEnabled: vi.fn(),
+  revokeLocalReminderOwner: vi.fn(),
   syncLocalReminders: vi.fn(),
 }));
 
@@ -31,6 +32,8 @@ const inbox: Reminder[] = [];
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(getLocalReminderEnabled).mockResolvedValue(true);
+  vi.mocked(wasRefreshCredentialRejected).mockReturnValue(false);
+  vi.mocked(revokeLocalReminderOwner).mockResolvedValue(undefined);
   vi.mocked(syncLocalReminders).mockResolvedValue(undefined);
 });
 
@@ -252,6 +255,35 @@ describe("future task device reminder synchronization", () => {
     await expect(refreshDeviceReminders("alice", "workspace-a"))
       .rejects.toThrow("policy recheck offline");
     expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("revokes local alerts after a confirmed refresh credential rejection", async () => {
+    vi.mocked(wasRefreshCredentialRejected).mockReturnValue(true);
+    vi.mocked(request).mockRejectedValueOnce(new Error("Session rejected"));
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("Session rejected");
+    expect(revokeLocalReminderOwner).toHaveBeenCalledWith("alice");
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing local alerts when the refresh outage is transient", async () => {
+    vi.mocked(request).mockRejectedValueOnce(new Error("Refresh server unavailable"));
+    await expect(refreshDeviceReminders("alice", "workspace-a"))
+      .rejects.toThrow("Refresh server unavailable");
+    expect(revokeLocalReminderOwner).not.toHaveBeenCalled();
+    expect(syncLocalReminders).not.toHaveBeenCalled();
+  });
+
+  it("cannot revoke a newer account after an old workspace request becomes stale", async () => {
+    let current = true;
+    vi.mocked(wasRefreshCredentialRejected).mockReturnValue(true);
+    vi.mocked(request).mockImplementationOnce(async () => {
+      current = false;
+      throw new Error("Old session rejected");
+    });
+    await expect(refreshDeviceReminders("alice", "workspace-a", () => current))
+      .rejects.toThrow("Old session rejected");
+    expect(revokeLocalReminderOwner).not.toHaveBeenCalled();
   });
 
   it("does not schedule a partial task list if the category was enabled mid-refresh", async () => {
