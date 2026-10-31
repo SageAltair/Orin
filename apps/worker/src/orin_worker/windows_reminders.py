@@ -373,15 +373,16 @@ def _shortcut_identity_script(app_id: str, shortcut: Path) -> str:
     )
 
 
-def _toast_script(app_id: str, shortcut: Path) -> str:
+def _toast_script(app_id: str, shortcut: Path, *, test_mode: bool = False) -> str:
     """Fail before Show unless the existing shortcut exposes the matching AUMID."""
+    message = "This is a test notification." if test_mode else "You have a scheduled task."
     return (
         _shortcut_identity_script(app_id, shortcut) +
         "[Windows.UI.Notifications.ToastNotificationManager,Windows.UI.Notifications,ContentType=WindowsRuntime]|Out-Null;"
         "[Windows.Data.Xml.Dom.XmlDocument,Windows.Data.Xml.Dom.XmlDocument,ContentType=WindowsRuntime]|Out-Null;"
         "$xml=New-Object Windows.Data.Xml.Dom.XmlDocument;"
         "$xml.LoadXml('<toast><visual><binding template=\"ToastGeneric\"><text>Orin</text>"
-        "<text>You have a scheduled task.</text></binding></visual></toast>');"
+        f"<text>{message}</text></binding></visual></toast>');"
         "$toast=[Windows.UI.Notifications.ToastNotification]::new($xml);"
         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId).Show($toast)"
     )
@@ -401,14 +402,14 @@ def _powershell_executable() -> str:
     return str(executable)
 
 
-def _windows_toast() -> None:
+def _windows_toast(*, test_mode: bool = False) -> None:
     """Generic content only; fail closed unless the registered identity matches."""
     if os.name != "nt":
         raise RuntimeError("Windows toast delivery requires Windows")
     app_id, shortcut = _toast_identity()
     subprocess.run(
         (_powershell_executable(), "-NoProfile", "-NonInteractive", "-InputFormat", "None", "-Command",
-         _toast_script(app_id, shortcut)),
+         _toast_script(app_id, shortcut, test_mode=test_mode)),
         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         stdin=subprocess.DEVNULL,
         timeout=15, env=_toast_environment(),
@@ -439,6 +440,33 @@ def check_toast_registration() -> None:
             "no changes were made."
         ) from error
     print("Orin toast shortcut identity matches. Visible delivery is still unverified.")
+
+
+def test_toast_delivery() -> None:
+    """Manual, interactive one-shot toast probe; never run by the scheduler.
+
+    An OS API success only confirms submission, not that Windows displayed it.
+    This requires a second explicit opt-in and an existing registered shortcut.
+    No API token, database or task state is needed.
+    """
+    if os.name != "nt":
+        raise SystemExit("Windows toast testing requires Windows")
+    if os.getenv("ORIN_WINDOWS_REMINDERS_TEST_TOAST") != "1":
+        raise SystemExit(
+            "Test toast is disabled. Set ORIN_WINDOWS_REMINDERS_TEST_TOAST=1 "
+            "explicitly in an interactive Windows session."
+        )
+    try:
+        _windows_toast(test_mode=True)
+    except (RuntimeError, OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise SystemExit(
+            f"Orin test toast request failed ({type(error).__name__}). "
+            "No visible delivery was confirmed."
+        ) from error
+    print(
+        "Orin test toast request submitted. Check the Windows banner and "
+        "notification center yourself; API success does not prove visibility."
+    )
 
 
 def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast,
