@@ -24,7 +24,7 @@ const fetchAllProjects = () => fetchAllPagesWithIdentityCheck<Project>(
   (project) => project.id,
 );
 
-export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
+export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, initialTaskId = null, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; initialTaskId?: string | null; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [view, setView] = useState<TaskView>("all");
@@ -44,6 +44,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
   const mutationVersion = useRef(0);
   const mutationActive = useRef(false);
   const editingBaseline = useRef<Task | null>(null);
+  const handledDeepLink = useRef<string | null>(null);
 
   const loadProjects = async () => {
     setProjectError("");
@@ -104,6 +105,21 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
 
   const visibleTasks = filterTasksForView(tasks, view, search, now);
   const { pageCount, currentPage, pageTasks } = paginateTaskList(visibleTasks, page, pageSize);
+  // External Calendar and notification links must reveal the target even when
+  // it is on a later page. Handle each link once; polling must not steal navigation.
+  useEffect(() => {
+    if (!initialTaskId || loading || handledDeepLink.current === initialTaskId) return;
+    const index = tasks.findIndex(task => task.id === initialTaskId);
+    if (index < 0) return;
+    handledDeepLink.current = initialTaskId;
+    setView("all");
+    setSearch("");
+    setPage(Math.floor(index / pageSize) + 1);
+  }, [initialTaskId, loading, tasks]);
+  useEffect(() => {
+    if (!initialTaskId || !pageTasks.some(task => task.id === initialTaskId)) return;
+    document.getElementById(`task-${initialTaskId}`)?.scrollIntoView({ block: "center" });
+  }, [initialTaskId, pageTasks]);
   // Index project labels once, even when a workspace has thousands of tasks.
   const projectNames = new Map(projects.map(project => [project.id, project.name]));
   const projectNameFor = (id: string) => projectNames.get(id) ?? "Project task";
@@ -190,7 +206,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, act
     </form>}
     {loading ? <p role="status">Loading tasks…</p> : visibleTasks.length === 0 ?
       <div className="focus-task-empty"><h2>{tasks.length === 0 ? "No tasks yet" : "Nothing in this view"}</h2><p>{tasks.length === 0 ? "Create your first task to start planning." : "Try another view or search."}</p></div> :
-      <ul className="focus-task-list">{pageTasks.map(task => <li key={task.id}>
+      <ul className="focus-task-list">{pageTasks.map(task => <li key={task.id} id={`task-${task.id}`}>
         <button type="button" className="focus-task-status" aria-label={`${task.status === "done" || task.status === "cancelled" ? "Reopen" : "Complete"} ${task.title}`} disabled={Boolean(busyId)} onClick={() => void changeStatus(task)}>{task.status === "done" || task.status === "cancelled" ? <RotateCcw size={16} /> : <Check size={16} />}</button>
         <div className="focus-task-row-content"><strong className={task.status === "done" ? "focus-task-done" : ""}>{task.title}</strong>
           <span>{task.project_id ? (onOpenProject && projectNames.has(task.project_id)
