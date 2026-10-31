@@ -1295,3 +1295,64 @@ def test_bound_browser_session_invalid_json_stops_and_clears_queue(tmp_path):
                      notify=lambda: pytest.fail("No toast"))
     assert queue.due(NOW) == []
     queue.close()
+
+
+LEASE_GENERATION = "3c413eed-47a2-45c5-922f-57d60610f728"
+
+
+@pytest.mark.parametrize("scenario", ["active", "switch", "expired", "outage", "wrong_generation"])
+def test_browser_workspace_lease_fails_closed_before_native_toast(tmp_path, scenario):
+    """A -> B, lease expiry and server uncertainty must never toast workspace A."""
+    queue = ledger(tmp_path)
+    queue.sync({"old": NOW + 60})
+    calls = []
+    state = {"leases": 0}
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(200, json=[{
+                "id": BROWSER_SESSION, "active": True, "revoked_at": None,
+            }])
+        if request.url.path.endswith(f"/auth/reminder-lease/{BROWSER_SESSION}"):
+            state["leases"] += 1
+            if scenario == "outage":
+                return httpx.Response(503)
+            workspace = "00000000-0000-4000-8000-000000000001" if (
+                scenario == "switch" and state["leases"] == 2
+            ) else WORKSPACE
+            expiry = NOW - 1 if scenario == "expired" else NOW + 45
+            generation = (
+                "00000000-0000-4000-8000-000000000002"
+                if scenario == "wrong_generation" else LEASE_GENERATION
+            )
+            return httpx.Response(200, json={
+                "workspace_id": workspace, "generation_id": generation,
+                "expires_at": datetime.fromtimestamp(expiry, timezone.utc).isoformat(),
+            })
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[task("due", NOW + 60)])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        if scenario == "active":
+            assert run_once(client, queue, now=NOW,
+                            browser_session_id=BROWSER_SESSION,
+                            browser_lease_generation=LEASE_GENERATION,
+                            notify=lambda: calls.append("toast")) == 1
+        else:
+            with pytest.raises((PermissionError, httpx.HTTPStatusError)):
+                run_once(client, queue, now=NOW,
+                         browser_session_id=BROWSER_SESSION,
+                         browser_lease_generation=LEASE_GENERATION,
+                         notify=lambda: calls.append("toast"))
+    assert calls == (["toast"] if scenario == "active" else [])
+    if scenario != "active":
+        assert queue.due(NOW) == []
+    queue.close()
