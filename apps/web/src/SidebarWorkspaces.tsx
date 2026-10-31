@@ -10,7 +10,7 @@ export function workspaceStorageKey(userId: string) {
   return `orin.sidebar-workspaces.${userId}.v1`;
 }
 
-export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; onActiveChange: (workspace: SidebarWorkspace) => boolean | Promise<boolean> }) {
+export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; onActiveChange: (workspace: SidebarWorkspace) => void | boolean | Promise<void | boolean> }) {
   const [items, setItems] = useState<SidebarWorkspace[]>([]);
   const [activeId, setActiveId] = useState(() => localStorage.getItem(`${workspaceStorageKey(userId)}.active`) || "");
   const [creating, setCreating] = useState(false);
@@ -36,7 +36,7 @@ export function SidebarWorkspaces({ userId, onActiveChange }: { userId: string; 
       // Parent must revoke the old browser lease before any visible/API
       // workspace selection changes. Never optimistically switch first.
       const allowed = await onActiveChange(item);
-      if (!allowed) {
+      if (allowed === false) {
         setError("Workspace switch blocked until reminder authorization is revoked.");
         return;
       }
