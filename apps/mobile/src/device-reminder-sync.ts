@@ -29,6 +29,33 @@ function isAwareTimestamp(value: unknown): value is string {
     wall.getUTCMinutes() === minute && wall.getUTCSeconds() === second;
 }
 
+// A malformed server policy must not turn quiet hours into an empty device
+// schedule. Validate every field used for suppression before touching OS alerts.
+// Explicit opt-out is authoritative even if unrelated fields are malformed.
+function assertValidDevicePolicy(value: unknown): asserts value is NotificationPolicy {
+  if (!value || typeof value !== "object" ||
+      typeof (value as NotificationPolicy).enabled !== "boolean") {
+    throw new Error("Invalid notification policy; device schedules were preserved.");
+  }
+  const policy = value as NotificationPolicy;
+  if (!policy.enabled) return;
+  const clock = /^(?:[01]\\d|2[0-3]):[0-5]\\d$/;
+  if (!Array.isArray(policy.categories) ||
+      policy.categories.some((category) => typeof category !== "string") ||
+      typeof policy.quiet_enabled !== "boolean" ||
+      typeof policy.respect_focus !== "boolean" ||
+      typeof policy.timezone !== "string" ||
+      typeof policy.quiet_start !== "string" || !clock.test(policy.quiet_start) ||
+      typeof policy.quiet_end !== "string" || !clock.test(policy.quiet_end)) {
+    throw new Error("Invalid notification policy; device schedules were preserved.");
+  }
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: policy.timezone });
+  } catch {
+    throw new Error("Invalid notification policy timezone; device schedules were preserved.");
+  }
+}
+
 // The owner-scoped API has offset pagination but no date filter or total count.
 // Fetch every page before touching OS schedules so a network failure cannot
 // silently cancel previously scheduled reminders.
@@ -169,6 +196,7 @@ export async function refreshDeviceReminders(
   // endpoint is unavailable. Do not make a full task scan a prerequisite.
   const policy = await request<NotificationPolicy>("/notifications/preferences");
   if (!isCurrent()) return;
+  assertValidDevicePolicy(policy);
   if (!policy.enabled) {
     await syncLocalReminders(owner, workspaceId, [], policy, []);
     return;
@@ -183,11 +211,7 @@ export async function refreshDeviceReminders(
   // before replacing OS schedules; a revoked opt-in clears alerts immediately.
   const livePolicy = await request<NotificationPolicy>("/notifications/preferences");
   if (!isCurrent()) return;
-  if (typeof livePolicy.enabled !== "boolean" ||
-      !Array.isArray(livePolicy.categories) ||
-      livePolicy.categories.some((category) => typeof category !== "string")) {
-    throw new Error("Invalid live notification policy; device schedules were preserved.");
-  }
+  assertValidDevicePolicy(livePolicy);
   if (!livePolicy.enabled) {
     await syncLocalReminders(owner, workspaceId, [], livePolicy, []);
     return;
