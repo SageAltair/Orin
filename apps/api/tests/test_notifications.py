@@ -875,3 +875,18 @@ def test_reminder_lead_validation_matches_calendar_and_routine_api_contracts():
     assert not valid_reminder_lead(-5, "routines")
     assert not valid_reminder_lead(10**13, "calendar")
     assert not valid_reminder_lead(None, "routines")
+
+
+def test_notification_preference_recovery_header_is_exposed_to_web(client, sessions):
+    factory, owner = sessions
+    with factory.begin() as session:
+        policy(session, owner).categories = None
+    response = client.get(
+        "/api/v1/notifications/preferences",
+        headers={"Origin": "http://localhost:5273"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Orin-Preferences-Recovery"] == "required"
+    assert "x-orin-preferences-recovery" in response.headers[
+        "access-control-expose-headers"
+    ].lower()

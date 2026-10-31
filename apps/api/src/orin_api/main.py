@@ -55,6 +55,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Timezone", "X-Orin-Workspace-Id"],
+    expose_headers=["X-Orin-Preferences-Recovery"],
 )
 app.include_router(privacy_router)
 app.include_router(notification_router)

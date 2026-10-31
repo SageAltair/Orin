@@ -16,17 +16,27 @@ export function NotificationPreferencesPanel() {
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
+  const [recoveryRequired, setRecoveryRequired] = useState(false);
   const loadGeneration = useRef(0);
   const refresh = async (): Promise<void> => {
     const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
     try {
-      const p = await request<NotificationPolicy>("/notifications/preferences");
+      let requiresRecovery = false;
+      const p = await request<NotificationPolicy>(
+        "/notifications/preferences",
+        {},
+        true,
+        (response) => {
+          requiresRecovery = response.headers.get("X-Orin-Preferences-Recovery") === "required";
+        },
+      );
       if (generation !== loadGeneration.current) return;
       if (!p || typeof p.enabled !== "boolean")
         throw Error("Invalid preferences");
       setPolicy(p);
+      setRecoveryRequired(requiresRecovery);
       setLoaded(true);
     } catch {
       if (generation === loadGeneration.current)
@@ -62,6 +72,12 @@ export function NotificationPreferencesPanel() {
         </p>
       )}
       {loading && <p role="status">Loading notification preferences…</p>}
+      {recoveryRequired && !loading && (
+        <p role="alert">
+          Some saved notification settings could not be validated. Alerts are
+          disabled for safety. Review your choices and save to repair them.
+        </p>
+      )}
       <form
         onSubmit={async (e) => {
           e.preventDefault();
@@ -73,6 +89,7 @@ export function NotificationPreferencesPanel() {
               { method: "PUT", body: JSON.stringify(policy) },
             );
             setPolicy(saved);
+            setRecoveryRequired(false);
             setNotice("Notification preferences saved.");
             window.dispatchEvent(new Event("orin-notification-preferences"));
           } catch {

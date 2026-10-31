@@ -45,7 +45,7 @@ async function refresh(): Promise<RefreshResult> {
   return refreshPromise;
 }
 
-export async function request<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+export async function request<T>(path: string, options: RequestInit = {}, retry = true, onResponse?: (response: Response) => void): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -55,7 +55,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   catch { throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0); }
   if (response.status === 401 && retry && path !== "/auth/login" && path !== "/auth/refresh") {
     const refreshResult = await refresh();
-    if (refreshResult === "refreshed") return request<T>(path, options, false);
+    if (refreshResult === "refreshed") return request<T>(path, options, false, onResponse);
     if (refreshResult === "rejected") {
       accessToken = null;
       window.dispatchEvent(new Event("orin:session-expired"));
@@ -66,6 +66,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
     try { const data = await response.json() as { detail?: string | { msg?: string; message?: string; conflicts?: { title: string }[] }[] | { message?: string; conflicts?: { title: string }[] } }; if (typeof data.detail === "string") message = data.detail; else if (Array.isArray(data.detail)) message = data.detail.map(e => e.msg ?? "Invalid input").join("; "); else if (data.detail && typeof data.detail === "object") message = [data.detail.message, ...(data.detail.conflicts?.map(item => item.title) ?? [])].filter(Boolean).join(" Conflicts: "); } catch { /* non-JSON error */ }
     throw new ApiError(message, response.status);
   }
+  onResponse?.(response);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
