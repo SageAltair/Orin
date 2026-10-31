@@ -53,12 +53,13 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
 
 export function activateWindowsLease(workspaceId: string): Promise<string> {
   return serialize(async () => {
-    const sessions = await request<AuthSession[]>("/auth/sessions");
+    const sessions = await request<AuthSession[]>("/auth/sessions", { signal: AbortSignal.timeout(8000) });
     const current = sessions.find(s => s.current && s.active);
     if (!current) throw new Error("No active browser session for Windows reminders");
     const generation = crypto.randomUUID();
     await request("/auth/reminder-lease", {
       method: "PUT",
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation, rotate: true }),
     });
     publishStatus(current.id, generation);
@@ -71,6 +72,7 @@ export function renewWindowsLease(workspaceId: string, generation: string): Prom
     if (getWindowsLeaseIdentifiers()?.generation !== generation) return;
     await request("/auth/reminder-lease", {
       method: "PUT",
+      signal: AbortSignal.timeout(8000),
       body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation }),
     });
   });
@@ -79,7 +81,7 @@ export function renewWindowsLease(workspaceId: string, generation: string): Prom
 export function stopWindowsLease(): Promise<void> {
   return serialize(async () => {
     // A failed revocation must not be misrepresented as a successful shutdown.
-    await request<void>("/auth/reminder-lease", { method: "DELETE" });
+    await request<void>("/auth/reminder-lease", { method: "DELETE", signal: AbortSignal.timeout(8000) });
     publishStatus(null, null);
   });
 }
