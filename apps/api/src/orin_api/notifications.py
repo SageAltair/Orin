@@ -113,13 +113,18 @@ def attention_allowed(session, prefs, now):
                 FocusSession.user_id == prefs.user_id, FocusSession.status == "active"
             )
         ).all()
-        if any(
-            utc(row.started_at)
-            <= now
-            < utc(row.started_at) + timedelta(minutes=row.duration_minutes)
-            for row in active
-        ):
-            return False
+        for row in active:
+            # Legacy corrupt focus durations must not crash the shared reminder tick
+            # or accidentally bypass an owner's opted-in focus suppression.
+            if not isinstance(row.duration_minutes, int) or row.duration_minutes <= 0:
+                return False
+            try:
+                started = utc(row.started_at)
+                until = started + timedelta(minutes=row.duration_minutes)
+            except (OverflowError, TypeError, ValueError):
+                return False
+            if started <= now < until:
+                return False
     return True
 
 
