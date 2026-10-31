@@ -708,3 +708,13 @@
   .orin-shell:has(.writing-studio)>.main-column>.topbar{display:flex;height:54px;padding-inline:12px}
   .orin-shell:has(.writing-studio) .main-content{height:calc(100dvh - 54px)}
 }
+
+/* Writing keeps the same left navigation and header as every Orin workspace.
+   The document list remains on the editor's left; the optional inspector is separate. */
+@media (min-width:761px) {
+  .orin-shell:has(.writing-studio) > .main-column > .topbar { display:flex; }
+  .orin-shell:has(.writing-studio) .main-content { height:calc(100dvh - 60px); }
+}
+.orin-shell:has(.writing-studio) > .sidebar { left:0; right:auto; }
+.orin-shell:has(.writing-studio) .writing-studio { direction:ltr; }
+.orin-shell:has(.writing-studio) .writing-workspace { direction:ltr; }
