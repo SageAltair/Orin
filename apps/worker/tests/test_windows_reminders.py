@@ -1104,6 +1104,8 @@ def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, m
         "ORIN_WINDOWS_REMINDERS_TOKEN": "disposable-test-token",
         "ORIN_WINDOWS_REMINDERS_OWNER_ID": OWNER,
         "ORIN_WINDOWS_REMINDERS_WORKSPACE_ID": WORKSPACE,
+        "ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID": "e4ef9f02-05f8-4c40-b0e4-ff4e99ca9093",
+        "ORIN_WINDOWS_REMINDERS_BROWSER_LEASE_GENERATION": "3c413eed-47a2-45c5-922f-57d60610f728",
         "ORIN_WINDOWS_REMINDERS_DB": str(tmp_path / "test-only.sqlite3"),
     }
     monkeypatch.setattr(windows_reminders, "os", SimpleNamespace(
