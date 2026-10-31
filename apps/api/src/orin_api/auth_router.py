@@ -251,7 +251,8 @@ def stop_reminder_lease(
         BrowserReminderLease.session_id == authenticated.auth_session.id,
     ).with_for_update())
     if row is not None:
-        if data is not None and data.generation_id is not None and row.generation_id != data.generation_id:
+        if (data is not None and data.generation_id is not None
+                and row.generation_id != data.generation_id):
             raise HTTPException(status_code=409, detail="Reminder lease generation changed")
         session.delete(row)
         session.commit()

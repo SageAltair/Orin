@@ -84,6 +84,33 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect(leaseAgain.workspace_id).toBe(leaseA.workspace_id);
   expect(leaseAgain.generation_id).not.toBe(generationA);
 
+  // Real PostgreSQL: a delayed close from tab A cannot revoke a newer B
+  // generation belonging to the same browser session. Use a disposable
+  // secondary session so this check cannot interfere with the live UI lease.
+  const sessionsResponse = await request.get(`${isolatedApi}/api/v1/auth/sessions`, { headers });
+  expect(sessionsResponse.status()).toBe(200);
+  const secondarySessionId = (await sessionsResponse.json() as { id: string; current: boolean }[])
+    .find(session => session.current)?.id;
+  expect(secondarySessionId).toBeTruthy();
+  const secondaryLeaseUrl = `${isolatedApi}/api/v1/auth/reminder-lease`;
+  const oldGeneration = crypto.randomUUID();
+  const newGeneration = crypto.randomUUID();
+  expect((await request.put(secondaryLeaseUrl, { headers, data: {
+    workspace_id: leaseA.workspace_id, generation_id: oldGeneration, rotate: true,
+  } })).status()).toBe(200);
+  expect((await request.put(secondaryLeaseUrl, { headers, data: {
+    workspace_id: leaseB.workspace_id, generation_id: newGeneration, rotate: true,
+  } })).status()).toBe(200);
+  expect((await request.delete(secondaryLeaseUrl, {
+    headers, data: { generation_id: oldGeneration },
+  })).status()).toBe(409);
+  const afterStaleClose = await request.get(`${secondaryLeaseUrl}/${secondarySessionId}`, { headers });
+  expect(afterStaleClose.status()).toBe(200);
+  expect((await afterStaleClose.json() as { generation_id: string }).generation_id).toBe(newGeneration);
+  expect((await request.delete(secondaryLeaseUrl, {
+    headers, data: { generation_id: newGeneration },
+  })).status()).toBe(204);
+
   const projectResponse = await request.post(`${isolatedApi}/api/v1/projects`, {
     headers,
     data: { name: "Disposable browser project" },
