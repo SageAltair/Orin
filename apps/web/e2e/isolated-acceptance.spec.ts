@@ -355,3 +355,81 @@ test("isolated PostgreSQL keeps task and project inventories within owner and wo
     await secondPage.close();
   }
 });
+
+// Exercise the actual browser timezone rather than only UTC or mocked unit cases.
+test.describe("Dar es Salaam local task scheduling", () => {
+  test.use({ timezoneId: "Africa/Dar_es_Salaam" });
+
+  test("isolated PostgreSQL preserves Dar es Salaam local task time through edit", async ({
+    page,
+    request,
+  }) => {
+    test.skip(!enabled, "Run only with the disposable orin-stabilization-acceptance Docker stack");
+    test.setTimeout(120_000);
+
+    const ready = await request.get(`${isolatedApi}/health/ready`);
+    expect(ready.status()).toBe(200);
+    expect(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone))
+      .toBe("Africa/Dar_es_Salaam");
+
+    const email = `isolated-dar-time-${crypto.randomUUID()}@example.com`;
+    const password = `Isolated-Dar-time-${crypto.randomUUID()}!`;
+    await page.goto(isolatedWeb);
+    await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
+    await page.getByLabel("Your name").fill("Disposable Dar time acceptance");
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password", { exact: true }).fill(password);
+    await page.getByRole("button", { name: "Create account" }).click();
+    await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+
+    const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
+      data: { email, password },
+    });
+    expect(login.status()).toBe(200);
+    const { access_token: token } = (await login.json()) as { access_token: string };
+    const headers = { Authorization: `Bearer ${token}` };
+
+    const openTasks = async () => {
+      await page.getByRole("navigation", { name: "Workspace" })
+        .getByRole("button", { name: "Tasks", exact: true }).click();
+      await expect(page.locator(".focus-task-collection")).toBeVisible();
+    };
+    await openTasks();
+    let tasks = page.locator(".focus-task-collection");
+    await tasks.getByRole("button", { name: "New task" }).click();
+    await tasks.getByLabel("Task name").fill("Disposable Dar timezone task");
+    await tasks.getByLabel("Due date and time (local)").fill("2099-11-02T09:45");
+    await tasks.getByRole("button", { name: "Save task" }).click();
+    await expect(tasks.locator(".focus-task-list")
+      .getByText("Disposable Dar timezone task")).toBeVisible();
+
+    const persisted = await request.get(`${isolatedApi}/api/v1/tasks`, { headers });
+    expect(persisted.status()).toBe(200);
+    const records = (await persisted.json()) as Array<{ title: string; due_at: string | null }>;
+    const saved = records.find(task => task.title === "Disposable Dar timezone task");
+    expect(saved).toBeDefined();
+    // 09:45 in Tanzania (UTC+03:00) is 06:45 UTC.
+    expect(new Date(saved?.due_at ?? "").toISOString()).toBe("2099-11-02T06:45:00.000Z");
+
+    await page.reload();
+    await openTasks();
+    tasks = page.locator(".focus-task-collection");
+    await tasks.locator(".focus-task-list")
+      .getByRole("button", { name: "Edit Disposable Dar timezone task" }).click();
+    await expect(tasks.getByLabel("Due date and time (local)")).toHaveValue("2099-11-02T09:45");
+    await tasks.getByLabel("Task name").fill("Disposable Dar timezone task revised");
+    await tasks.getByRole("button", { name: "Save task" }).click();
+    // Wait for the awaited PATCH to commit before reading PostgreSQL via the API.
+    await expect(tasks.getByText("Task updated.")).toBeVisible();
+    await expect(tasks.locator(".focus-task-list")
+      .getByText("Disposable Dar timezone task revised")).toBeVisible();
+
+    const afterEdit = await request.get(`${isolatedApi}/api/v1/tasks`, { headers });
+    expect(afterEdit.status()).toBe(200);
+    const updated = (await afterEdit.json()) as Array<{ title: string; due_at: string | null }>;
+    const revised = updated.find(task => task.title === "Disposable Dar timezone task revised");
+    expect(revised).toBeDefined();
+    // Editing unrelated fields must not shift the original instant.
+    expect(new Date(revised?.due_at ?? "").toISOString()).toBe("2099-11-02T06:45:00.000Z");
+  });
+});
