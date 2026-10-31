@@ -1,3 +1,4 @@
+import { CalendarClock, Check, Pencil, Play } from "lucide-react";
 import { useEffect, useState } from "react";
 import { request, type Task } from "../../api";
 import { fetchAllPages } from "./taskPagination";
@@ -103,13 +104,13 @@ export function PriorityOverview({ tasks, activeWorkspaceId, mode, now, onEditTa
             <small>{item.reasons[0] ?? (task.priority === "urgent" ? "Marked urgent" : task.priority === "high" ? "Marked high priority" : "For planning")}</small>
             {item.workspaceId === currentId && <>
               {onEditTask && <button type="button" disabled={actionsBusy}
-                aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)}>Edit task</button>}
+                aria-label={`Edit ${task.title}`} onClick={() => onEditTask(task)} title="Edit task"><Pencil size={16}/></button>}
               {onScheduleTask && <button type="button" disabled={actionsBusy}
-                aria-label={`Schedule ${task.title}`} onClick={() => onScheduleTask(task.id)}>Schedule</button>}
+                aria-label={`Schedule ${task.title}`} onClick={() => onScheduleTask(task.id)} title="Schedule task"><CalendarClock size={16}/></button>}
               {onStartTask && task.status === "todo" && <button type="button" disabled={actionsBusy}
-                aria-label={`Start ${task.title}`} onClick={() => onStartTask(task)}>Start</button>}
+                aria-label={`Start ${task.title}`} onClick={() => onStartTask(task)} title="Start task"><Play size={16}/></button>}
               {onCompleteTask && <button type="button" disabled={actionsBusy}
-                aria-label={`Mark ${task.title} done`} onClick={() => onCompleteTask(task)}>Mark done</button>}
+                aria-label={`Mark ${task.title} done`} onClick={() => onCompleteTask(task)} title="Mark done"><Check size={16}/></button>}
             </>}
           </div>
         </li>;
