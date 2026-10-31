@@ -603,3 +603,33 @@ def test_quiet_hours_reject_corrupt_legacy_clocks(
         prefs.quiet_end = end
         now = datetime(2026, 10, 13, clock_hour, 0, tzinfo=timezone.utc)
         assert attention_allowed(session, prefs, now) is expected
+
+
+def test_existing_reminder_with_null_categories_stays_unread_without_attention(sessions):
+    """Persisted reminders also fail closed, not only newly emitted reminders."""
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    task_id = task(factory, owner, now)
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.categories = None
+        prefs.persistent = True
+        session.add(
+            Notification(
+                user_id=owner,
+                category="tasks",
+                source_id=task_id,
+                delivery_key=f"task:{task_id}:{now.isoformat()}",
+                title="Existing reminder",
+                message="Must not bypass invalid category preferences",
+                due_at=now,
+            )
+        )
+
+    tick(factory, now)
+    with factory() as session:
+        row = session.scalar(select(Notification).where(Notification.user_id == owner))
+        assert row is not None
+        assert row.read_at is None
+        assert row.attention_at is None
+        assert row.repeats == 0
