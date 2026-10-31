@@ -262,10 +262,15 @@ jobs:
           path: orin-sbom.spdx.json
 
   isolated-acceptance:
-    # Exercises actual signup, PostgreSQL persistence, Writing reload, task/project
-    # creation and the background reminder loop. Never point at a developer DB.
+    # Independent disposable databases prevent signup rate-limit collisions.
+    # The existing acceptance job name remains stable for required CI checks.
+    name: ${{ matrix.suite == 'isolated-acceptance.spec.ts' && 'isolated-acceptance' || 'isolated-worker-acceptance' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [isolated-acceptance.spec.ts, worker-stack.spec.ts]
     services:
       postgres:
         image: postgres:16-alpine
@@ -329,12 +334,12 @@ jobs:
           exit 1
       - name: Cross-feature real-browser acceptance on disposable data
         working-directory: apps/web
-        run: npm run test:e2e -- e2e/isolated-acceptance.spec.ts e2e/worker-stack.spec.ts --project=chromium --workers=1
+        run: npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
       - name: Preserve isolated acceptance diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: isolated-acceptance-diagnostics
+          name: isolated-acceptance-diagnostics-${{ matrix.suite }}
           path: |
             /tmp/orin-isolated-api.log
             /tmp/orin-isolated-web.log
