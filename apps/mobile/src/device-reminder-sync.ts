@@ -39,7 +39,7 @@ function assertValidDevicePolicy(value: unknown): asserts value is NotificationP
   }
   const policy = value as NotificationPolicy;
   if (!policy.enabled) return;
-  const clock = /^(?:[01]\\d|2[0-3]):[0-5]\\d$/;
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
   if (!Array.isArray(policy.categories) ||
       policy.categories.some((category) => typeof category !== "string") ||
       typeof policy.quiet_enabled !== "boolean" ||
