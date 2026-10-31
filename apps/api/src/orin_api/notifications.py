@@ -85,6 +85,16 @@ def category_enabled(prefs, category: str) -> bool:
     )
 
 
+def valid_repeat_policy(prefs) -> bool:
+    """Legacy corrupt repeat settings never authorize repeated interruptions."""
+    return (
+        type(prefs.repeat_minutes) is int
+        and prefs.repeat_minutes in (5, 15, 30, 60)
+        and type(prefs.max_repeats) is int
+        and 1 <= prefs.max_repeats <= 5
+    )
+
+
 def attention_allowed(session, prefs, now):
     if not prefs.enabled:
         return False
@@ -495,9 +505,10 @@ def notification_tick(session, now):
         if row.attention_at is None:
             row.attention_at = now
             continue
+        if not prefs.persistent or not valid_repeat_policy(prefs):
+            continue
         if (
-            not prefs.persistent
-            or row.repeats >= prefs.max_repeats
+            row.repeats >= prefs.max_repeats
             or utc(row.attention_at) + timedelta(minutes=prefs.repeat_minutes) > now
         ):
             continue
@@ -506,6 +517,7 @@ def notification_tick(session, now):
         if (
             not category_enabled(prefs, row.category)
             or not prefs.persistent
+            or not valid_repeat_policy(prefs)
             or row.repeats >= prefs.max_repeats
         ):
             continue
@@ -516,7 +528,9 @@ def notification_tick(session, now):
         if prefs.repeat_day != local_day:
             prefs.repeat_day = local_day
             prefs.repeats_today = 0
-        if prefs.repeats_today >= 8:
+        # A corrupt negative counter must not bypass the daily repeat cap.
+        # An invalid count from a prior day is safely reset above.
+        if type(prefs.repeats_today) is not int or not 0 <= prefs.repeats_today < 8:
             continue
         row.repeats += 1
         row.revision += 1
