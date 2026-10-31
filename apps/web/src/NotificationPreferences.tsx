@@ -7,7 +7,7 @@ import {
   playReminderSound,
   type NotificationPolicy,
 } from "./notificationPolicy";
-export function NotificationPreferencesPanel() {
+export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) {
   const [policy, setPolicy] = useState<NotificationPolicy>({
     ...defaultNotificationPolicy,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -18,7 +18,8 @@ export function NotificationPreferencesPanel() {
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [recoveryRequired, setRecoveryRequired] = useState(false);
-  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(isWindowsLeaseOptedIn);
+  const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(() => isWindowsLeaseOptedIn(ownerId));
+  useEffect(() => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(ownerId)), [ownerId]);
   const [windowsLeaseIds, setWindowsLeaseIds] = useState(getWindowsLeaseIdentifiers);
   useEffect(() => {
     const update = () => setWindowsLeaseIds(getWindowsLeaseIdentifiers());
@@ -263,9 +264,10 @@ export function NotificationPreferencesPanel() {
             <input
               type="checkbox"
               checked={windowsLeaseEnabled}
+              disabled={!ownerId}
               onChange={async (event) => {
                 if (event.target.checked) {
-                  setWindowsLeaseOptIn(true);
+                  setWindowsLeaseOptIn(true, ownerId);
                   setWindowsLeaseEnabled(true);
                   setNotice("Windows companion browser lease enabled for this tab.");
                 } else {
