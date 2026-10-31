@@ -264,7 +264,8 @@ describe("future task device reminder synchronization", () => {
     await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
       .rejects.toThrow("Session rejected");
     expect(revokeLocalReminderOwner).toHaveBeenCalledWith("alice", wasRefreshCredentialRejected);
-    expect(onRevoked).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(onRevoked).toHaveBeenCalledWith(true);
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
@@ -275,7 +276,8 @@ describe("future task device reminder synchronization", () => {
     vi.mocked(revokeLocalReminderOwner).mockRejectedValueOnce(new Error("OS cancellation failed"));
     await expect(refreshDeviceReminders("alice", "workspace-a", () => true, onRevoked))
       .rejects.toThrow("OS cancellation failed");
-    expect(onRevoked).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onRevoked).toHaveBeenCalledTimes(1);
+    expect(onRevoked).toHaveBeenCalledWith(false);
   });
 
   it("does not sign out a newly authenticated same-owner session", async () => {
