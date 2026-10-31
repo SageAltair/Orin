@@ -145,6 +145,7 @@ export function TaskCollection({ onScheduleTask, onOpenProject, onTaskSaved, ini
         method: isNew ? "POST" : "PATCH", body: JSON.stringify(payload),
       });
       setTasks(current => isNew ? [saved, ...current] : current.map(item => item.id === saved.id ? saved : item));
+      if (isNew) { setView("all"); setSearch(""); setPage(1); }
       onTaskSaved?.(saved);
       setTaskRevision(value => value + 1);
       setEditingId(null); setNotice(isNew ? "Task created." : "Task updated.");
