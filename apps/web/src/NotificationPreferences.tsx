@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { request } from "./api";
+import { ApiError, request } from "./api";
 import {
   defaultNotificationPolicy,
   notificationCategories,
@@ -15,12 +15,14 @@ export function NotificationPreferencesPanel() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const [repairRequired, setRepairRequired] = useState(false);
   const [notice, setNotice] = useState("");
   const loadGeneration = useRef(0);
   const refresh = async (): Promise<void> => {
     const generation = ++loadGeneration.current;
     setLoading(true);
     setError("");
+    setRepairRequired(false);
     try {
       const p = await request<NotificationPolicy>("/notifications/preferences");
       if (generation !== loadGeneration.current) return;
@@ -28,9 +30,17 @@ export function NotificationPreferencesPanel() {
         throw Error("Invalid preferences");
       setPolicy(p);
       setLoaded(true);
-    } catch {
-      if (generation === loadGeneration.current)
-        setError("Notification preferences could not be loaded.");
+      setRepairRequired(false);
+    } catch (value) {
+      if (generation === loadGeneration.current) {
+        if (value instanceof ApiError && value.status === 409) {
+          setLoaded(false);
+          setRepairRequired(true);
+          setError("Saved notification settings are invalid. Restore safe defaults to edit them.");
+        } else {
+          setError("Notification preferences could not be loaded.");
+        }
+      }
     } finally {
       if (generation === loadGeneration.current) setLoading(false);
     }
@@ -62,6 +72,43 @@ export function NotificationPreferencesPanel() {
         </p>
       )}
       {loading && <p role="status">Loading notification preferences…</p>}
+      {repairRequired && !loading && (
+        <div role="group" aria-label="Repair notification preferences">
+          <p>Restoring defaults replaces the invalid saved settings and keeps all notifications off until you choose to enable them again.</p>
+          <button
+            type="button"
+            className="text-action"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError("");
+              try {
+                const safePolicy: NotificationPolicy = {
+                  ...defaultNotificationPolicy,
+                  enabled: false,
+                  categories: [],
+                  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+                };
+                const saved = await request<NotificationPolicy>(
+                  "/notifications/preferences",
+                  { method: "PUT", body: JSON.stringify(safePolicy) },
+                );
+                setPolicy(saved);
+                setLoaded(true);
+                setRepairRequired(false);
+                setNotice("Safe defaults restored. Notifications remain off until you enable them.");
+                window.dispatchEvent(new Event("orin-notification-preferences"));
+              } catch {
+                setError("Could not restore notification settings. No changes were confirmed.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            Restore safe notification defaults
+          </button>
+        </div>
+      )}
       <form
         onSubmit={async (e) => {
           e.preventDefault();
