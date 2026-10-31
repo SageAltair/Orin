@@ -108,6 +108,81 @@ def task(factory, owner, now, title="One next action"):
         return row.id
 
 
+def test_invalid_legacy_preference_timezone_suppresses_only_affected_owner(sessions):
+    from orin_api.models import Project
+
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.timezone = "Invalid/Legacy"
+        session.add(Project(owner_id=owner, name="Legacy project", target_date=now.date()))
+        healthy = User(
+            email="healthy-reminders@example.test",
+            password_hash="test-hash",
+            display_name="Healthy",
+        )
+        session.add(healthy)
+        session.flush()
+        healthy_owner = healthy.id
+    task(factory, owner, now, "Owner with invalid preferences")
+    task(factory, healthy_owner, now, "Healthy owner")
+    tick(factory, now)
+    with factory() as session:
+        bad = session.scalar(select(Notification).where(Notification.user_id == owner))
+        good = session.scalar(select(Notification).where(Notification.user_id == healthy_owner))
+        assert bad is not None and bad.read_at is None and bad.attention_at is None
+        assert good is not None and good.read_at is None and good.attention_at is not None
+
+
+def test_corrupt_legacy_calendar_and_routine_metadata_cannot_abort_maintenance(sessions, monkeypatch):
+    from orin_api import background
+    from orin_api.models import CalendarEvent, Routine
+
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    with factory.begin() as session:
+        event = CalendarEvent(
+            user_id=owner, title="Legacy event", is_all_day=True,
+            start_date=now.date(), end_date=now.date(),
+            timezone="Invalid/Legacy", reminder_minutes=15,
+        )
+        routine = Routine(
+            user_id=owner, title="Legacy routine", start_date=now.date(),
+            timezone="Invalid/Legacy", reminder_minutes=5,
+        )
+        invalid_clock = Routine(
+            user_id=owner, title="Legacy time", start_date=now.date(),
+            timezone="UTC", time_of_day="not-a-time", reminder_minutes=5,
+        )
+        session.add_all([event, routine, invalid_clock])
+        session.flush()
+        session.add_all([
+            Notification(
+                user_id=owner, category="calendar", source_id=event.id,
+                delivery_key="calendar:legacy-invalid-zone",
+                title="Legacy event", message="Invalid timezone", due_at=now,
+            ),
+            Notification(
+                user_id=owner, category="routines", source_id=routine.id,
+                delivery_key="routine:legacy-invalid-zone",
+                title="Legacy routine", message="Invalid timezone", due_at=now,
+            ),
+        ])
+    task(factory, owner, now, "Healthy task survives legacy corruption")
+    monkeypatch.setattr(background, "SessionLocal", factory)
+    monkeypatch.setattr(background, "run_due_automations", lambda *_: None)
+    background.maintenance_tick(Settings(_env_file=None), now=now)
+    with factory() as session:
+        rows = {row.delivery_key: row for row in session.scalars(select(Notification))}
+        assert rows["calendar:legacy-invalid-zone"].read_at is not None
+        assert rows["routine:legacy-invalid-zone"].read_at is not None
+        healthy = [row for row in rows.values() if row.delivery_key.startswith("task:")]
+        assert len(healthy) == 1
+        assert healthy[0].read_at is None
+        assert healthy[0].attention_at is not None
+
+
 def test_due_task_is_deduplicated_and_completion_stops_followup(sessions):
     factory, owner = sessions
     now = datetime.now(timezone.utc)
