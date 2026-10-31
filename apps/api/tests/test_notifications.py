@@ -153,7 +153,7 @@ def test_corrupt_legacy_calendar_and_routine_metadata_cannot_abort_maintenance(s
         )
         invalid_clock = Routine(
             user_id=owner, title="Legacy time", start_date=now.date(),
-            timezone="UTC", time_of_day="not-a-time", reminder_minutes=5,
+            timezone="UTC", time_of_day="99:99", reminder_minutes=5,
         )
         session.add_all([event, routine, invalid_clock])
         session.flush()
