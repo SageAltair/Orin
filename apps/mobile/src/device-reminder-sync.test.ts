@@ -323,6 +323,21 @@ describe("future task device reminder synchronization", () => {
     expect(syncLocalReminders).not.toHaveBeenCalled();
   });
 
+  it("honors empty-category opt-out even if quiet-hours fields are malformed", async () => {
+    const noCategories = {
+      ...policy, categories: [], quiet_enabled: "invalid", timezone: "Invalid/Timezone",
+    };
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") return noCategories as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("No task fetch expected after category opt-out");
+    });
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", "workspace-a", inbox, noCategories, [],
+    );
+  });
+
   it("still clears alerts on explicit server opt-out with malformed unrelated fields", async () => {
     const disabled = { enabled: false, quiet_enabled: "invalid", timezone: "Invalid/Timezone" };
     vi.mocked(request).mockResolvedValueOnce(disabled as never);
