@@ -72,6 +72,7 @@ import {
   request,
   requestBlob,
   restoreSession,
+  setActiveWorkspace,
 } from "./api";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -823,14 +824,16 @@ export default function App() {
         await stopWindowsLease();
       } catch {
         setLoadError("Cannot switch workspaces until the Windows reminder lease is revoked. Retry when Orin is reachable.");
-        return;
+        return false;
       }
     }
+    setActiveWorkspace(workspace.id);
     setActiveWorkspaceName(workspace.name);
     setActiveWorkspaceId(current => {
       if (current && current !== workspace.id) setPage("home");
       return workspace.id;
     });
+    return true;
   }, [windowsLeaseEnabled]);
   useEffect(() => {
     if (!user || !activeWorkspaceId || !windowsLeaseEnabled) return;
