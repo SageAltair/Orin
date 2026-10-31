@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from orin_api.auth import get_current_user
@@ -67,7 +67,14 @@ def preferences(
 ):
     row = policy(session, user.id)
     session.commit()
-    return row
+    try:
+        return Preferences.model_validate(row)
+    except ValidationError as exc:
+        # Legacy malformed settings should be recoverable, not a server 500.
+        # Never silently turn notifications on or rewrite preferences on GET.
+        raise HTTPException(
+            409, "Stored notification preferences are invalid. Restore safe defaults to edit them."
+        ) from exc
 
 
 @router.put("/preferences", response_model=Preferences)
