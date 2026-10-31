@@ -599,7 +599,9 @@ def main() -> None:
                     except PermissionError:
                         logger.error("Reminder account verification failed; stopping companion")
                         break
-                    except (httpx.HTTPError, ValueError, sqlite3.Error, subprocess.SubprocessError, RuntimeError) as error:
+                    except (httpx.HTTPError, ValueError, sqlite3.Error,
+                            subprocess.SubprocessError, RuntimeError, OSError) as error:
+                        # Windows process launch can raise OSError before a toast is submitted.
                         # Never log request headers, tokens, task titles, or exception strings.
                         logger.warning("Reminder sync or toast failed (%s); no delivery is confirmed", type(error).__name__)
                     stopping.wait(POLL_SECONDS)

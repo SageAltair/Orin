@@ -1091,3 +1091,60 @@ def test_late_task_revalidation_allows_unchanged_due_task(tmp_path):
     assert alerts == ["toast"]
     assert queue.due(NOW) == []
     queue.close()
+
+
+def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, monkeypatch):
+    """A transient Windows subprocess OSError must not kill the reminder poller."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    config = {
+        "ORIN_WINDOWS_REMINDERS_ENABLED": "1",
+        "ORIN_WINDOWS_REMINDERS_API_URL": "http://127.0.0.1:8100",
+        "ORIN_WINDOWS_REMINDERS_TOKEN": "disposable-test-token",
+        "ORIN_WINDOWS_REMINDERS_OWNER_ID": OWNER,
+        "ORIN_WINDOWS_REMINDERS_WORKSPACE_ID": WORKSPACE,
+        "ORIN_WINDOWS_REMINDERS_DB": str(tmp_path / "test-only.sqlite3"),
+    }
+    monkeypatch.setattr(windows_reminders, "os", SimpleNamespace(
+        name="nt", getenv=lambda name, default=None: config.get(name, default),
+    ))
+    monkeypatch.setattr(windows_reminders, "single_instance", lambda path: nullcontext())
+
+    class FakeLedger:
+        def close(self):
+            pass
+
+    monkeypatch.setattr(windows_reminders, "ReminderLedger", lambda *args: FakeLedger())
+    monkeypatch.setattr(windows_reminders.signal, "signal", lambda *args: None)
+
+    class FakeStop:
+        count = 0
+
+        def is_set(self):
+            return self.count >= 2
+
+        def wait(self, seconds):
+            self.count += 1
+
+    monkeypatch.setattr(windows_reminders.threading, "Event", FakeStop)
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    monkeypatch.setattr(windows_reminders.httpx, "Client", lambda **kwargs: FakeClient())
+    calls = []
+
+    def poll(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("Windows toast transport temporarily unavailable")
+        return 0
+
+    monkeypatch.setattr(windows_reminders, "run_once", poll)
+    windows_reminders.main()
+    assert len(calls) == 2
