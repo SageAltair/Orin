@@ -1426,6 +1426,12 @@ export default function App() {
       ? current.map(task => task.id === updated.id ? updated : task)
       : [updated, ...current]);
   };
+  const refreshTaskInventory = async () => {
+    // A delayed refresh from a previous workspace must never leak its tasks.
+    if (activeWorkspaceRef.current !== activeWorkspaceId) return;
+    const latest = await loadAppTaskInventory();
+    if (activeWorkspaceRef.current === activeWorkspaceId) setTasks(latest);
+  };
   const activeProjects = projects
     .filter((project) => project.status === "active")
     .slice(0, 4);
@@ -1717,6 +1723,7 @@ export default function App() {
                     onScheduleTask={scheduleTask}
                     onOpenProject={openProject}
                     onTaskSaved={syncSavedTask}
+                    onTaskInventoryChanged={refreshTaskInventory}
                     activeWorkspaceId={activeWorkspaceId}
                     priorityGuidanceMode={preferences.priorityGuidanceMode}
                   /></div>
