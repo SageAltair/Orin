@@ -538,3 +538,98 @@ def test_saved_reminder_becomes_ready_immediately_when_quiet_hours_end(
         client.put("/api/v1/notifications/preferences", json=prefs).status_code == 200
     )
     assert client.get("/api/v1/notifications").json()[0]["attention_ready"]
+
+
+@pytest.mark.parametrize("corruption", ["invalid_quiet_clock", "invalid_categories", "null_categories"])
+def test_corrupt_legacy_preferences_do_not_starve_other_owners(sessions, corruption):
+    """One owner's malformed settings must not stop another owner's task reminders."""
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        if corruption == "invalid_quiet_clock":
+            prefs.quiet_enabled = True
+            prefs.quiet_start = "99:99"
+            prefs.quiet_end = "07:00"
+        elif corruption == "invalid_categories":
+            prefs.categories = {"tasks": True}  # Legacy malformed JSON object, not a list.
+        else:
+            prefs.categories = None  # Legacy JSON null must not crash the shared tick.
+        healthy = User(
+            email=f"healthy-{corruption}@example.test",
+            password_hash="test-hash",
+            display_name="Healthy",
+        )
+        session.add(healthy)
+        session.flush()
+        healthy_owner = healthy.id
+
+    task(factory, owner, now, "Owner with corrupt preferences")
+    task(factory, healthy_owner, now, "Healthy owner's due task")
+    tick(factory, now)
+
+    with factory() as session:
+        affected = session.scalars(
+            select(Notification).where(Notification.user_id == owner)
+        ).all()
+        healthy = session.scalars(
+            select(Notification).where(Notification.user_id == healthy_owner)
+        ).all()
+        assert len(healthy) == 1 and healthy[0].attention_at is not None
+        if corruption == "invalid_quiet_clock":
+            assert len(affected) == 1 and affected[0].attention_at is None
+        else:
+            assert affected == []
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "clock_hour", "expected"),
+    [
+        ("22:00", "07:00", 23, False),
+        ("22:00", "07:00", 12, True),
+        ("99:99", "07:00", 12, False),
+        ("22:00", "24:00", 12, False),
+        ("22:00", "xx:xx", 12, False),
+    ],
+)
+def test_quiet_hours_reject_corrupt_legacy_clocks(
+    sessions, start, end, clock_hour, expected
+):
+    factory, owner = sessions
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.quiet_enabled = True
+        prefs.quiet_start = start
+        prefs.quiet_end = end
+        now = datetime(2026, 10, 13, clock_hour, 0, tzinfo=timezone.utc)
+        assert attention_allowed(session, prefs, now) is expected
+
+
+def test_existing_reminder_with_null_categories_stays_unread_without_attention(sessions):
+    """Persisted reminders also fail closed, not only newly emitted reminders."""
+    factory, owner = sessions
+    now = datetime(2026, 10, 13, 12, 0, tzinfo=timezone.utc)
+    task_id = task(factory, owner, now)
+    with factory.begin() as session:
+        prefs = policy(session, owner)
+        prefs.categories = None
+        prefs.persistent = True
+        session.add(
+            Notification(
+                user_id=owner,
+                category="tasks",
+                source_id=task_id,
+                delivery_key=f"task:{task_id}:{now.isoformat()}",
+                title="Existing reminder",
+                message="Must not bypass invalid category preferences",
+                due_at=now,
+            )
+        )
+
+    tick(factory, now)
+    with factory() as session:
+        row = session.scalar(select(Notification).where(Notification.user_id == owner))
+        assert row is not None
+        assert row.read_at is None
+        assert row.attention_at is None
+        assert row.repeats == 0
