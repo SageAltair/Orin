@@ -229,3 +229,34 @@ describe("web logout and account isolation", () => {
     expect(headers.get("X-Orin-Workspace-Id")).toBeNull();
   });
 });
+
+
+describe("successful response metadata", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("exposes the recovery header without changing the parsed API result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ enabled: false }), {
+        status: 200,
+        headers: { "X-Orin-Preferences-Recovery": "required" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const observe = vi.fn();
+    const result = await request<{ enabled: boolean }>(
+      "/notifications/preferences", {}, true, observe,
+    );
+    expect(result).toEqual({ enabled: false });
+    expect(observe).toHaveBeenCalledOnce();
+    expect(observe.mock.calls[0][0].headers.get("X-Orin-Preferences-Recovery")).toBe("required");
+  });
+
+  it("never treats a failed response as successful recovery metadata", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Unavailable" }), { status: 503 }),
+    ));
+    const observe = vi.fn();
+    await expect(request("/notifications/preferences", {}, true, observe)).rejects.toMatchObject({ status: 503 });
+    expect(observe).not.toHaveBeenCalled();
+  });
+});
