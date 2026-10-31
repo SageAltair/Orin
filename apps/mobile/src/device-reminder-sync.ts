@@ -202,7 +202,9 @@ export async function refreshDeviceReminders(
   const policy = await request<NotificationPolicy>("/notifications/preferences");
   if (!isCurrent()) return;
   assertValidDevicePolicy(policy);
-  if (!policy.enabled) {
+  if (!policy.enabled || policy.categories.length === 0) {
+    // No enabled categories means no alert can be delivered. Cancel without
+    // depending on the inbox or task endpoints being online.
     await syncLocalReminders(owner, workspaceId, [], policy, []);
     return;
   }
@@ -217,7 +219,7 @@ export async function refreshDeviceReminders(
   const livePolicy = await request<NotificationPolicy>("/notifications/preferences");
   if (!isCurrent()) return;
   assertValidDevicePolicy(livePolicy);
-  if (!livePolicy.enabled) {
+  if (!livePolicy.enabled || livePolicy.categories.length === 0) {
     await syncLocalReminders(owner, workspaceId, [], livePolicy, []);
     return;
   }
