@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Command, Plus, X } from "lucide-react";
-import { request } from "../../api";
+import { request, type Task } from "../../api";
 import { Capture } from "./Capture";
 import { Close } from "./Close";
 import { Later } from "./Later";
@@ -23,7 +23,7 @@ function readStored<T>(key: string, fallback: T): T {
   catch { return fallback; }
 }
 
-export function FocusExperience({ name, onSignOut, embedded = false, onScheduleTask, onOpenProject, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { name: string; onSignOut: () => void; embedded?: boolean; onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
+export function FocusExperience({ name, onSignOut, embedded = false, onScheduleTask, onOpenProject, onTaskSaved, activeWorkspaceId = "", priorityGuidanceMode = "balanced" }: { name: string; onSignOut: () => void; embedded?: boolean; onScheduleTask?: (taskId: string) => void; onOpenProject?: (projectId: string) => void; onTaskSaved?: (task: Task) => void; activeWorkspaceId?: string; priorityGuidanceMode?: PriorityGuidanceMode }) {
   const focus = useFocusWorkspace();
   // The main application Tasks route must open All Tasks, not the Focus Now screen.
   const [surface, setSurface] = useState<Surface>(embedded ? "tasks" : "now");
@@ -122,7 +122,7 @@ export function FocusExperience({ name, onSignOut, embedded = false, onScheduleT
       {surface === "capture" && <><Capture onSave={capture} onSuggest={suggestCapture} busy={focus.busy} onDone={() => { window.setTimeout(() => navClick("now"), 500); }} />{captureMessage && <p className="focus-quiet-message" role="status">{captureMessage}</p>}</>}
       {surface === "close" && <>{closeMessage ? <section className="focus-card"><span className="focus-eyebrow">CLOSED</span><h1>That was enough for today.</h1><p>You can begin again whenever you return.</p><button className="focus-primary" onClick={() => navClick("now")}>Back to Now</button></section> : <Close value={focus.close} later={focus.later} busy={focus.busy} onSave={async input => { if (await focus.saveClose(input)) setCloseMessage("saved"); }} onSkip={() => navClick("now")} />}</>}
       {surface === "later" && <Later tasks={focus.later} onBack={() => navClick("today")} onChoose={addLaterToToday} />}
-      {surface === "tasks" && <TaskCollection onScheduleTask={onScheduleTask} onOpenProject={onOpenProject} activeWorkspaceId={activeWorkspaceId} priorityGuidanceMode={priorityGuidanceMode} />}
+      {surface === "tasks" && <TaskCollection onScheduleTask={onScheduleTask} onOpenProject={onOpenProject} onTaskSaved={onTaskSaved} activeWorkspaceId={activeWorkspaceId} priorityGuidanceMode={priorityGuidanceMode} />}
       {surface === "settings" && <section className="focus-card focus-settings-page"><button className="focus-text-button" onClick={() => navClick("today")}>Back to Today</button><span className="focus-eyebrow">PREFERENCES</span><h1>Make it comfortable.</h1><label>Theme<select value={theme} onChange={event => setThemeValue(event.target.value as Theme)}><option value="auto">Auto</option><option value="light">Light</option><option value="dark">Dark</option></select></label><label className="focus-toggle"><input type="checkbox" checked={reducedMotion} onChange={event => setMotionValue(event.target.checked)} /> Reduce motion</label><label className="focus-toggle"><input type="checkbox" checked={hideTimerNumbers} onChange={event => setTimerNumbersValue(event.target.checked)} /> Hide timer numbers</label><label className="focus-toggle"><input type="checkbox" checked={soundEnabled} onChange={event => setSoundValue(event.target.checked)} /> Sound (off by default)</label><label className="focus-toggle"><input type="checkbox" checked={hapticsEnabled} onChange={event => setHapticsValue(event.target.checked)} /> Light haptics</label><p className="focus-quiet-message">Configure workspace reminders in Settings → Notifications & follow-up.</p><p className="focus-quiet-message">Orin supports focus and is not a medical treatment.</p></section>}
       {surface === "recovery" && <Recovery onBack={() => navClick("now")} onChanged={() => void focus.refresh()} />}
     </main>
