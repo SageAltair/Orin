@@ -333,8 +333,30 @@ describe("future task device reminder synchronization", () => {
       throw new Error("No task fetch expected after category opt-out");
     });
     await refreshDeviceReminders("alice", "workspace-a");
+    expect(request).toHaveBeenCalledTimes(1);
     expect(syncLocalReminders).toHaveBeenCalledWith(
-      "alice", "workspace-a", inbox, noCategories, [],
+      "alice", "workspace-a", [], noCategories, [],
+    );
+  });
+
+  it("clears all alerts when categories are removed during an in-flight refresh", async () => {
+    const noCategories = {
+      ...policy, categories: [], quiet_enabled: "invalid", timezone: "Invalid/Timezone",
+    };
+    let reads = 0;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/notifications/preferences") {
+        reads += 1;
+        return (reads === 1 ? policy : noCategories) as never;
+      }
+      if (path.startsWith("/tasks?")) return [task("future", due)] as never;
+      if (path.startsWith("/notifications?")) return inbox as never;
+      throw new Error("Unexpected API request");
+    });
+    await refreshDeviceReminders("alice", "workspace-a");
+    expect(reads).toBe(2);
+    expect(syncLocalReminders).toHaveBeenCalledWith(
+      "alice", "workspace-a", [], noCategories, [],
     );
   });
 
