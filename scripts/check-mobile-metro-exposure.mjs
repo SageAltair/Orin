@@ -7,7 +7,9 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SCOPED_PACKAGES = ['zod', 'deepmerge'];
+// These audited roots must remain absent from the exported Android JS graph.
+// @expo/cli is reported for evidence but intentionally not blocked by this gate.
+const SCOPED_PACKAGES = ['zod', 'deepmerge', 'glob', 'minimatch'];
 const EXPECTED_SCOPE = 'Exported Android Metro JavaScript source maps only';
 
 export function enforceMetroExposureBaseline(report) {
@@ -35,7 +37,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const path = resolve(process.argv[2] ?? 'apps/mobile/mobile-runtime-js-exposure.json');
   try {
     enforceMetroExposureBaseline(JSON.parse(await readFile(path, 'utf8')));
-    console.log('Android Metro JS exposure baseline verified (zod and deepmerge absent from exported source maps only).');
+    console.log('Android Metro JS exposure baseline verified (zod, deepmerge, glob and minimatch absent from exported source maps only).');
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
