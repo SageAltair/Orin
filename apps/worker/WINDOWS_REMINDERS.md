@@ -46,8 +46,11 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   On a workspace switch the browser must receive server confirmation that the
   previous lease was revoked **before** showing the new workspace. A stale
   generation, revoked session, expired lease, owner/workspace mismatch or
-  unreachable lease API prevents the companion from delivering and clears its
-  scoped queue. Browser lease state is stored server-side without tokens.
+  unreachable lease API prevents the companion from delivering. Revocation or
+  malformed identity clears the scoped queue; a transient lease/session API
+  outage drops pending alerts but retains attempted-delivery markers so
+  recovery does not duplicate earlier toasts. Browser lease state is stored
+  server-side without tokens.
   The companion must be started with the browser's current session UUID and
   lease-generation UUID shown in Notifications settings. These IDs are not
   access credentials; the companion still needs its own short-lived bearer.
