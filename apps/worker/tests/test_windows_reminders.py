@@ -1420,3 +1420,53 @@ def test_browser_workspace_lease_fails_closed_before_native_toast(tmp_path, scen
     if scenario != "active":
         assert queue.due(NOW) == []
     queue.close()
+
+
+def test_browser_lease_outage_preserves_attempted_dedup_without_pending_alerts(tmp_path):
+    """A temporary lease 503 must not re-toast a previously delivered task."""
+    queue = ledger(tmp_path)
+    queue.sync({"already-delivered": NOW + 60, "pending": NOW + 60})
+    queue.mark_attempted("already-delivered", NOW + 60, NOW)
+    state = {"lease_status": 503}
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            return httpx.Response(200, json=[{
+                "id": BROWSER_SESSION, "active": True, "revoked_at": None,
+            }])
+        if request.url.path.endswith(f"/auth/reminder-lease/{BROWSER_SESSION}"):
+            if state["lease_status"] == 503:
+                return httpx.Response(503)
+            return httpx.Response(200, json={
+                "workspace_id": WORKSPACE, "generation_id": LEASE_GENERATION,
+                "expires_at": datetime.fromtimestamp(NOW + 45, timezone.utc).isoformat(),
+            })
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[
+                task("already-delivered", NOW + 60), task("pending", NOW + 60),
+            ])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     browser_lease_generation=LEASE_GENERATION,
+                     notify=lambda: pytest.fail("No toast during lease outage"))
+        assert queue.due(NOW) == []
+        assert queue.db.execute(
+            "SELECT attempted_epoch FROM reminders WHERE task_id='already-delivered'"
+        ).fetchone() == (NOW,)
+        state["lease_status"] = 200
+        calls = []
+        assert run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                        browser_lease_generation=LEASE_GENERATION,
+                        notify=lambda: calls.append("toast")) == 1
+        assert calls == ["toast"]
+    queue.close()

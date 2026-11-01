@@ -351,10 +351,14 @@ def _check_bound_browser_lease(
         _require_browser_lease(
             client, session_id, ledger.workspace_id, generation_id, now,
         )
-    except (PermissionError, httpx.HTTPError, ValueError):
-        # No stale workspace queue may survive a missing, revoked or
-        # unreachable lease; the browser must renew before any new alert.
+    except (PermissionError, ValueError):
+        # A revoked or malformed lease invalidates the entire workspace queue.
         ledger.clear()
+        raise
+    except httpx.HTTPError:
+        # Server uncertainty suppresses pending alerts, but must not erase
+        # attempted records and re-toast them when the lease API recovers.
+        ledger.clear_pending()
         raise
 
 
