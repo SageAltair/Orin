@@ -127,7 +127,7 @@
 .focus-task-list li strong { overflow-wrap: anywhere; }
 .focus-task-list li span { font-size: .82rem; color: var(--focus-muted); }
 .focus-task-status, .focus-task-schedule { color: var(--focus-text); background: transparent; border: 1px solid var(--focus-line); border-radius: .6rem; min-height: 36px; padding: .4rem .6rem; cursor: pointer; }
-.focus-task-done { text-decoration: line-through; opacity: .72; }
+.focus-task-done { text-decoration: line-through; color: var(--focus-text); opacity: 1; }
 .focus-task-empty { padding: 1.25rem 0; }
 .focus-task-empty h2 { font-size: 1.1rem; }
 @media (max-width: 520px) { .focus-task-list li { grid-template-columns: auto minmax(0, 1fr); } .focus-task-schedule { grid-column: 2; justify-self: start; } }
