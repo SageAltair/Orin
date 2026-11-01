@@ -2,8 +2,10 @@
 export const UNCONFIRMED_SIGN_OUT_KEY = "orin.signOutUnconfirmed.v1";
 export const UNCONFIRMED_SIGN_OUT_MESSAGE =
   "Your workspace is hidden, but Orin could not confirm server sign-out. " +
-  "A session may still be active in this browser. Reconnect and retry server sign-out. " +
-  "On a shared device, clear Orin site data if retry remains unavailable.";
+  "A session may still be active. Windows task alerts may continue for up to 45 seconds " +
+  "after the last successful reminder-lease renewal. Reconnect and retry server sign-out. " +
+  "On a shared device, clear Orin site data to remove local session data; " +
+  "this does not revoke the server session or reminder lease.";
 
 type SignOutStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
