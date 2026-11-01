@@ -319,12 +319,20 @@ test("Tasks creates and edits a precisely scheduled task in the unified list", a
   await expect(workspace.getByRole("button", { name: /All tasks/ })).toHaveAttribute("aria-pressed", "true");
   await workspace.getByRole("button", { name: "New task" }).click();
   await workspace.getByLabel("Task name").fill("Scheduled notification test");
-  await workspace.getByLabel("Due date and time (local)").fill("2026-11-01T15:45");
+  // Keep the due date in Upcoming regardless of when CI runs or the browser timezone.
+  // A fixed 2026-11-01 date became Today on Nov 1 and invalidated this assertion.
+  const futureLocal = await page.evaluate(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 2);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T15:45`;
+  });
+  await workspace.getByLabel("Due date and time (local)").fill(futureLocal);
   await workspace.getByLabel("Priority", { exact: true }).selectOption("high");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled notification test")).toBeVisible();
   await workspace.locator(".focus-task-list").getByRole("button", { name: "Edit Scheduled notification test" }).click();
-  await expect(workspace.getByLabel("Due date and time (local)")).toHaveValue("2026-11-01T15:45");
+  await expect(workspace.getByLabel("Due date and time (local)")).toHaveValue(futureLocal);
   await workspace.getByLabel("Task name").fill("Scheduled task updated");
   await workspace.getByRole("button", { name: "Save task" }).click();
   await expect(workspace.locator(".focus-task-list").getByText("Scheduled task updated")).toBeVisible();
