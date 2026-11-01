@@ -88,10 +88,17 @@ export function stopWindowsLease(): Promise<void> {
       publishStatus(null, null);
       return;
     }
-    await request<void>("/auth/reminder-lease", {
-      method: "DELETE", signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ generation_id: generation }),
-    });
+    try {
+      await request<void>("/auth/reminder-lease", {
+        method: "DELETE", signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ generation_id: generation }),
+      });
+    } catch (error) {
+      // 409 means another tab already replaced this generation. The old
+      // workspace is no longer authorized, so clearing our local ownership
+      // is safe. Other errors leave navigation blocked until confirmed.
+      if (!(error instanceof Error && "status" in error && error.status === 409)) throw error;
+    }
     publishStatus(null, null);
   });
 }
