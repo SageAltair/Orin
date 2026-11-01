@@ -5,6 +5,8 @@ import re
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from orin_api.models import (
@@ -62,15 +64,27 @@ def require_user(session: Session, user_id: uuid.UUID) -> User:
 
 def ensure_capability_catalog(session: Session) -> list[Capability]:
     existing = {capability.code: capability for capability in session.scalars(select(Capability)).all()}
-    changed = False
-    for code, name, description in CAPABILITY_CATALOG:
-        if code not in existing:
-            capability = Capability(code=code, name=name, description=description)
-            session.add(capability)
-            existing[code] = capability
-            changed = True
-    if changed:
-        session.flush()
+    missing = [(code, name, description) for code, name, description in CAPABILITY_CATALOG
+               if code not in existing]
+    if missing:
+        dialect = session.get_bind().dialect.name
+        insert_for = {"postgresql": pg_insert, "sqlite": sqlite_insert}.get(dialect)
+        if insert_for is not None:
+            # Concurrent first-time signups can both observe an empty catalog.
+            # The unique code constraint, not a read-then-insert check, arbitrates.
+            rows = [{"id": uuid.uuid4(), "code": code, "name": name,
+                     "description": description, "is_enabled": True}
+                    for code, name, description in missing]
+            session.execute(insert_for(Capability).values(rows).on_conflict_do_nothing(
+                index_elements=[Capability.code]))
+            existing = {capability.code: capability
+                        for capability in session.scalars(select(Capability)).all()}
+        else:
+            for code, name, description in missing:
+                capability = Capability(code=code, name=name, description=description)
+                session.add(capability)
+                existing[code] = capability
+            session.flush()
     return [existing[code] for code, _, _ in CAPABILITY_CATALOG]
 
 
