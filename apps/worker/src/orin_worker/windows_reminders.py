@@ -246,7 +246,10 @@ def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now
         for item in items:
             if not isinstance(item, dict) or not isinstance(item.get("id"), str):
                 raise ValueError("Invalid task record")
-            if item.get("owner_id", owner_id) != owner_id or item.get("workspace_id", workspace_id) != workspace_id:
+            # TaskRead requires both identities. Missing fields must fail closed:
+            # defaulting to the requested scope can turn a malformed response
+            # into a notification for an unverified task.
+            if item.get("owner_id") != owner_id or item.get("workspace_id") != workspace_id:
                 raise PermissionError("Task belongs to another owner or workspace")
             if item.get("status") not in {"todo", "in_progress", "blocked", "done", "cancelled"}:
                 raise ValueError("Invalid task status")
