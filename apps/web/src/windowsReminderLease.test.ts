@@ -66,4 +66,35 @@ describe("Windows reminder browser lease", () => {
       workspace_id: "workspace-b", generation_id: second, rotate: true,
     });
   });
+  it("treats a stale-generation 409 as confirmed revocation of this tab's lease", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/sessions") {
+        return [{ id: "browser-session", current: true, active: true }];
+      }
+      if (path === "/auth/reminder-lease" && options?.method === "DELETE") {
+        throw Object.assign(new Error("Reminder lease generation changed"), { status: 409 });
+      }
+      return undefined;
+    });
+    // Another tab already replaced A's generation. A must not be trapped
+    // in workspace A merely because its conditional DELETE returned 409.
+    await expect(stopWindowsLease()).resolves.toBeUndefined();
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
+    const second = await activateWindowsLease("workspace-b");
+    expect(second).not.toBe(first);
+  });
+
+  it("still blocks a workspace switch when revocation returns a server error", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "DELETE") {
+        throw Object.assign(new Error("API unavailable"), { status: 503 });
+      }
+      return undefined;
+    });
+    await expect(stopWindowsLease()).rejects.toMatchObject({ status: 503 });
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+  });
+
 });
