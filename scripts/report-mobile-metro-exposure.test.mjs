@@ -10,16 +10,20 @@ test("reports watched packages without claiming a clean runtime", () => {
     "../../node_modules/zod/v3/index.js",
     "node_modules/@expo/cli/build/index.js",
     "node_modules/.pnpm/deepmerge@4.3.1/node_modules/deepmerge/index.js",
+    "node_modules/glob/dist/commonjs/index.js",
+    "node_modules/.pnpm/minimatch@10.2.6/node_modules/minimatch/dist/commonjs/index.js",
     "src/App.tsx",
   ] }]);
   assert.equal(report.source_map_count, 1);
-  assert.equal(report.module_source_count, 4);
-  for (const name of ["zod", "@expo/cli", "deepmerge"]) {
+  assert.equal(report.module_source_count, 6);
+  for (const name of ["zod", "@expo/cli", "deepmerge", "glob", "minimatch"]) {
     assert.equal(report.audited_packages[name].observed_in_js_graph, true);
     assert.equal(report.audited_packages[name].source_occurrences, 1);
   }
   assert.deepEqual(report.audited_packages["@expo/cli"].sample_package_paths, ["@expo/cli/build/index.js"]);
   assert.deepEqual(report.audited_packages.deepmerge.sample_package_paths, ["deepmerge/index.js"]);
+  assert.deepEqual(report.audited_packages.glob.sample_package_paths, ["glob/dist/commonjs/index.js"]);
+  assert.deepEqual(report.audited_packages.minimatch.sample_package_paths, ["minimatch/dist/commonjs/index.js"]);
   assert.match(report.limitation, /not proof/);
 });
 
@@ -31,6 +35,8 @@ test("handles indexed maps and Windows-style paths", () => {
   assert.equal(report.audited_packages.zod.source_occurrences, 1);
   assert.deepEqual(report.audited_packages.zod.sample_package_paths, ["zod/v4/index.ts"]);
   assert.equal(report.audited_packages.deepmerge.observed_in_js_graph, false);
+  assert.equal(report.audited_packages.glob.observed_in_js_graph, false);
+  assert.equal(report.audited_packages.minimatch.observed_in_js_graph, false);
 });
 
 test("rejects malformed or empty source maps instead of reporting false absence", () => {
