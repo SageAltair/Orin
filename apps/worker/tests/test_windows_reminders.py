@@ -22,7 +22,8 @@ NOW = int(datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc).timestamp())
 
 
 def task(id: str, due: int | None, status: str = "todo") -> dict[str, object]:
-    return {"id": id, "status": status, "due_at": (
+    return {"id": id, "owner_id": OWNER, "workspace_id": WORKSPACE,
+            "status": status, "due_at": (
         datetime.fromtimestamp(due, timezone.utc).isoformat() if due is not None else None
     )}
 
@@ -317,6 +318,21 @@ def test_disabled_preferences_clear_stale_alerts(tmp_path):
     queue.sync({"a": NOW + 60})
     with api([task("a", NOW + 60)], categories=["calendar"]) as client:
         assert run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no alerts")) == 0
+    assert queue.due(NOW) == []
+    queue.close()
+
+
+@pytest.mark.parametrize("missing_field", ["owner_id", "workspace_id"])
+def test_task_missing_required_identity_fails_closed(tmp_path, missing_field):
+    """A malformed task response must not inherit the requested owner/workspace."""
+    queue = ledger(tmp_path)
+    queue.sync({"previous": NOW + 60})
+    record = task("unscoped", NOW + 60)
+    record.update({"owner_id": OWNER, "workspace_id": WORKSPACE})
+    del record[missing_field]
+    with api([record]) as client:
+        with pytest.raises(PermissionError, match="another owner or workspace"):
+            run_once(client, queue, now=NOW, notify=lambda: pytest.fail("no toast"))
     assert queue.due(NOW) == []
     queue.close()
 
