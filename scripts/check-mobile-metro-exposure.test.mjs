@@ -10,6 +10,8 @@ function report() {
     audited_packages: {
       zod: { source_occurrences: 0, observed_in_js_graph: false },
       deepmerge: { source_occurrences: 0, observed_in_js_graph: false },
+      glob: { source_occurrences: 0, observed_in_js_graph: false },
+      minimatch: { source_occurrences: 0, observed_in_js_graph: false },
       '@expo/cli': { source_occurrences: 1, observed_in_js_graph: true },
     },
   };
@@ -19,8 +21,8 @@ test('permits the observed baseline even when Expo CLI is listed', () => {
   assert.equal(enforceMetroExposureBaseline(report()), true);
 });
 
-test('fails on newly bundled zod or deepmerge code', () => {
-  for (const name of ['zod', 'deepmerge']) {
+test('fails on newly bundled audited vulnerable package code', () => {
+  for (const name of ['zod', 'deepmerge', 'glob', 'minimatch']) {
     const changed = report();
     changed.audited_packages[name] = { source_occurrences: 1, observed_in_js_graph: true };
     assert.throws(() => enforceMetroExposureBaseline(changed), new RegExp(`${name} appeared`));
@@ -33,6 +35,8 @@ test('rejects missing, stale or inconsistent evidence instead of declaring safet
     (r) => { r.source_map_count = 0; },
     (r) => { r.module_source_count = 0; },
     (r) => { delete r.audited_packages.zod; },
+    (r) => { delete r.audited_packages.glob; },
+    (r) => { delete r.audited_packages.minimatch; },
     (r) => { r.audited_packages.deepmerge.observed_in_js_graph = true; },
     (r) => { r.audited_packages.zod.source_occurrences = -1; },
   ]) {
