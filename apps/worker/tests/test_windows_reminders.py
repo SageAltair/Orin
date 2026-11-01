@@ -1285,7 +1285,50 @@ def test_bound_browser_session_api_failure_never_toasts(tmp_path, status):
         with pytest.raises(httpx.HTTPStatusError):
             run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
                      notify=lambda: pytest.fail("No toast on session lookup failure"))
-    assert queue.due(NOW) == ([] if status == 401 else [("old", NOW + 60)])
+    assert queue.due(NOW) == [], "Session lookup uncertainty must clear stale workspace reminders"
+    queue.close()
+
+
+def test_session_outage_discards_pending_but_preserves_attempted_dedup(tmp_path):
+    """A transient 503 must not retain pending alerts or re-toast delivered ones."""
+    queue = ledger(tmp_path)
+    queue.sync({"already-delivered": NOW + 60, "pending": NOW + 60})
+    queue.mark_attempted("already-delivered", NOW + 60, NOW)
+    state = {"session_status": 503}
+    def handler(request):
+        if request.url.path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": OWNER})
+        if request.url.path.endswith("/auth/sessions"):
+            if state["session_status"] == 503:
+                return httpx.Response(503)
+            return httpx.Response(200, json=[{
+                "id": BROWSER_SESSION, "active": True, "revoked_at": None,
+            }])
+        if request.url.path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={
+                "enabled": True, "categories": ["tasks"], "quiet_enabled": False,
+                "respect_focus": False, "timezone": "UTC",
+                "quiet_start": "22:00", "quiet_end": "07:00",
+            })
+        if request.url.path.endswith("/tasks"):
+            return httpx.Response(200, json=[
+                task("already-delivered", NOW + 60), task("pending", NOW + 60),
+            ])
+        return httpx.Response(404)
+    with httpx.Client(base_url="https://orin.example/api/v1",
+                      transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                     notify=lambda: pytest.fail("No toast during outage"))
+        assert queue.due(NOW) == []
+        assert queue.db.execute(
+            "SELECT attempted_epoch FROM reminders WHERE task_id='already-delivered'"
+        ).fetchone() == (NOW,)
+        state["session_status"] = 200
+        notifications = []
+        assert run_once(client, queue, now=NOW, browser_session_id=BROWSER_SESSION,
+                        notify=lambda: notifications.append("toast")) == 1
+        assert notifications == ["toast"]
     queue.close()
 
 

@@ -149,6 +149,15 @@ class ReminderLedger:
                 (self.owner_id, self.workspace_id),
             )
 
+    def clear_pending(self) -> None:
+        """Drop uncertain alerts but retain delivered-task deduplication."""
+        with self.db:
+            self.db.execute(
+                "DELETE FROM reminders WHERE owner_id=? AND workspace_id=? "
+                "AND attempted_epoch IS NULL",
+                (self.owner_id, self.workspace_id),
+            )
+
     def close(self) -> None:
         self.db.close()
 
@@ -358,9 +367,14 @@ def _check_bound_browser_session(client: httpx.Client, ledger: ReminderLedger,
     except PermissionError:
         ledger.clear()
         raise
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code in {401, 403}:
+    except httpx.HTTPError as error:
+        # An unavailable session API cannot confirm the browser is signed in.
+        # Drop pending alerts while retaining already-attempted deduplication;
+        # otherwise a transient 503 could cause duplicate toasts on recovery.
+        if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in {401, 403}:
             ledger.clear()
+        else:
+            ledger.clear_pending()
         raise
 
 
