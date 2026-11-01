@@ -445,18 +445,18 @@ test("priority outlook requires explicit cross-workspace opt-in and can return t
   await expect(outlook.getByText("Ask the team about the venue")).toHaveCount(0);
 });
 
-test("completed Tasks retain WCAG AA contrast at desktop and phone widths", async ({ page }) => {
-  await setupFocus(page);
-  await page.goto("/");
-  await signIn(page);
-  await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
-  await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
-  await expect(page.locator(".focus-task-done")).toBeVisible();
-
-  for (const width of [1280, 390]) {
-    await page.setViewportSize({ width, height: 844 });
-    for (const theme of ["light", "dark"]) {
+for (const width of [1280, 390]) {
+  for (const theme of ["light", "dark"] as const) {
+    test(`completed Tasks retain WCAG AA contrast at ${width}px in ${theme} theme`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await setupFocus(page);
+      await page.goto("/");
+      await signIn(page);
+      await page.getByRole("navigation", { name: "Focus navigation" }).getByRole("button", { name: "Tasks" }).click();
+      await page.getByRole("navigation", { name: "Task views" }).getByRole("button", { name: /Completed/ }).click();
+      await expect(page.locator(".focus-task-done")).toBeVisible();
       if (theme === "dark") await page.getByLabel("Toggle light or dark theme").click();
+      await expect(page.locator(".orin-shell")).toHaveClass(new RegExp(`theme-${theme}`));
       const report = await new AxeBuilder({ page })
         .include(".focus-task-collection")
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
@@ -467,7 +467,6 @@ test("completed Tasks retain WCAG AA contrast at desktop and phone widths", asyn
         id: violation.id,
         targets: violation.nodes.map(node => node.target),
       })), `WCAG A/AA accessibility at ${width}px in ${theme} theme`).toEqual([]);
-      if (theme === "dark") await page.getByLabel("Toggle light or dark theme").click();
-    }
+    });
   }
-});
+}
