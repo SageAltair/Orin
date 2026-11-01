@@ -4,6 +4,7 @@ import {
   clearSignOutUnconfirmed,
   isSignOutUnconfirmed,
   UNCONFIRMED_SIGN_OUT_KEY,
+  UNCONFIRMED_SIGN_OUT_MESSAGE,
 } from "./signOut";
 
 function memoryStorage() {
@@ -16,6 +17,12 @@ function memoryStorage() {
 }
 
 describe("remote sign-out confirmation", () => {
+  it("discloses residual Windows reminders and that clearing site data cannot revoke a server lease", () => {
+    expect(UNCONFIRMED_SIGN_OUT_MESSAGE).toMatch(/Windows task alerts/i);
+    expect(UNCONFIRMED_SIGN_OUT_MESSAGE).toMatch(/45 seconds/i);
+    expect(UNCONFIRMED_SIGN_OUT_MESSAGE).toMatch(/does not revoke/i);
+  });
+
   it("marks sign-out pending before requesting revocation and clears only on success", async () => {
     const storage = memoryStorage();
     const revoke = vi.fn(async () => {
