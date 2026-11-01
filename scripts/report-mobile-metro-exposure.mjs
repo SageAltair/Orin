@@ -6,8 +6,8 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const watched = ["zod", "@expo/cli", "deepmerge"];
-const watchedSource = /(?:^|\/)node_modules\/(@expo\/cli|zod|deepmerge)(?:\/|$)/g;
+const watched = ["zod", "@expo/cli", "deepmerge", "glob", "minimatch"];
+const watchedSource = /(?:^|\/)node_modules\/(@expo\/cli|zod|deepmerge|glob|minimatch)(?:\/|$)/g;
 
 export function summarizeSourceMaps(maps) {
   const counts = Object.fromEntries(watched.map(name => [name, 0]));
