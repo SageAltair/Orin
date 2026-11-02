@@ -147,6 +147,22 @@ describe("Windows reminder browser lease", () => {
     expect(puts).toHaveLength(0);
   });
 
+  it("retains a generation when the client reports a late workspace-scope 409", async () => {
+    const stale = Object.assign(new Error("Workspace changed while the request was in flight."), { status: 409 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/sessions") return [{ id: "browser-session", current: true, active: true }];
+      if (path === "/auth/reminder-lease" && options?.method === "PUT") throw stale;
+      return undefined;
+    });
+    await expect(activateWindowsLease("workspace-a")).rejects.toBe(stale);
+    const generation = getWindowsLeaseIdentifiers()?.generation;
+    expect(generation).toBe("11111111-1111-4111-8111-111111111111");
+    await stopWindowsLease();
+    const deletes = apiRequest.mock.calls.filter(([path, options]) =>
+      path === "/auth/reminder-lease" && options?.method === "DELETE");
+    expect(JSON.parse(deletes[0][1].body)).toEqual({ generation_id: generation });
+  });
+
   it("restores the previous revocation handle after a definite rotation rejection", async () => {
     const first = await activateWindowsLease("workspace-a");
     apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
