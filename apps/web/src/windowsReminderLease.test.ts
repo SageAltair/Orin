@@ -270,4 +270,23 @@ describe("Windows reminder browser lease", () => {
     expect(getWindowsLeaseIdentifiers()).toBeNull();
   });
 
+  it("suppresses browser heartbeat after uncertain renewal without losing the revocation handle", async () => {
+    const generation = await activateWindowsLease("workspace-a");
+    const outage = Object.assign(new Error("renewal response unavailable"), { status: 503 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "PUT") throw outage;
+      return undefined;
+    });
+    await expect(renewWindowsLease("workspace-a", generation)).rejects.toBe(outage);
+    handleWindowsLeaseRenewalFailure(generation, outage);
+    // The handle must remain available for a scoped DELETE, but App's
+    // two-second heartbeat must not keep authorizing native delivery.
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(generation);
+    const heartbeatHandle = (getWindowsLeaseIdentifiers as unknown as
+      (purpose: "heartbeat") => ReturnType<typeof getWindowsLeaseIdentifiers>)("heartbeat");
+    expect(heartbeatHandle).toBeNull();
+    await stopWindowsLease();
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
+  });
+
 });
