@@ -19,7 +19,7 @@ const WritingStudio = lazy(() =>
   })),
 );
 import { NotificationCenter } from "./NotificationCenter";
-import { activateWindowsLease, clearWindowsLeaseLocalState, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
+import { activateWindowsLease, clearWindowsLeaseLocalState, handleWindowsLeaseRenewalFailure, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
 import {
   useEffect,
   useCallback,
@@ -850,9 +850,11 @@ export default function App() {
     }).catch(() => clearWindowsLeaseLocalState());
     const timer = window.setInterval(() => {
       if (!cancelled && generation) {
-        void renewWindowsLease(activeWorkspaceId, generation).catch(() => {
-          generation = null;
-          clearWindowsLeaseLocalState();
+        const attemptedGeneration = generation;
+        void renewWindowsLease(activeWorkspaceId, attemptedGeneration).catch((error: unknown) => {
+          if (cancelled) return;
+          generation = null; // Stop heartbeats until a fresh explicit activation.
+          handleWindowsLeaseRenewalFailure(attemptedGeneration, error);
         });
       }
     }, 10000);

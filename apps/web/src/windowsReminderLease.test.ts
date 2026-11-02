@@ -5,6 +5,7 @@ vi.mock("./api", () => ({ request: apiRequest }));
 import {
   activateWindowsLease, getWindowsLeaseIdentifiers, renewWindowsLease,
   stopWindowsLease, setWindowsLeaseOptIn, isWindowsLeaseOptedIn,
+  handleWindowsLeaseRenewalFailure,
 } from "./windowsReminderLease";
 
 describe("Windows reminder browser lease", () => {
@@ -95,6 +96,34 @@ describe("Windows reminder browser lease", () => {
     });
     await expect(stopWindowsLease()).rejects.toMatchObject({ status: 503 });
     expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+  });
+
+  it("retains a revocable generation after transient heartbeat failure", async () => {
+    const generation = await activateWindowsLease("workspace-a");
+    // A 503 does not prove that the server-side lease was revoked. The
+    // user must still be able to send a generation-scoped DELETE.
+    const outage = Object.assign(new Error("API unavailable"), { status: 503 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "PUT") throw outage;
+      return undefined;
+    });
+    await expect(renewWindowsLease("workspace-a", generation)).rejects.toBe(outage);
+    handleWindowsLeaseRenewalFailure(generation, outage);
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(generation);
+    await stopWindowsLease();
+    const deletes = apiRequest.mock.calls.filter(([path, options]) =>
+      path === "/auth/reminder-lease" && options?.method === "DELETE");
+    expect(deletes).toHaveLength(1);
+    expect(JSON.parse(deletes[0][1].body)).toEqual({ generation_id: generation });
+  });
+
+  it("clears a generation confirmed stale, but not a newer generation", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    const second = await activateWindowsLease("workspace-b");
+    handleWindowsLeaseRenewalFailure(first, Object.assign(new Error("stale"), { status: 409 }));
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(second);
+    handleWindowsLeaseRenewalFailure(second, Object.assign(new Error("stale"), { status: 409 }));
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
   });
 
 });
