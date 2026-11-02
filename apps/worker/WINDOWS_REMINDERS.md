@@ -185,9 +185,45 @@ This process stops with Ctrl+C, does not auto-start, and does not install
 anything on a phone. It does not claim to wake a sleeping or powered-off device.
 The OS toast adapter and lifecycle still require real Windows validation.
 
+## Optional foreground loopback revocation (release security gate)
+
+A server outage can prevent both the authenticated lease DELETE and logout
+POST. In that case the API lease can remain valid for up to 45 seconds.
+The optional loopback channel gives an **already running** foreground
+companion an independent stop instruction. It does not replace remote
+revocation or prove visible Windows notification delivery.
+
+Only in an explicitly opted-in, disposable foreground environment, set
+`ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN` to the **exact** browser origin
+(for example `http://127.0.0.1:4173`) before launching the companion.
+The listener binds only `127.0.0.1:18765`; the optional
+`ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_PORT` must match the browser's
+port 18765 for the current web build. No listener is created when the origin
+variable is absent. Port collision or invalid origin fails startup instead
+of silently disabling the configured control. Never expose this port on a
+network interface or proxy it externally.
+
+The browser uses a one-time nonce and HMAC-SHA256 with the existing ephemeral
+lease generation. It sends **no generation UUID, access token, refresh token,
+task title or workspace data** to loopback. The server requires an exact
+Origin, Host, session ID and valid proof, and accepts only a stop operation.
+A 204 acknowledgement is synchronized with toast submission: no new toast
+can be submitted **after acknowledgement**. An in-flight toast may finish
+before acknowledgement. The companion then drops pending queue entries and
+exits; attempted reminders retain deduplication.
+
+The web client still attempts remote DELETE even if the local stop succeeds.
+If the local listener is absent, blocked by browser Private Network Access,
+unreachable, or times out, it returns unconfirmed and does **not** treat that
+as successful revocation. Browser tab crash/pagehide is still best effort.
+There is no unattended startup, credential broker, background service,
+closed-browser guarantee, DND bypass or automatic token renewal. Physical
+Windows acceptance remains in issue #129, and #149 stays open until all
+engineering lifecycle gates are verified.
+
 ## Tests
 
-`python -m pytest apps/worker/tests/test_windows_reminders.py -q`
+`python -m pytest apps/worker/tests/test_windows_reminders.py apps/worker/tests/test_windows_reminder_control.py -q`
 
 Tests use disposable SQLite, fake clocks, mocked HTTP and fake notifiers.
 No real notifications, accounts or production data are touched.
