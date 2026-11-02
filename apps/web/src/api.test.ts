@@ -329,6 +329,121 @@ describe("web logout and account isolation", () => {
 });
 
 
+describe("workspace response isolation", () => {
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it("rejects a previous workspace task response after switching workspaces", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Promise<Response>(resolve => { finish = resolve; }));
+    vi.stubGlobal("fetch", fetchMock);
+    setActiveWorkspace("workspace-A");
+    const pending = request<{ id: string }[]>("/tasks");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get("X-Orin-Workspace-Id")).toBe("workspace-A");
+    setActiveWorkspace("workspace-B");
+    finish!(new Response(JSON.stringify([{ id: "A-private-task" }]), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("rejects a previous workspace attachment after switching workspaces", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async () => new Promise<Response>(resolve => { finish = resolve; })));
+    setActiveWorkspace("workspace-A");
+    const pending = requestBlob("/attachments/private/download");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-B");
+    finish!(new Response("workspace-A-private-file", { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("rejects an A response after an A-to-B-to-A switch", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Promise<Response>(resolve => { finish = resolve; })));
+    setActiveWorkspace("workspace-A");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-B");
+    setActiveWorkspace("workspace-A");
+    finish!(new Response(JSON.stringify([{ id: "old-snapshot" }]), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("rejects a workspace response when its JSON finishes decoding after the switch", async () => {
+    let finishJson: ((value: unknown[]) => void) | undefined;
+    const response = new Response(JSON.stringify([]), { status: 200 });
+    vi.spyOn(response, "json").mockImplementation(() =>
+      new Promise(resolve => { finishJson = resolve; }));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    setActiveWorkspace("workspace-A");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(finishJson).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-B");
+    finishJson!([{ id: "old-decoded-snapshot" }]);
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("keeps initial unscoped bootstrap reads working when a workspace is selected", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "bootstrap-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "bootstrap-user" }), { status: 200 });
+      if (path.endsWith("/projects"))
+        return new Promise<Response>(resolve => { finish = resolve; });
+      throw new Error("Unexpected request: " + path);
+    }));
+    await login("bootstrap@example.com", "password");
+    const pending = request<unknown[]>("/projects");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-A");
+    finish!(new Response(JSON.stringify([]), { status: 200 }));
+    await expect(pending).resolves.toEqual([]);
+  });
+
+  it("does not retry an A request under B after refresh completes", async () => {
+    let finishRefresh: ((response: Response) => void) | undefined;
+    let taskReads = 0;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "user-1" }), { status: 200 });
+      if (path.endsWith("/auth/refresh"))
+        return new Promise<Response>(resolve => { finishRefresh = resolve; });
+      if (path.endsWith("/tasks")) {
+        taskReads++;
+        return taskReads === 1
+          ? new Response(null, { status: 401 })
+          : new Response(JSON.stringify([{ id: "workspace-B-task" }]), { status: 200 });
+      }
+      throw new Error("Unexpected request: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await login("user@example.com", "password");
+    setActiveWorkspace("workspace-A");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-B");
+    finishRefresh!(new Response(JSON.stringify({ access_token: "renewed-token" }), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+    expect(taskReads).toBe(1);
+  });
+
+  it("allows requests when selecting the already active workspace", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })));
+    setActiveWorkspace("workspace-A");
+    const pending = request<unknown[]>("/tasks");
+    setActiveWorkspace("workspace-A");
+    await expect(pending).resolves.toEqual([]);
+  });
+});
+
 describe("successful response metadata", () => {
   afterEach(() => vi.unstubAllGlobals());
 
