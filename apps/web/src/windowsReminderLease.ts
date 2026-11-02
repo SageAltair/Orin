@@ -7,6 +7,9 @@ const generationKey = "orin:windows-reminder-lease-generation";
 const sessionKey = "orin:windows-reminder-lease-session";
 export const windowsLeaseToggleEvent = "orin:windows-reminder-lease-toggle";
 export const windowsLeaseStatusEvent = "orin:windows-reminder-lease-status";
+// An uncertain server renewal must not authorize further local heartbeats.
+// Keep the generation in sessionStorage separately for scoped revocation.
+let heartbeatGeneration: string | null = null;
 
 export function isWindowsLeaseOptedIn(ownerId?: string): boolean {
   try { return Boolean(ownerId) && sessionStorage.getItem(windowsLeaseOptInKey) === ownerId; }
@@ -14,6 +17,7 @@ export function isWindowsLeaseOptedIn(ownerId?: string): boolean {
 }
 
 export function setWindowsLeaseOptIn(enabled: boolean, ownerId?: string): void {
+  heartbeatGeneration = null;
   if (enabled) {
     if (!ownerId) throw new Error("A signed-in owner is required for Windows reminder opt-in");
     sessionStorage.setItem(windowsLeaseOptInKey, ownerId);
@@ -25,6 +29,7 @@ export function setWindowsLeaseOptIn(enabled: boolean, ownerId?: string): void {
 }
 
 function publishStatus(sessionId: string | null, generation: string | null): void {
+  heartbeatGeneration = null;
   if (sessionId && generation) {
     sessionStorage.setItem(sessionKey, sessionId);
     sessionStorage.setItem(generationKey, generation);
@@ -35,10 +40,11 @@ function publishStatus(sessionId: string | null, generation: string | null): voi
   window.dispatchEvent(new Event(windowsLeaseStatusEvent));
 }
 
-export function getWindowsLeaseIdentifiers(): { sessionId: string; generation: string } | null {
+export function getWindowsLeaseIdentifiers(purpose: "revocation" | "heartbeat" = "revocation"): { sessionId: string; generation: string } | null {
   try {
     const sessionId = sessionStorage.getItem(sessionKey);
     const generation = sessionStorage.getItem(generationKey);
+    if (purpose === "heartbeat" && generation !== heartbeatGeneration) return null;
     return sessionId && generation ? { sessionId, generation } : null;
   } catch { return null; }
 }
@@ -60,6 +66,7 @@ function isClientScopeError(error: unknown): boolean {
 
 export function activateWindowsLease(workspaceId: string): Promise<string> {
   return serialize(async () => {
+    heartbeatGeneration = null;
     const sessions = await request<AuthSession[]>("/auth/sessions", { signal: AbortSignal.timeout(8000) });
     const current = sessions.find(s => s.current && s.active);
     if (!current) throw new Error("No active browser session for Windows reminders");
@@ -108,6 +115,7 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
       }
       throw error;
     }
+    heartbeatGeneration = generation;
     return generation;
   });
 }
@@ -124,7 +132,10 @@ export function renewWindowsLease(workspaceId: string, generation: string): Prom
 }
 
 export function stopWindowsLease(): Promise<void> {
+  // Stop future local pulses immediately, even while remote DELETE is pending.
+  heartbeatGeneration = null;
   return serialize(async () => {
+    heartbeatGeneration = null;
     // A stale tab cannot revoke another tab's newer workspace generation.
     const identifiers = getWindowsLeaseIdentifiers();
     const generation = identifiers?.generation;
@@ -164,6 +175,7 @@ export function stopWindowsLease(): Promise<void> {
  */
 export function handleWindowsLeaseRenewalFailure(generation: string, error: unknown): void {
   if (getWindowsLeaseIdentifiers()?.generation !== generation) return;
+  heartbeatGeneration = null;
   const status = error instanceof Error && "status" in error ? error.status : undefined;
   // The shared API can synthesize a 409 after a successful server PUT if
   // the user switched workspaces while the response was in flight.

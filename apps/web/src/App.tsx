@@ -830,7 +830,7 @@ export default function App() {
       // Background tabs may still send pulses; browser throttling or sleep
       // naturally makes the companion fail closed when pulses stop.
       if (pending) return;
-      const identifiers = getWindowsLeaseIdentifiers();
+      const identifiers = getWindowsLeaseIdentifiers("heartbeat");
       if (!identifiers) return;
       pending = true;
       void heartbeatLocalWindowsCompanion(identifiers).finally(() => { pending = false; });
