@@ -5,8 +5,9 @@
 const endpoint = "http://127.0.0.1:18765";
 const headers = { "X-Orin-Reminder-Control": "1" };
 
-export async function revokeLocalWindowsCompanion(
+async function sendLocalWindowsCompanion(
   lease: { sessionId: string; generation: string },
+  action: "revoke" | "heartbeat",
 ): Promise<boolean> {
   try {
     const challenge = await fetch(endpoint + "/challenge", {
@@ -21,11 +22,12 @@ export async function revokeLocalWindowsCompanion(
       { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
     );
     const signature = await crypto.subtle.sign(
-      "HMAC", key, new TextEncoder().encode(data.nonce + "|" + lease.sessionId),
+      "HMAC", key, new TextEncoder().encode(data.nonce + "|" + lease.sessionId +
+        (action === "heartbeat" ? "|heartbeat" : "")),
     );
     const proof = Array.from(new Uint8Array(signature), byte =>
       byte.toString(16).padStart(2, "0")).join("");
-    const result = await fetch(endpoint + "/revoke", {
+    const result = await fetch(endpoint + "/" + action, {
       method: "POST", mode: "cors", credentials: "omit", cache: "no-store",
       redirect: "error",
       headers: { ...headers, "Content-Type": "application/json" },
@@ -38,4 +40,13 @@ export async function revokeLocalWindowsCompanion(
     // Never report a confirmed local revocation from an uncertain response.
     return false;
   }
+}
+
+export function revokeLocalWindowsCompanion(lease: { sessionId: string; generation: string }): Promise<boolean> {
+  return sendLocalWindowsCompanion(lease, "revoke");
+}
+
+/** Foreground-only presence pulse. Failure leaves native delivery disabled. */
+export function heartbeatLocalWindowsCompanion(lease: { sessionId: string; generation: string }): Promise<boolean> {
+  return sendLocalWindowsCompanion(lease, "heartbeat");
 }

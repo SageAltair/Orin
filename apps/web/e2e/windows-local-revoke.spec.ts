@@ -18,7 +18,7 @@ test("real Chromium revokes a disposable foreground companion over loopback", as
     "  allowed_origin='http://127.0.0.1:4173', stopping=stop,",
     "  delivery_lock=threading.Lock(), port=18765):",
     "  print('READY', flush=True)",
-    "  print('STOPPED' if stop.wait(20) else 'TIMED_OUT', flush=True)",
+    "  print('STOPPED' if stop.wait(60) else 'TIMED_OUT', flush=True)",
   ].join("\n");
   const child = spawn(process.platform === "win32" ? "python" : "python3", ["-u", "-c", code], {
     cwd: root,
@@ -52,11 +52,15 @@ test("real Chromium revokes a disposable foreground companion over loopback", as
       (await page.request.get("/src/windowsReminderLocalControl.ts")).status(),
       { timeout: 10_000 },
     ).toBe(200);
-    const revoked = await page.evaluate(async ({ sessionId, generation }) => {
-      const { revokeLocalWindowsCompanion } = await import("/src/windowsReminderLocalControl.ts");
-      return revokeLocalWindowsCompanion({ sessionId, generation });
+    const result = await page.evaluate(async ({ sessionId, generation }) => {
+      const { heartbeatLocalWindowsCompanion, revokeLocalWindowsCompanion } =
+        await import("/src/windowsReminderLocalControl.ts");
+      const heartbeat = await heartbeatLocalWindowsCompanion({ sessionId, generation });
+      const revoked = await revokeLocalWindowsCompanion({ sessionId, generation });
+      return { heartbeat, revoked };
     }, { sessionId, generation });
-    expect(revoked).toBe(true);
+    expect(result.heartbeat).toBe(true);
+    expect(result.revoked).toBe(true);
     await expect.poll(() => output.includes("STOPPED"), { timeout: 5_000 }).toBe(true);
   } finally {
     if (child.exitCode === null) child.kill();

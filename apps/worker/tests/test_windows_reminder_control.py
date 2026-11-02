@@ -169,3 +169,98 @@ def test_acknowledged_stop_waits_for_inflight_native_submission(control):
     # After acknowledgement, another toast must not be submitted.
     assert _notify_if_active(lambda: notified.append(2), stopping, lock) is False
     assert notified == [1]
+
+
+def heartbeat_proof(nonce):
+    return hmac.new(GENERATION.encode(), f"{nonce}|{SESSION}|heartbeat".encode(), hashlib.sha256).hexdigest()
+
+
+def test_unreachable_browser_fails_closed_before_toast(control):
+    listener, stopping, lock = control
+    notified = []
+    assert not listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(1), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is False
+    assert notified == []
+    nonce = challenge(listener)
+    payload = {"nonce": nonce, "session_id": SESSION, "proof": heartbeat_proof(nonce)}
+    assert send(listener, "POST", "/heartbeat", body=payload)[0] == 204
+    assert listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(2), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is True
+    assert notified == [2]
+    listener._last_heartbeat_wall -= 20
+    assert not listener.is_browser_recent()
+    listener._last_heartbeat_wall += 20
+    listener._last_heartbeat -= 20
+    assert not listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(3), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is False
+    assert notified == [2]
+
+
+def test_local_heartbeat_rejects_wrong_origin_and_revoke_proof(control):
+    listener, stopping, _ = control
+    nonce = challenge(listener)
+    assert send(listener, "POST", "/heartbeat", origin="https://attacker.example",
+                body={"nonce": nonce, "session_id": SESSION,
+                      "proof": heartbeat_proof(nonce)})[0] == 403
+    assert send(listener, "POST", "/heartbeat",
+                body={"nonce": nonce, "session_id": SESSION,
+                      "proof": proof(nonce)})[0] == 403
+    assert not listener.is_browser_recent()
+    assert not stopping.is_set()
+
+
+def test_live_loopback_heartbeat_gates_synthetic_api_sqlite_delivery(control, tmp_path):
+    """An active server lease alone must never authorize a native submission."""
+    from datetime import datetime, timezone
+    import httpx
+    from orin_worker.windows_reminders import ReminderLedger, run_once
+
+    listener, stopping, lock = control
+    owner = "16e447d8-27f9-4b0d-82be-3f0dbf2d899b"
+    workspace = "65e77714-26ba-420b-99a4-54093a5ad36b"
+    now = int(datetime(2026, 11, 2, 20, tzinfo=timezone.utc).timestamp())
+    due = datetime.fromtimestamp(now + 60, timezone.utc).isoformat()
+    expiry = datetime.fromtimestamp(now + 45, timezone.utc).isoformat()
+    queue = ReminderLedger(tmp_path / "synthetic.sqlite3", owner, workspace)
+    delivered = []
+    task_reads = []
+
+    def api_handler(request):
+        path = request.url.path
+        if path.endswith("/auth/me"):
+            return httpx.Response(200, json={"id": owner})
+        if path.endswith("/auth/sessions"):
+            return httpx.Response(200, json=[{"id": SESSION, "active": True, "revoked_at": None}])
+        if path.endswith("/auth/reminder-lease/" + SESSION):
+            return httpx.Response(200, json={"workspace_id": workspace,
+                                             "generation_id": GENERATION, "expires_at": expiry})
+        if path.endswith("/notifications/preferences"):
+            return httpx.Response(200, json={"enabled": True, "categories": ["tasks"],
+                                             "quiet_enabled": False, "respect_focus": False,
+                                             "timezone": "UTC", "quiet_start": "22:00",
+                                             "quiet_end": "07:00"})
+        if path.endswith("/tasks"):
+            task_reads.append(path)
+            return httpx.Response(200, json=[{"id": "synthetic-due", "owner_id": owner,
+                                             "workspace_id": workspace, "status": "todo",
+                                             "due_at": due}])
+        return httpx.Response(404)
+
+    with httpx.Client(base_url="http://127.0.0.1:8100/api/v1",
+                      transport=httpx.MockTransport(api_handler)) as client:
+        kwargs = dict(now=now, delivery_clock=lambda: now, notify=lambda: delivered.append(1),
+                      browser_session_id=SESSION, browser_lease_generation=GENERATION,
+                      stopping=stopping, delivery_lock=lock,
+                      delivery_permitted=listener.is_browser_recent)
+        assert run_once(client, queue, **kwargs) == 0
+        assert delivered == []
+        assert task_reads == [], "no private task reads without browser presence"
+        nonce = challenge(listener)
+        assert send(listener, "POST", "/heartbeat", body={
+            "nonce": nonce, "session_id": SESSION, "proof": heartbeat_proof(nonce)})[0] == 204
+        assert run_once(client, queue, **kwargs) == 1
+        assert delivered == [1]
+    queue.close()

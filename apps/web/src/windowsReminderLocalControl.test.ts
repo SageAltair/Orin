@@ -54,3 +54,30 @@ describe("optional local Windows companion revocation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+
+describe("foreground local browser heartbeat", () => {
+  it("authenticates the heartbeat with a domain-separated proof", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ nonce: "abcdef0123456789abcdef0123456789" }) })
+      .mockResolvedValueOnce({ status: 204 });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("crypto", { subtle: {
+      importKey: vi.fn().mockResolvedValue("key"),
+      sign: vi.fn().mockResolvedValue(Uint8Array.from([1, 2]).buffer),
+    } });
+    const { heartbeatLocalWindowsCompanion } = await import("./windowsReminderLocalControl");
+    await expect(heartbeatLocalWindowsCompanion(lease)).resolves.toBe(true);
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:18765/heartbeat");
+    expect(new TextDecoder().decode(vi.mocked(crypto.subtle.sign).mock.calls[0][2] as ArrayBuffer))
+      .toBe("abcdef0123456789abcdef0123456789|" + lease.sessionId + "|heartbeat");
+  });
+});
+
+describe("unreachable local heartbeat", () => {
+  it("never claims foreground presence without a listener acknowledgement", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
+    const { heartbeatLocalWindowsCompanion } = await import("./windowsReminderLocalControl");
+    await expect(heartbeatLocalWindowsCompanion(lease)).resolves.toBe(false);
+  });
+});

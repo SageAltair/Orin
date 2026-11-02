@@ -19,7 +19,8 @@ const WritingStudio = lazy(() =>
   })),
 );
 import { NotificationCenter } from "./NotificationCenter";
-import { activateWindowsLease, clearWindowsLeaseLocalState, handleWindowsLeaseRenewalFailure, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
+import { activateWindowsLease, clearWindowsLeaseLocalState, getWindowsLeaseIdentifiers, handleWindowsLeaseRenewalFailure, isWindowsLeaseOptedIn, renewWindowsLease, setWindowsLeaseOptIn, stopWindowsLease, windowsLeaseToggleEvent } from "./windowsReminderLease";
+import { heartbeatLocalWindowsCompanion } from "./windowsReminderLocalControl";
 import {
   useEffect,
   useCallback,
@@ -821,6 +822,26 @@ export default function App() {
     if (!user || !windowsLeaseEnabled) return;
     window.addEventListener("pagehide", revokeReminderLeaseOnPageHide);
     return () => window.removeEventListener("pagehide", revokeReminderLeaseOnPageHide);
+  }, [user?.id, windowsLeaseEnabled]);
+  useEffect(() => {
+    if (!user || !windowsLeaseEnabled) return;
+    let pending = false;
+    const pulse = () => {
+      // Background tabs may still send pulses; browser throttling or sleep
+      // naturally makes the companion fail closed when pulses stop.
+      if (pending) return;
+      const identifiers = getWindowsLeaseIdentifiers();
+      if (!identifiers) return;
+      pending = true;
+      void heartbeatLocalWindowsCompanion(identifiers).finally(() => { pending = false; });
+    };
+    const timer = window.setInterval(pulse, 2000);
+    document.addEventListener("visibilitychange", pulse);
+    pulse();
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", pulse);
+    };
   }, [user?.id, windowsLeaseEnabled]);
   const handleWorkspaceChange = useCallback(async (workspace: { id: string; name: string }) => {
     if (windowsLeaseEnabled && activeWorkspaceRef.current &&

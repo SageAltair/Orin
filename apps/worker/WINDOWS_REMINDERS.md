@@ -18,8 +18,9 @@ delivery when Orin is closed, Windows is asleep, or notifications are suppressed
   immediately before a due toast**. Changes to task opt-in, quiet hours or Focus
   suppression during a slow task scan take effect before delivery. HTTP 401/403
   or owner mismatch clears the queue. Network failure fails closed without
-  delivering cached reminders. A still-valid independently supplied token cannot
-  detect browser logout without a client-controlled session bridge.
+  delivering cached reminders. A browser-scoped server lease and fresh local
+  browser heartbeat are additionally required for foreground native delivery;
+  crash/revocation races still cannot guarantee instantaneous shutdown.
 - For multi-page task lists, performs a confirming read of all task identities,
   statuses and due timestamps before replacing the durable queue. This detects
   many offset-pagination shifts caused by concurrent edits or deletions, but
@@ -178,8 +179,9 @@ Use an HTTPS API, or loopback HTTP for local development. Do not put bearer
 tokens into tracked scripts, PowerShell history, screenshots, or logs.
 
 A successful toast API call is recorded as an attempt, not proof the alert was visible.
-The companion must be stopped when switching accounts or workspaces until
-a client-controlled session bridge is implemented.
+The companion requires a matching browser session, workspace lease and recent
+local heartbeat; changing accounts or workspaces requires revocation and a
+new explicit foreground launch.
 
 This process stops with Ctrl+C, does not auto-start, and does not install
 anything on a phone. It does not claim to wake a sleeping or powered-off device.
@@ -191,8 +193,9 @@ A server outage can prevent both the authenticated lease DELETE and logout
 POST. In that case the API lease can remain valid for up to 45 seconds.
 The foreground companion now **requires** the loopback channel. Without a
 configured trusted browser origin it refuses to start, before opening the
-reminder queue. This removes the unprotected no-listener configuration; it
-does not guarantee browser reachability or immediate revocation after a crash.
+reminder queue. This removes the unprotected no-listener configuration. A separate authenticated
+browser heartbeat now gates private task reads and native submission; it still
+cannot guarantee immediate revocation after a crash.
 The loopback channel gives an **already running** foreground
 companion an independent stop instruction. It does not replace remote
 revocation or prove visible Windows notification delivery.
@@ -209,11 +212,20 @@ Never expose this port on a network interface or proxy it externally.
 The browser uses a one-time nonce and HMAC-SHA256 with the existing ephemeral
 lease generation. It sends **no generation UUID, access token, refresh token,
 task title or workspace data** to loopback. The server requires an exact
-Origin, Host, session ID and valid proof, and accepts only a stop operation.
-A 204 acknowledgement is synchronized with toast submission: no new toast
-can be submitted **after acknowledgement**. An in-flight toast may finish
+Origin, Host, session ID and valid proof. It accepts only authenticated stop
+and heartbeat operations; it cannot start delivery, read tasks or schedule alerts.
+A successful `/revoke` 204 acknowledgement is synchronized with toast
+submission: no new toast can be submitted **after stop acknowledgement**. An in-flight toast may finish
 before acknowledgement. The companion then drops pending queue entries and
 exits; attempted reminders retain deduplication.
+
+The opted-in browser sends a heartbeat every two seconds while its tab can run;
+the worker requires a heartbeat no older than six seconds, checked using both
+monotonic and wall clocks before reading private tasks and immediately before
+toast submission. A blocked local channel or browser throttling fails closed.
+A crash just after a pulse leaves a bounded six-second freshness window; an
+already-started OS toast cannot be recalled. This is a safety tradeoff, not an
+always-on or background-delivery guarantee.
 
 The web client still attempts remote DELETE even if the local stop succeeds.
 If the local listener is absent, blocked by browser Private Network Access,
