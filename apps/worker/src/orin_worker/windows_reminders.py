@@ -16,13 +16,15 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from orin_worker.windows_reminder_control import LocalRevocationControl
 
 logger = logging.getLogger(__name__)
 PAGE_SIZE = 100
@@ -585,10 +587,29 @@ def test_toast_delivery() -> None:
     )
 
 
+def _notify_if_active(
+    notify: Callable[[], None], stopping: threading.Event | None,
+    delivery_lock: threading.Lock | None,
+) -> bool:
+    """Serialize native submission with an acknowledged local revocation."""
+    if stopping is None:
+        notify()
+        return True
+    if delivery_lock is None:
+        raise ValueError("A stop event requires a delivery lock")
+    with delivery_lock:
+        if stopping.is_set():
+            return False
+        notify()
+        return True
+
+
 def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_windows_toast,
              delivery_clock: Callable[[], int] | None = None,
              browser_session_id: str | None = None,
-             browser_lease_generation: str | None = None) -> int:
+             browser_lease_generation: str | None = None,
+             stopping: threading.Event | None = None,
+             delivery_lock: threading.Lock | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
     # A revoked browser lease must also block *reading* old-workspace tasks.
     # Check before the first task request, after the snapshot and before toast.
@@ -673,7 +694,11 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     _check_bound_browser_lease(client, ledger, browser_session_id, browser_lease_generation, delivery_now)
 
     # One generic toast per poll avoids flooding the user with N alerts.
-    notify()
+    # A local revocation can arrive during HTTP polling. Never submit a toast
+    # after its stop acknowledgement, even if remote DELETE/logout returned 503.
+    if not _notify_if_active(notify, stopping, delivery_lock):
+        ledger.clear_pending()
+        return 0
     for task_id, due in due_tasks:
         ledger.mark_attempted(task_id, due, delivery_now)
     return len(due_tasks)
@@ -704,11 +729,24 @@ def main() -> None:
     with single_instance(path):
         ledger = ReminderLedger(path, owner, workspace)
         stopping = threading.Event()
+        delivery_lock = threading.Lock()
         signal.signal(signal.SIGINT, lambda *_: stopping.set())
         signal.signal(signal.SIGTERM, lambda *_: stopping.set())
         logging.basicConfig(level=logging.INFO)
+        control_origin = os.getenv("ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN", "")
         try:
-            with httpx.Client(
+            control_port = int(os.getenv("ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_PORT", "18765"))
+        except ValueError as error:
+            raise SystemExit("Invalid local reminder control port") from error
+        try:
+            # Explicit opt-in. No service or startup installation. A port
+            # collision fails startup, never silently bypasses local control.
+            control = (LocalRevocationControl(
+                session_id=browser_session, generation=browser_lease,
+                allowed_origin=control_origin, stopping=stopping,
+                delivery_lock=delivery_lock, port=control_port,
+            ) if control_origin else nullcontext())
+            with control, httpx.Client(
                 base_url=url + "/api/v1", headers={"Authorization": "Bearer " + token},
                 timeout=httpx.Timeout(15, connect=5), follow_redirects=False,
                 trust_env=urlparse(url).hostname not in {"localhost", "127.0.0.1", "::1"},
@@ -718,7 +756,8 @@ def main() -> None:
                         run_once(client, ledger, now=int(time.time()),
                                  delivery_clock=lambda: int(time.time()),
                                  browser_session_id=browser_session,
-                                 browser_lease_generation=browser_lease)
+                                 browser_lease_generation=browser_lease,
+                                 stopping=stopping, delivery_lock=delivery_lock)
                     except httpx.HTTPStatusError as error:
                         if error.response.status_code in {401, 403}:
                             logger.error("Reminder authorization revoked; stopping companion")
@@ -734,6 +773,8 @@ def main() -> None:
                         logger.warning("Reminder sync or toast failed (%s); no delivery is confirmed", type(error).__name__)
                     stopping.wait(POLL_SECONDS)
         finally:
+            if control_origin and stopping.is_set():
+                ledger.clear_pending()
             ledger.close()
 
 

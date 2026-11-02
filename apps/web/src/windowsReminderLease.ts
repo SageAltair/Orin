@@ -1,5 +1,6 @@
 /** Opt-in, tab-scoped Windows companion lease. Never persists access tokens. */
 import { request, type AuthSession } from "./api";
+import { revokeLocalWindowsCompanion } from "./windowsReminderLocalControl";
 
 export const windowsLeaseOptInKey = "orin:windows-reminder-lease-opt-in";
 const generationKey = "orin:windows-reminder-lease-generation";
@@ -69,6 +70,9 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
       // Confirm old revocation before creating a replacement generation.
       if (previous.sessionId !== current.id)
         throw new Error("A different browser session still owns the reminder lease");
+      // Stop an active foreground companion before remote rotation. A
+      // remote 503 still blocks rotation, but cannot undo a local stop.
+      await revokeLocalWindowsCompanion(previous);
       try {
         await request<void>("/auth/reminder-lease", {
           method: "DELETE",
@@ -122,13 +126,17 @@ export function renewWindowsLease(workspaceId: string, generation: string): Prom
 export function stopWindowsLease(): Promise<void> {
   return serialize(async () => {
     // A stale tab cannot revoke another tab's newer workspace generation.
-    const generation = getWindowsLeaseIdentifiers()?.generation;
+    const identifiers = getWindowsLeaseIdentifiers();
+    const generation = identifiers?.generation;
     // No local generation means this tab does not own the server lease.
     // An unscoped DELETE could revoke a different tab's active workspace.
     if (!generation) {
       publishStatus(null, null);
       return;
     }
+    // An independent loopback stop can prevent stale native delivery when
+    // DELETE and server logout both fail. It never substitutes for DELETE.
+    if (identifiers) await revokeLocalWindowsCompanion(identifiers);
     try {
       await request<void>("/auth/reminder-lease", {
         method: "DELETE", signal: AbortSignal.timeout(8000),
