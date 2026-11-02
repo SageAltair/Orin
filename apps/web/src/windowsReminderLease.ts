@@ -51,6 +51,12 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
+function isClientScopeError(error: unknown): boolean {
+  return error instanceof Error &&
+    (error.message === "Workspace changed while the request was in flight." ||
+     error.message === "Session changed while the request was in flight.");
+}
+
 export function activateWindowsLease(workspaceId: string): Promise<string> {
   return serialize(async () => {
     const sessions = await request<AuthSession[]>("/auth/sessions", { signal: AbortSignal.timeout(8000) });
@@ -72,10 +78,7 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
       // A definite 4xx rejection did not activate this generation. An
       // ambiguous network/5xx failure may have committed before the response
       // failed, so keep its handle available for a scoped DELETE.
-      const scopeChangedAfterRequest = error instanceof Error &&
-        (error.message === "Workspace changed while the request was in flight." ||
-         error.message === "Session changed while the request was in flight.");
-      if (!scopeChangedAfterRequest &&
+      if (!isClientScopeError(error) &&
           typeof status === "number" && status >= 400 && status < 500) {
         if (previous) publishStatus(previous.sessionId, previous.generation);
         else clearWindowsLeaseLocalState();
@@ -134,7 +137,10 @@ export function stopWindowsLease(): Promise<void> {
 export function handleWindowsLeaseRenewalFailure(generation: string, error: unknown): void {
   if (getWindowsLeaseIdentifiers()?.generation !== generation) return;
   const status = error instanceof Error && "status" in error ? error.status : undefined;
-  if (status === 404 || status === 409) clearWindowsLeaseLocalState();
+  // The shared API can synthesize a 409 after a successful server PUT if
+  // the user switched workspaces while the response was in flight.
+  if (!isClientScopeError(error) && (status === 404 || status === 409))
+    clearWindowsLeaseLocalState();
 }
 
 export function clearWindowsLeaseLocalState(): void {
