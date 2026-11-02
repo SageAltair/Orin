@@ -25,11 +25,13 @@ function assertCurrentAuthEpoch(epoch: number): void {
   if (epoch !== authEpoch) throw new ApiError("Session changed while the request was in flight.", 401);
 }
 
-function assertCurrentRequestScope(auth: number, workspace: number): void {
+function assertCurrentRequestScope(auth: number, workspace: number | null): void {
   assertCurrentAuthEpoch(auth);
   // Even A -> B -> A invalidates A's pending responses: the workspace epoch
   // changes on every actual switch, not just when the current ID differs.
-  if (workspace !== workspaceEpoch)
+  // Requests made before the initial workspace is selected are unscoped.
+  // Their callers handle bootstrap cleanup; do not break initial app loading.
+  if (workspace !== null && workspace !== workspaceEpoch)
     throw new ApiError("Workspace changed while the request was in flight.", 409);
 }
 
@@ -90,7 +92,7 @@ async function refresh(allowSignedOut = false): Promise<RefreshResult> {
 
 export async function request<T>(path: string, options: RequestInit = {}, retry = true, onResponse?: (response: Response) => void): Promise<T> {
   const requestEpoch = authEpoch;
-  const requestWorkspaceEpoch = workspaceEpoch;
+  const requestWorkspaceEpoch = activeWorkspaceId === null ? null : workspaceEpoch;
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -142,7 +144,7 @@ export function revokeReminderLeaseOnPageHide(): void {
 export async function requestBlob(path: string): Promise<Blob> {
   const fetchBlob = async (retry: boolean): Promise<Blob> => {
     const requestEpoch = authEpoch;
-    const requestWorkspaceEpoch = workspaceEpoch;
+    const requestWorkspaceEpoch = activeWorkspaceId === null ? null : workspaceEpoch;
     const headers = new Headers();
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);

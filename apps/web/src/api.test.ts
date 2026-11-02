@@ -385,6 +385,26 @@ describe("workspace response isolation", () => {
     await expect(pending).rejects.toMatchObject({ status: 409 });
   });
 
+  it("keeps initial unscoped bootstrap reads working when a workspace is selected", async () => {
+    let finish: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "bootstrap-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "bootstrap-user" }), { status: 200 });
+      if (path.endsWith("/projects"))
+        return new Promise<Response>(resolve => { finish = resolve; });
+      throw new Error("Unexpected request: " + path);
+    }));
+    await login("bootstrap@example.com", "password");
+    const pending = request<unknown[]>("/projects");
+    await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-A");
+    finish!(new Response(JSON.stringify([]), { status: 200 }));
+    await expect(pending).resolves.toEqual([]);
+  });
+
   it("allows requests when selecting the already active workspace", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })));
     setActiveWorkspace("workspace-A");
