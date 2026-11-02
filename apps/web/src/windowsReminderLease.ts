@@ -103,6 +103,21 @@ export function stopWindowsLease(): Promise<void> {
   });
 }
 
+
+/**
+ * Preserve the tab's generation when a heartbeat fails without proving
+ * revocation. Otherwise a later explicit opt-out cannot send the scoped
+ * DELETE, and the old server lease can authorize alerts until expiry.
+ *
+ * A confirmed missing/stale lease can be discarded. A late failure from an
+ * older generation must never clear a newer tab/workspace activation.
+ */
+export function handleWindowsLeaseRenewalFailure(generation: string, error: unknown): void {
+  if (getWindowsLeaseIdentifiers()?.generation !== generation) return;
+  const status = error instanceof Error && "status" in error ? error.status : undefined;
+  if (status === 404 || status === 409) clearWindowsLeaseLocalState();
+}
+
 export function clearWindowsLeaseLocalState(): void {
   publishStatus(null, null);
 }
