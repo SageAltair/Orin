@@ -102,7 +102,13 @@ describe("Windows reminder browser lease", () => {
     const generation = await activateWindowsLease("workspace-a");
     // A 503 does not prove that the server-side lease was revoked. The
     // user must still be able to send a generation-scoped DELETE.
-    handleWindowsLeaseRenewalFailure(generation, Object.assign(new Error("API unavailable"), { status: 503 }));
+    const outage = Object.assign(new Error("API unavailable"), { status: 503 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "PUT") throw outage;
+      return undefined;
+    });
+    await expect(renewWindowsLease("workspace-a", generation)).rejects.toBe(outage);
+    handleWindowsLeaseRenewalFailure(generation, outage);
     expect(getWindowsLeaseIdentifiers()?.generation).toBe(generation);
     await stopWindowsLease();
     const deletes = apiRequest.mock.calls.filter(([path, options]) =>
