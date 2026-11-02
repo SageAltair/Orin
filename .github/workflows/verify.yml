@@ -334,7 +334,14 @@ jobs:
           exit 1
       - name: Cross-feature real-browser acceptance on disposable data
         working-directory: apps/web
-        run: npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+        run: |
+          if [ "${{ matrix.suite }}" = "isolated-acceptance.spec.ts" ]; then
+            # Run previously skipped live Writing/knowledge journeys against
+            # this job's disposable PostgreSQL/API/browser stack.
+            npm run test:e2e -- e2e/isolated-acceptance.spec.ts e2e/knowledge.spec.ts e2e/studio.spec.ts --project=chromium --workers=1
+          else
+            npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+          fi
       - name: Preserve isolated acceptance diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
