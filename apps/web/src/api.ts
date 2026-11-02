@@ -14,6 +14,12 @@ export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }
 
+function assertCurrentAuthEpoch(epoch: number): void {
+  // A response from a previous account must not repopulate UI or expose files
+  // after sign-out or a different login, even if the HTTP request succeeded.
+  if (epoch !== authEpoch) throw new ApiError("Session changed while the request was in flight.", 401);
+}
+
 export interface User { id: string; email: string; display_name: string; created_at: string; is_admin: boolean; is_disabled: boolean }
 export interface Task { id: string; title: string; description: string | null; verification_criteria?: string | null; status: "todo" | "in_progress" | "blocked" | "done" | "cancelled"; focus_state?: "inbox" | "later" | "today" | "active" | "released" | null; first_step?: string | null; why?: string | null; energy_level?: "low" | "medium" | "high" | null; estimated_minutes?: number | null; is_anchor?: boolean; trigger?: string | null; last_touched_at?: string | null; decay_review_at?: string | null; skip_count_today?: number; skip_day_key?: string | null; today_day_key?: string | null; today_position?: number | null; completed_at?: string | null; released_at?: string | null; priority: "low" | "normal" | "high" | "urgent"; due_at: string | null; project_id: string | null; milestone_id?: string | null; created_at: string; updated_at: string }
 export interface Milestone { id: string; project_id: string; title: string; description: string | null; target_date: string | null; status: "pending" | "completed"; completion_criteria: string | null; created_at: string; updated_at: string }
@@ -70,6 +76,7 @@ async function refresh(allowSignedOut = false): Promise<RefreshResult> {
 }
 
 export async function request<T>(path: string, options: RequestInit = {}, retry = true, onResponse?: (response: Response) => void): Promise<T> {
+  const requestEpoch = authEpoch;
   const headers = new Headers(options.headers);
   if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -77,6 +84,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   let response: Response;
   try { response = await fetch(`${baseUrl}/api/v1${path}`, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(120000), credentials: "include" }); }
   catch { throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0); }
+  assertCurrentAuthEpoch(requestEpoch);
   if (response.status === 401 && retry && path !== "/auth/login" && path !== "/auth/refresh") {
     const refreshResult = await refresh(path === "/auth/logout");
     if (refreshResult === "refreshed") return request<T>(path, options, false, onResponse);
@@ -92,7 +100,9 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   }
   onResponse?.(response);
   if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
+  const data = await response.json() as T;
+  assertCurrentAuthEpoch(requestEpoch);
+  return data;
 }
 
 /** Best-effort authenticated revocation when a browser tab is closing.
@@ -117,6 +127,7 @@ export function revokeReminderLeaseOnPageHide(): void {
 
 export async function requestBlob(path: string): Promise<Blob> {
   const fetchBlob = async (retry: boolean): Promise<Blob> => {
+    const requestEpoch = authEpoch;
     const headers = new Headers();
     if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
     if (activeWorkspaceId) headers.set("X-Orin-Workspace-Id", activeWorkspaceId);
@@ -126,6 +137,7 @@ export async function requestBlob(path: string): Promise<Blob> {
     } catch {
       throw new ApiError("Could not reach Orin. Check your connection and API configuration.", 0);
     }
+    assertCurrentAuthEpoch(requestEpoch);
     if (response.status === 401 && retry) {
       const refreshResult = await refresh();
       if (refreshResult === "refreshed") return fetchBlob(false);
@@ -135,7 +147,9 @@ export async function requestBlob(path: string): Promise<Blob> {
       }
     }
     if (!response.ok) throw new ApiError(`Could not load file (${response.status}).`, response.status);
-    return response.blob();
+    const blob = await response.blob();
+    assertCurrentAuthEpoch(requestEpoch);
+    return blob;
   };
   return fetchBlob(true);
 }
