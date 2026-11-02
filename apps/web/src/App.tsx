@@ -847,7 +847,10 @@ export default function App() {
     let generation: string | null = null;
     void activateWindowsLease(activeWorkspaceId).then(id => {
       if (!cancelled) generation = id;
-    }).catch(() => clearWindowsLeaseLocalState());
+    }).catch(() => {
+      // An uncertain activation PUT may already have committed server-side.
+      // Keep its generation available for explicit scoped revocation.
+    });
     const timer = window.setInterval(() => {
       if (!cancelled && generation) {
         const attemptedGeneration = generation;
