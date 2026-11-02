@@ -51,18 +51,59 @@ function serialize<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
+function isClientScopeError(error: unknown): boolean {
+  return error instanceof Error &&
+    (error.message === "Workspace changed while the request was in flight." ||
+     error.message === "Session changed while the request was in flight.");
+}
+
 export function activateWindowsLease(workspaceId: string): Promise<string> {
   return serialize(async () => {
     const sessions = await request<AuthSession[]>("/auth/sessions", { signal: AbortSignal.timeout(8000) });
     const current = sessions.find(s => s.current && s.active);
     if (!current) throw new Error("No active browser session for Windows reminders");
+    const previous = getWindowsLeaseIdentifiers();
+    if (previous) {
+      // A rotation PUT can fail before committing. Overwriting the old handle
+      // first would make a still-live previous generation impossible to revoke.
+      // Confirm old revocation before creating a replacement generation.
+      if (previous.sessionId !== current.id)
+        throw new Error("A different browser session still owns the reminder lease");
+      try {
+        await request<void>("/auth/reminder-lease", {
+          method: "DELETE",
+          signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ generation_id: previous.generation }),
+        });
+      } catch (error) {
+        // 409 confirms another tab already replaced this generation.
+        if (isClientScopeError(error) ||
+            !(error instanceof Error && "status" in error && error.status === 409))
+          throw error;
+      }
+      clearWindowsLeaseLocalState();
+    }
     const generation = crypto.randomUUID();
-    await request("/auth/reminder-lease", {
-      method: "PUT",
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation, rotate: true }),
-    });
+    // Persist the revocation handle before asking the server to create a
+    // lease. Storage failure must not leave a live lease with no local handle.
     publishStatus(current.id, generation);
+    try {
+      await request("/auth/reminder-lease", {
+        method: "PUT",
+        signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation, rotate: true }),
+      });
+    } catch (error) {
+      const status = error instanceof Error && "status" in error ? error.status : undefined;
+      // A definite 4xx rejection did not activate this generation. An
+      // ambiguous network/5xx failure may have committed before the response
+      // failed, so keep its handle available for a scoped DELETE.
+      if (!isClientScopeError(error) &&
+          typeof status === "number" && status >= 400 && status < 500) {
+        clearWindowsLeaseLocalState();
+      }
+      throw error;
+    }
     return generation;
   });
 }
@@ -97,7 +138,8 @@ export function stopWindowsLease(): Promise<void> {
       // 409 means another tab already replaced this generation. The old
       // workspace is no longer authorized, so clearing our local ownership
       // is safe. Other errors leave navigation blocked until confirmed.
-      if (!(error instanceof Error && "status" in error && error.status === 409)) throw error;
+      if (isClientScopeError(error) ||
+            !(error instanceof Error && "status" in error && error.status === 409)) throw error;
     }
     publishStatus(null, null);
   });
@@ -115,7 +157,10 @@ export function stopWindowsLease(): Promise<void> {
 export function handleWindowsLeaseRenewalFailure(generation: string, error: unknown): void {
   if (getWindowsLeaseIdentifiers()?.generation !== generation) return;
   const status = error instanceof Error && "status" in error ? error.status : undefined;
-  if (status === 404 || status === 409) clearWindowsLeaseLocalState();
+  // The shared API can synthesize a 409 after a successful server PUT if
+  // the user switched workspaces while the response was in flight.
+  if (!isClientScopeError(error) && (status === 404 || status === 409))
+    clearWindowsLeaseLocalState();
 }
 
 export function clearWindowsLeaseLocalState(): void {
