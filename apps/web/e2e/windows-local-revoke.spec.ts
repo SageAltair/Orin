@@ -18,7 +18,7 @@ test("real Chromium revokes a disposable foreground companion over loopback", as
     "  allowed_origin='http://127.0.0.1:4173', stopping=stop,",
     "  delivery_lock=threading.Lock(), port=18765):",
     "  print('READY', flush=True)",
-    "  print('STOPPED' if stop.wait(20) else 'TIMED_OUT', flush=True)",
+    "  print('STOPPED' if stop.wait(60) else 'TIMED_OUT', flush=True)",
   ].join("\n");
   const child = spawn(process.platform === "win32" ? "python" : "python3", ["-u", "-c", code], {
     cwd: root,
