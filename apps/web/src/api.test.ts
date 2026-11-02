@@ -190,6 +190,58 @@ describe("web logout and account isolation", () => {
     expect(headers.get("X-Orin-Workspace-Id")).toBeNull();
   });
 
+  it("does not silently refresh a signed-out session after failed server logout", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "user-1" }), { status: 200 }))
+      .mockRejectedValueOnce(new TypeError("Offline"))
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "zombie-token" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: "private-task" }]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    await expect(logout()).rejects.toMatchObject({ status: 0 });
+    await expect(request<unknown[]>("/tasks")).rejects.toMatchObject({ status: 401 });
+    // Background requests after local sign-out cannot use the surviving cookie
+    // to revive the former account. An explicit logout retry remains permitted.
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("ignores a delayed refresh response after logout has cleared local credentials", async () => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    let firstTasksRequest = true;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, _init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "user-1" }), { status: 200 });
+      if (path.endsWith("/auth/refresh"))
+        return new Promise<Response>(resolve => { resolveRefresh = resolve; });
+      if (path.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      if (path.endsWith("/tasks")) {
+        if (firstTasksRequest) {
+          firstTasksRequest = false;
+          return new Response(null, { status: 401 });
+        }
+        return new Response(JSON.stringify([]), { status: 200 });
+      }
+      throw new Error("Unexpected API call: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("user@example.com", "password");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(resolveRefresh).toBeTypeOf("function"));
+    await logout();
+    resolveRefresh!(new Response(JSON.stringify({ access_token: "late-token" }), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    await expect(request<unknown[]>("/tasks")).resolves.toEqual([]);
+    const headers = new Headers(fetchMock.mock.calls.at(-1)?.[1]?.headers);
+    expect(headers.get("Authorization")).toBeNull();
+  });
+
   it("can revoke the cookie-backed session on retry after an offline sign-out", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
     fetchMock
