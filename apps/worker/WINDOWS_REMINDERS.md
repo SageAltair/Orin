@@ -185,22 +185,25 @@ This process stops with Ctrl+C, does not auto-start, and does not install
 anything on a phone. It does not claim to wake a sleeping or powered-off device.
 The OS toast adapter and lifecycle still require real Windows validation.
 
-## Optional foreground loopback revocation (release security gate)
+## Required foreground loopback revocation (release security gate)
 
 A server outage can prevent both the authenticated lease DELETE and logout
 POST. In that case the API lease can remain valid for up to 45 seconds.
-The optional loopback channel gives an **already running** foreground
+The foreground companion now **requires** the loopback channel. Without a
+configured trusted browser origin it refuses to start, before opening the
+reminder queue. This removes the unprotected no-listener configuration; it
+does not guarantee browser reachability or immediate revocation after a crash.
+The loopback channel gives an **already running** foreground
 companion an independent stop instruction. It does not replace remote
 revocation or prove visible Windows notification delivery.
 
-Only in an explicitly opted-in, disposable foreground environment, set
+Before any explicitly opted-in foreground launch, set
 `ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN` to the **exact** browser origin
 (for example `http://127.0.0.1:4173`) before launching the companion.
 The listener binds only `127.0.0.1:18765`; the optional
 `ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_PORT` must match the browser's
-port 18765 for the current web build. No listener is created when the origin
-variable is absent. Port collision or invalid origin fails startup instead
-of silently disabling the configured control. Never expose this port on a
+port 18765 for the current web build. Missing or invalid origin, or a port
+collision, fails startup instead of silently running without local control. Never expose this port on a
 network interface or proxy it externally.
 
 The browser uses a one-time nonce and HMAC-SHA256 with the existing ephemeral
