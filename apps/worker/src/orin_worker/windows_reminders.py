@@ -234,7 +234,12 @@ def _focus_active(client: httpx.Client) -> bool:
         raise ValueError("Invalid Focus active state")
     return state["active"]
 
-def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, tuple[object, object]], int]:
+class BrowserPresenceExpired(RuntimeError):
+    """Stop private task pagination when the foreground browser is no longer present."""
+
+
+def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now: int, *,
+                     delivery_permitted: Callable[[], bool] | None = None) -> tuple[dict[str, int], dict[str, tuple[object, object]], int]:
     """Read every task page, including identities of completed tasks.
 
     Signatures let a second scan detect deletions or updates that shift offset
@@ -245,6 +250,8 @@ def _scan_task_pages(client: httpx.Client, owner_id: str, workspace_id: str, now
     signatures: dict[str, tuple[object, object]] = {}
     seen: set[str] = set()
     for page in range(1000):
+        if delivery_permitted is not None and not delivery_permitted():
+            raise BrowserPresenceExpired("Browser heartbeat expired during task pagination")
         response = client.get(
             "/tasks",
             params={"limit": PAGE_SIZE, "offset": page * PAGE_SIZE},
@@ -384,16 +391,19 @@ def _check_bound_browser_session(client: httpx.Client, ledger: ReminderLedger,
         raise
 
 
-def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int) -> tuple[dict[str, int], dict[str, object]]:
+def _fetch_snapshot(client: httpx.Client, owner_id: str, workspace_id: str, now: int, *,
+                    delivery_permitted: Callable[[], bool] | None = None) -> tuple[dict[str, int], dict[str, object]]:
     prefs = _fetch_live_policy(client, owner_id)
     if not prefs["enabled"] or "tasks" not in prefs["categories"]:
         return {}, prefs
 
-    tasks, signatures, pages = _scan_task_pages(client, owner_id, workspace_id, now)
+    tasks, signatures, pages = _scan_task_pages(
+        client, owner_id, workspace_id, now, delivery_permitted=delivery_permitted)
     if pages > 1:
         # An offset shift can omit a task without repeating an ID. Confirm the
         # full identity/status/deadline set before replacing durable reminders.
-        _, confirmed, _ = _scan_task_pages(client, owner_id, workspace_id, now)
+        _, confirmed, _ = _scan_task_pages(
+            client, owner_id, workspace_id, now, delivery_permitted=delivery_permitted)
         if signatures != confirmed:
             raise ValueError("Tasks changed during pagination; retry before scheduling")
     return tasks, prefs
@@ -626,8 +636,17 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
         _check_bound_browser_lease(
             client, ledger, browser_session_id, browser_lease_generation, now,
         )
+    if delivery_permitted is not None and not delivery_permitted():
+        ledger.clear_pending()
+        return 0
     try:
-        tasks, prefs = _fetch_snapshot(client, ledger.owner_id, ledger.workspace_id, now)
+        tasks, prefs = _fetch_snapshot(
+            client, ledger.owner_id, ledger.workspace_id, now,
+            delivery_permitted=delivery_permitted,
+        )
+    except BrowserPresenceExpired:
+        ledger.clear_pending()
+        return 0
     except httpx.HTTPStatusError as error:
         if error.response.status_code in {401, 403}:
             ledger.clear()
@@ -635,6 +654,9 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     except PermissionError:
         ledger.clear()
         raise
+    if delivery_permitted is not None and not delivery_permitted():
+        ledger.clear_pending()
+        return 0
     # An independent companion credential must not continue delivering after
     # the explicitly selected browser session has logged out.
     _check_bound_browser_session(client, ledger, browser_session_id)
@@ -646,6 +668,9 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     if not due_tasks:
         return 0
 
+    if delivery_permitted is not None and not delivery_permitted():
+        ledger.clear_pending()
+        return 0
     # The initial task snapshot can become stale while other requests run.
     # Confirm that every due task is still active at the same deadline
     # immediately before delivery. A failure leaves reminders retryable.
@@ -653,7 +678,11 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     try:
         current_tasks, _, _ = _scan_task_pages(
             client, ledger.owner_id, ledger.workspace_id, now,
+            delivery_permitted=delivery_permitted,
         )
+    except BrowserPresenceExpired:
+        ledger.clear_pending()
+        return 0
     except httpx.HTTPStatusError as error:
         if error.response.status_code in {401, 403}:
             ledger.clear()
