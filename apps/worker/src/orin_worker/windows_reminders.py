@@ -16,7 +16,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -725,6 +725,9 @@ def main() -> None:
         raise SystemExit("Owner, workspace and optional browser session must be UUIDs") from error
     if not browser_session or not browser_lease:
         raise SystemExit("An active browser session and short-lived workspace lease are required")
+    control_origin = os.getenv("ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN", "")
+    if not control_origin:
+        raise SystemExit("A trusted browser origin is required for local revocation")
     path = Path(os.getenv("ORIN_WINDOWS_REMINDERS_DB", str(Path.home() / ".orin" / "windows-reminders.sqlite3")))
     with single_instance(path):
         ledger = ReminderLedger(path, owner, workspace)
@@ -733,19 +736,18 @@ def main() -> None:
         signal.signal(signal.SIGINT, lambda *_: stopping.set())
         signal.signal(signal.SIGTERM, lambda *_: stopping.set())
         logging.basicConfig(level=logging.INFO)
-        control_origin = os.getenv("ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN", "")
         try:
             control_port = int(os.getenv("ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_PORT", "18765"))
         except ValueError as error:
             raise SystemExit("Invalid local reminder control port") from error
         try:
-            # Explicit opt-in. No service or startup installation. A port
-            # collision fails startup, never silently bypasses local control.
-            control = (LocalRevocationControl(
+            # A foreground companion must accept local stop instructions.
+            # Missing origin or port collision fails startup before any poll.
+            control = LocalRevocationControl(
                 session_id=browser_session, generation=browser_lease,
                 allowed_origin=control_origin, stopping=stopping,
                 delivery_lock=delivery_lock, port=control_port,
-            ) if control_origin else nullcontext())
+            )
             with control, httpx.Client(
                 base_url=url + "/api/v1", headers={"Authorization": "Bearer " + token},
                 timeout=httpx.Timeout(15, connect=5), follow_redirects=False,
@@ -773,7 +775,7 @@ def main() -> None:
                         logger.warning("Reminder sync or toast failed (%s); no delivery is confirmed", type(error).__name__)
                     stopping.wait(POLL_SECONDS)
         finally:
-            if control_origin and stopping.is_set():
+            if stopping.is_set():
                 ledger.clear_pending()
             ledger.close()
 
