@@ -102,4 +102,3 @@ def test_heartbeat_expiry_during_task_pagination_blocks_second_page(tmp_path):
         assert requested_offsets == [0]
     finally:
         queue.close()
-
