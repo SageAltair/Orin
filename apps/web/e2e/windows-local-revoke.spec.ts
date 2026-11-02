@@ -52,11 +52,15 @@ test("real Chromium revokes a disposable foreground companion over loopback", as
       (await page.request.get("/src/windowsReminderLocalControl.ts")).status(),
       { timeout: 10_000 },
     ).toBe(200);
-    const revoked = await page.evaluate(async ({ sessionId, generation }) => {
-      const { revokeLocalWindowsCompanion } = await import("/src/windowsReminderLocalControl.ts");
-      return revokeLocalWindowsCompanion({ sessionId, generation });
+    const result = await page.evaluate(async ({ sessionId, generation }) => {
+      const { heartbeatLocalWindowsCompanion, revokeLocalWindowsCompanion } =
+        await import("/src/windowsReminderLocalControl.ts");
+      const heartbeat = await heartbeatLocalWindowsCompanion({ sessionId, generation });
+      const revoked = await revokeLocalWindowsCompanion({ sessionId, generation });
+      return { heartbeat, revoked };
     }, { sessionId, generation });
-    expect(revoked).toBe(true);
+    expect(result.heartbeat).toBe(true);
+    expect(result.revoked).toBe(true);
     await expect.poll(() => output.includes("STOPPED"), { timeout: 5_000 }).toBe(true);
   } finally {
     if (child.exitCode === null) child.kill();

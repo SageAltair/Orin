@@ -4,6 +4,7 @@ from pathlib import Path
 import sqlite3
 import os
 import subprocess
+import threading
 
 import orin_worker.windows_reminders as windows_reminders
 
@@ -1151,7 +1152,15 @@ def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, m
         name="nt", getenv=lambda name, default=None: config.get(name, default),
     ))
     monkeypatch.setattr(windows_reminders, "single_instance", lambda path: nullcontext())
-    monkeypatch.setattr(windows_reminders, "LocalRevocationControl", lambda **kwargs: nullcontext())
+    class FakeControl:
+        def is_browser_recent(self):
+            return True
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+
+    monkeypatch.setattr(windows_reminders, "LocalRevocationControl", lambda **kwargs: FakeControl())
 
     class FakeLedger:
         def clear_pending(self):
@@ -1496,4 +1505,21 @@ def test_browser_lease_outage_preserves_attempted_dedup_without_pending_alerts(t
                         browser_lease_generation=LEASE_GENERATION,
                         notify=lambda: calls.append("toast")) == 1
         assert calls == ["toast"]
+    queue.close()
+
+
+def test_missing_local_browser_heartbeat_suppresses_and_retries_due_toast(tmp_path):
+    queue = ledger(tmp_path)
+    notified = []
+    stop = threading.Event()
+    lock = threading.Lock()
+    with api([task("due", NOW + 60)], prefs_extra={"respect_focus": False}) as client:
+        assert run_once(client, queue, now=NOW, notify=lambda: notified.append("stale"),
+                        stopping=stop, delivery_lock=lock,
+                        delivery_permitted=lambda: False) == 0
+        assert notified == []
+        assert run_once(client, queue, now=NOW, notify=lambda: notified.append("fresh"),
+                        stopping=stop, delivery_lock=lock,
+                        delivery_permitted=lambda: True) == 1
+    assert notified == ["fresh"]
     queue.close()

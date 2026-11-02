@@ -169,3 +169,41 @@ def test_acknowledged_stop_waits_for_inflight_native_submission(control):
     # After acknowledgement, another toast must not be submitted.
     assert _notify_if_active(lambda: notified.append(2), stopping, lock) is False
     assert notified == [1]
+
+
+def heartbeat_proof(nonce):
+    return hmac.new(GENERATION.encode(), f"{nonce}|{SESSION}|heartbeat".encode(), hashlib.sha256).hexdigest()
+
+
+def test_unreachable_browser_fails_closed_before_toast(control):
+    listener, stopping, lock = control
+    notified = []
+    assert not listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(1), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is False
+    assert notified == []
+    nonce = challenge(listener)
+    payload = {"nonce": nonce, "session_id": SESSION, "proof": heartbeat_proof(nonce)}
+    assert send(listener, "POST", "/heartbeat", body=payload)[0] == 204
+    assert listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(2), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is True
+    assert notified == [2]
+    listener._last_heartbeat -= 20
+    assert not listener.is_browser_recent()
+    assert _notify_if_active(lambda: notified.append(3), stopping, lock,
+                             delivery_permitted=listener.is_browser_recent) is False
+    assert notified == [2]
+
+
+def test_local_heartbeat_rejects_wrong_origin_and_revoke_proof(control):
+    listener, stopping, _ = control
+    nonce = challenge(listener)
+    assert send(listener, "POST", "/heartbeat", origin="https://attacker.example",
+                body={"nonce": nonce, "session_id": SESSION,
+                      "proof": heartbeat_proof(nonce)})[0] == 403
+    assert send(listener, "POST", "/heartbeat",
+                body={"nonce": nonce, "session_id": SESSION,
+                      "proof": proof(nonce)})[0] == 403
+    assert not listener.is_browser_recent()
+    assert not stopping.is_set()

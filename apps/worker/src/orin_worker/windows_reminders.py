@@ -590,15 +590,18 @@ def test_toast_delivery() -> None:
 def _notify_if_active(
     notify: Callable[[], None], stopping: threading.Event | None,
     delivery_lock: threading.Lock | None,
+    delivery_permitted: Callable[[], bool] | None = None,
 ) -> bool:
     """Serialize native submission with an acknowledged local revocation."""
     if stopping is None:
+        if delivery_permitted is not None and not delivery_permitted():
+            return False
         notify()
         return True
     if delivery_lock is None:
         raise ValueError("A stop event requires a delivery lock")
     with delivery_lock:
-        if stopping.is_set():
+        if stopping.is_set() or (delivery_permitted is not None and not delivery_permitted()):
             return False
         notify()
         return True
@@ -609,7 +612,8 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
              browser_session_id: str | None = None,
              browser_lease_generation: str | None = None,
              stopping: threading.Event | None = None,
-             delivery_lock: threading.Lock | None = None) -> int:
+             delivery_lock: threading.Lock | None = None,
+             delivery_permitted: Callable[[], bool] | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
     # A revoked browser lease must also block *reading* old-workspace tasks.
     # Check before the first task request, after the snapshot and before toast.
@@ -696,7 +700,8 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
     # One generic toast per poll avoids flooding the user with N alerts.
     # A local revocation can arrive during HTTP polling. Never submit a toast
     # after its stop acknowledgement, even if remote DELETE/logout returned 503.
-    if not _notify_if_active(notify, stopping, delivery_lock):
+    if not _notify_if_active(notify, stopping, delivery_lock,
+                             delivery_permitted=delivery_permitted):
         ledger.clear_pending()
         return 0
     for task_id, due in due_tasks:
@@ -759,7 +764,8 @@ def main() -> None:
                                  delivery_clock=lambda: int(time.time()),
                                  browser_session_id=browser_session,
                                  browser_lease_generation=browser_lease,
-                                 stopping=stopping, delivery_lock=delivery_lock)
+                                 stopping=stopping, delivery_lock=delivery_lock,
+                                 delivery_permitted=control.is_browser_recent)
                     except httpx.HTTPStatusError as error:
                         if error.response.status_code in {401, 403}:
                             logger.error("Reminder authorization revoked; stopping companion")

@@ -52,8 +52,9 @@ class LocalRevocationControl:
     """Foreground-only, origin-restricted, generation-authenticated stop channel.
 
     A revocation acknowledgement is serialized against toast submission.
-    Port collision or invalid configuration fails startup rather than running
-    a companion whose browser cannot reach its configured stop channel.
+    Port collision or invalid configuration fails startup. A configured but
+    unreachable browser cannot authorize delivery: each native submission
+    requires an authenticated local heartbeat no older than six seconds.
     """
 
     def __init__(
@@ -69,6 +70,7 @@ class LocalRevocationControl:
         generation = str(uuid.UUID(generation))
         self._stopping = stopping
         self._delivery_lock = delivery_lock
+        self._last_heartbeat = 0.0
         self._nonces: dict[str, float] = {}
         self._nonce_lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -102,7 +104,7 @@ class LocalRevocationControl:
 
             def do_OPTIONS(self) -> None:
                 requested = self.headers.get("Access-Control-Request-Method")
-                if (self.path not in {"/challenge", "/revoke"}
+                if (self.path not in {"/challenge", "/revoke", "/heartbeat"}
                         or self.headers.get("Host") != f"127.0.0.1:{owner.port}"
                         or self.headers.get("Origin") != allowed_origin
                         or requested not in {None, "GET", "POST"}):
@@ -134,7 +136,7 @@ class LocalRevocationControl:
                 self._response(200, json.dumps({"nonce": nonce}).encode())
 
             def do_POST(self) -> None:
-                if self.path != "/revoke" or not self._authorized():
+                if self.path not in {"/revoke", "/heartbeat"} or not self._authorized():
                     self._response(403)
                     return
                 length = self.headers.get("Content-Length", "")
@@ -162,7 +164,8 @@ class LocalRevocationControl:
                 with owner._nonce_lock:
                     expiry = owner._nonces.pop(nonce, 0)
                 expected = hmac.new(
-                    generation.encode(), f"{nonce}|{session_id}".encode(),
+                    generation.encode(), f"{nonce}|{session_id}".encode() +
+                    (b"|heartbeat" if self.path == "/heartbeat" else b""),
                     hashlib.sha256,
                 ).hexdigest()
                 if (expiry <= time.monotonic()
@@ -173,12 +176,23 @@ class LocalRevocationControl:
                 # No successful response can race ahead of an already-started
                 # toast. Once 204 is sent, the worker cannot submit another.
                 with owner._delivery_lock:
-                    owner._stopping.set()
+                    if self.path == "/heartbeat":
+                        if owner._stopping.is_set():
+                            self._response(409)
+                            return
+                        owner._last_heartbeat = time.monotonic()
+                    else:
+                        owner._stopping.set()
                 self._response(204)
 
         self._server = _ExclusiveLoopbackServer(("127.0.0.1", port), Handler)
         self._server.daemon_threads = True
         self.port = self._server.server_port
+
+    def is_browser_recent(self) -> bool:
+        """Only allow foreground delivery after a recent authenticated browser pulse."""
+        return (not self._stopping.is_set() and self._last_heartbeat > 0
+                and time.monotonic() - self._last_heartbeat <= 6)
 
     def __enter__(self) -> "LocalRevocationControl":
         self._thread = threading.Thread(
