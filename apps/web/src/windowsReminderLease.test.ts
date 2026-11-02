@@ -117,6 +117,18 @@ describe("Windows reminder browser lease", () => {
     expect(JSON.parse(deletes[0][1].body)).toEqual({ generation_id: generation });
   });
 
+  it("keeps the heartbeat revocation handle after a client-side workspace conflict", async () => {
+    const generation = await activateWindowsLease("workspace-a");
+    const stale = Object.assign(new Error("Workspace changed while the request was in flight."), { status: 409 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "PUT") throw stale;
+      return undefined;
+    });
+    await expect(renewWindowsLease("workspace-a", generation)).rejects.toBe(stale);
+    handleWindowsLeaseRenewalFailure(generation, stale);
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(generation);
+  });
+
   it("keeps an uncertain activation generation available for scoped revocation", async () => {
     const outage = Object.assign(new Error("API unavailable after PUT"), { status: 503 });
     apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
