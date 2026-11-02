@@ -57,12 +57,27 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
     const current = sessions.find(s => s.current && s.active);
     if (!current) throw new Error("No active browser session for Windows reminders");
     const generation = crypto.randomUUID();
-    await request("/auth/reminder-lease", {
-      method: "PUT",
-      signal: AbortSignal.timeout(8000),
-      body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation, rotate: true }),
-    });
+    const previous = getWindowsLeaseIdentifiers();
+    // Persist the revocation handle before asking the server to create a
+    // lease. Storage failure must not leave a live lease with no local handle.
     publishStatus(current.id, generation);
+    try {
+      await request("/auth/reminder-lease", {
+        method: "PUT",
+        signal: AbortSignal.timeout(8000),
+        body: JSON.stringify({ workspace_id: workspaceId, generation_id: generation, rotate: true }),
+      });
+    } catch (error) {
+      const status = error instanceof Error && "status" in error ? error.status : undefined;
+      // A definite 4xx rejection did not activate this generation. An
+      // ambiguous network/5xx failure may have committed before the response
+      // failed, so keep its handle available for a scoped DELETE.
+      if (typeof status === "number" && status >= 400 && status < 500) {
+        if (previous) publishStatus(previous.sessionId, previous.generation);
+        else clearWindowsLeaseLocalState();
+      }
+      throw error;
+    }
     return generation;
   });
 }
