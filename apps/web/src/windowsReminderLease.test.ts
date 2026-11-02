@@ -202,6 +202,32 @@ describe("Windows reminder browser lease", () => {
     expect(serverGeneration).toBeNull();
   });
 
+  it("retains the lease handle if a DELETE receives a client-generated workspace conflict", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    const stale = Object.assign(new Error("Workspace changed while the request was in flight."), { status: 409 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/reminder-lease" && options?.method === "DELETE") throw stale;
+      return undefined;
+    });
+    await expect(stopWindowsLease()).rejects.toBe(stale);
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+  });
+
+  it("does not rotate after a client-generated 409 on previous lease revocation", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    const stale = Object.assign(new Error("Workspace changed while the request was in flight."), { status: 409 });
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/sessions") return [{ id: "browser-session", current: true, active: true }];
+      if (path === "/auth/reminder-lease" && options?.method === "DELETE") throw stale;
+      return undefined;
+    });
+    await expect(activateWindowsLease("workspace-b")).rejects.toBe(stale);
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+    const puts = apiRequest.mock.calls.filter(([path, options]) =>
+      path === "/auth/reminder-lease" && options?.method === "PUT");
+    expect(puts).toHaveLength(1);
+  });
+
   it("does not rotate while revocation of the previous lease is uncertain", async () => {
     const first = await activateWindowsLease("workspace-a");
     apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {

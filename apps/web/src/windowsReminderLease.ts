@@ -77,7 +77,8 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
         });
       } catch (error) {
         // 409 confirms another tab already replaced this generation.
-        if (!(error instanceof Error && "status" in error && error.status === 409))
+        if (isClientScopeError(error) ||
+            !(error instanceof Error && "status" in error && error.status === 409))
           throw error;
       }
       clearWindowsLeaseLocalState();
@@ -137,7 +138,8 @@ export function stopWindowsLease(): Promise<void> {
       // 409 means another tab already replaced this generation. The old
       // workspace is no longer authorized, so clearing our local ownership
       // is safe. Other errors leave navigation blocked until confirmed.
-      if (!(error instanceof Error && "status" in error && error.status === 409)) throw error;
+      if (isClientScopeError(error) ||
+            !(error instanceof Error && "status" in error && error.status === 409)) throw error;
     }
     publishStatus(null, null);
   });
