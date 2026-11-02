@@ -615,6 +615,11 @@ def run_once(client: httpx.Client, ledger: ReminderLedger, *, now: int, notify=_
              delivery_lock: threading.Lock | None = None,
              delivery_permitted: Callable[[], bool] | None = None) -> int:
     """No stale/offline alerts: fetch and validate all pages before any delivery."""
+    # Without fresh foreground presence, do not even read private workspace
+    # tasks using an otherwise still-valid companion credential/lease.
+    if delivery_permitted is not None and not delivery_permitted():
+        ledger.clear_pending()
+        return 0
     # A revoked browser lease must also block *reading* old-workspace tasks.
     # Check before the first task request, after the snapshot and before toast.
     if browser_lease_generation is not None:

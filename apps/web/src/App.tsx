@@ -827,7 +827,9 @@ export default function App() {
     if (!user || !windowsLeaseEnabled) return;
     let pending = false;
     const pulse = () => {
-      if (pending || document.visibilityState !== "visible") return;
+      // Background tabs may still send pulses; browser throttling or sleep
+      // naturally makes the companion fail closed when pulses stop.
+      if (pending) return;
       const identifiers = getWindowsLeaseIdentifiers();
       if (!identifiers) return;
       pending = true;

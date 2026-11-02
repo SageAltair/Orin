@@ -226,6 +226,7 @@ def test_live_loopback_heartbeat_gates_synthetic_api_sqlite_delivery(control, tm
     expiry = datetime.fromtimestamp(now + 45, timezone.utc).isoformat()
     queue = ReminderLedger(tmp_path / "synthetic.sqlite3", owner, workspace)
     delivered = []
+    task_reads = []
 
     def api_handler(request):
         path = request.url.path
@@ -242,6 +243,7 @@ def test_live_loopback_heartbeat_gates_synthetic_api_sqlite_delivery(control, tm
                                              "timezone": "UTC", "quiet_start": "22:00",
                                              "quiet_end": "07:00"})
         if path.endswith("/tasks"):
+            task_reads.append(path)
             return httpx.Response(200, json=[{"id": "synthetic-due", "owner_id": owner,
                                              "workspace_id": workspace, "status": "todo",
                                              "due_at": due}])
@@ -255,6 +257,7 @@ def test_live_loopback_heartbeat_gates_synthetic_api_sqlite_delivery(control, tm
                       delivery_permitted=listener.is_browser_recent)
         assert run_once(client, queue, **kwargs) == 0
         assert delivered == []
+        assert task_reads == [], "no private task reads without browser presence"
         nonce = challenge(listener)
         assert send(listener, "POST", "/heartbeat", body={
             "nonce": nonce, "session_id": SESSION, "proof": heartbeat_proof(nonce)})[0] == 204
