@@ -1109,6 +1109,28 @@ def test_late_task_revalidation_allows_unchanged_due_task(tmp_path):
     queue.close()
 
 
+def test_foreground_companion_refuses_unprotected_local_stop(monkeypatch):
+    """Never start an opted-in companion that cannot accept browser-local revocation."""
+    from types import SimpleNamespace
+
+    config = {
+        "ORIN_WINDOWS_REMINDERS_ENABLED": "1",
+        "ORIN_WINDOWS_REMINDERS_API_URL": "http://127.0.0.1:8100",
+        "ORIN_WINDOWS_REMINDERS_TOKEN": "disposable-test-token",
+        "ORIN_WINDOWS_REMINDERS_OWNER_ID": OWNER,
+        "ORIN_WINDOWS_REMINDERS_WORKSPACE_ID": WORKSPACE,
+        "ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID": "e4ef9f02-05f8-4c40-b0e4-ff4e99ca9093",
+        "ORIN_WINDOWS_REMINDERS_BROWSER_LEASE_GENERATION": "3c413eed-47a2-45c5-922f-57d60610f728",
+    }
+    monkeypatch.setattr(windows_reminders, "os", SimpleNamespace(
+        name="nt", getenv=lambda name, default=None: config.get(name, default),
+    ))
+    monkeypatch.setattr(windows_reminders, "single_instance",
+                        lambda path: pytest.fail("Companion must not open its queue"))
+    with pytest.raises(SystemExit, match="local revocation"):
+        windows_reminders.main()
+
+
 def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, monkeypatch):
     """A transient Windows subprocess OSError must not kill the reminder poller."""
     from contextlib import nullcontext
@@ -1122,14 +1144,19 @@ def test_foreground_companion_recovers_from_os_toast_transport_error(tmp_path, m
         "ORIN_WINDOWS_REMINDERS_WORKSPACE_ID": WORKSPACE,
         "ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID": "e4ef9f02-05f8-4c40-b0e4-ff4e99ca9093",
         "ORIN_WINDOWS_REMINDERS_BROWSER_LEASE_GENERATION": "3c413eed-47a2-45c5-922f-57d60610f728",
+        "ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN": "http://127.0.0.1:4173",
         "ORIN_WINDOWS_REMINDERS_DB": str(tmp_path / "test-only.sqlite3"),
     }
     monkeypatch.setattr(windows_reminders, "os", SimpleNamespace(
         name="nt", getenv=lambda name, default=None: config.get(name, default),
     ))
     monkeypatch.setattr(windows_reminders, "single_instance", lambda path: nullcontext())
+    monkeypatch.setattr(windows_reminders, "LocalRevocationControl", lambda **kwargs: nullcontext())
 
     class FakeLedger:
+        def clear_pending(self):
+            pass
+
         def close(self):
             pass
 
