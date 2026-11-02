@@ -242,6 +242,52 @@ describe("web logout and account isolation", () => {
     expect(headers.get("Authorization")).toBeNull();
   });
 
+  it("rejects an authenticated task response that arrives after sign-out", async () => {
+    let finishTasks: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "old-user" }), { status: 200 });
+      if (path.endsWith("/tasks"))
+        return new Promise<Response>(resolve => { finishTasks = resolve; });
+      if (path.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      throw new Error("Unexpected API call: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("old@example.com", "password");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(finishTasks).toBeTypeOf("function"));
+    await logout();
+    finishTasks!(new Response(JSON.stringify([{ id: "private-task" }]), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("rejects an authenticated file download that arrives after sign-out", async () => {
+    let finishDownload: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "old-user" }), { status: 200 });
+      if (path.endsWith("/attachments/private/download"))
+        return new Promise<Response>(resolve => { finishDownload = resolve; });
+      if (path.endsWith("/auth/logout")) return new Response(null, { status: 204 });
+      throw new Error("Unexpected API call: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await login("old@example.com", "password");
+    const pending = requestBlob("/attachments/private/download");
+    await vi.waitFor(() => expect(finishDownload).toBeTypeOf("function"));
+    await logout();
+    finishDownload!(new Response("old-account-secret", { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+  });
+
   it("can revoke the cookie-backed session on retry after an offline sign-out", async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => new Response());
     fetchMock
