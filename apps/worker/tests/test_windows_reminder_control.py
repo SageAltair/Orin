@@ -189,6 +189,9 @@ def test_unreachable_browser_fails_closed_before_toast(control):
     assert _notify_if_active(lambda: notified.append(2), stopping, lock,
                              delivery_permitted=listener.is_browser_recent) is True
     assert notified == [2]
+    listener._last_heartbeat_wall -= 20
+    assert not listener.is_browser_recent()
+    listener._last_heartbeat_wall += 20
     listener._last_heartbeat -= 20
     assert not listener.is_browser_recent()
     assert _notify_if_active(lambda: notified.append(3), stopping, lock,

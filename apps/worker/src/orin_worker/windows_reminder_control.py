@@ -71,6 +71,7 @@ class LocalRevocationControl:
         self._stopping = stopping
         self._delivery_lock = delivery_lock
         self._last_heartbeat = 0.0
+        self._last_heartbeat_wall = 0.0
         self._nonces: dict[str, float] = {}
         self._nonce_lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -181,6 +182,7 @@ class LocalRevocationControl:
                             self._response(409)
                             return
                         owner._last_heartbeat = time.monotonic()
+                        owner._last_heartbeat_wall = time.time()
                     else:
                         owner._stopping.set()
                 self._response(204)
@@ -191,8 +193,10 @@ class LocalRevocationControl:
 
     def is_browser_recent(self) -> bool:
         """Only allow foreground delivery after a recent authenticated browser pulse."""
+        monotonic_age = time.monotonic() - self._last_heartbeat
+        wall_age = time.time() - self._last_heartbeat_wall
         return (not self._stopping.is_set() and self._last_heartbeat > 0
-                and time.monotonic() - self._last_heartbeat <= 6)
+                and 0 <= monotonic_age <= 6 and 0 <= wall_age <= 6)
 
     def __enter__(self) -> "LocalRevocationControl":
         self._thread = threading.Thread(

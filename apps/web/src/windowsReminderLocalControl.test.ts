@@ -73,3 +73,11 @@ describe("foreground local browser heartbeat", () => {
       .toBe("abcdef0123456789abcdef0123456789|" + lease.sessionId + "|heartbeat");
   });
 });
+
+describe("unreachable local heartbeat", () => {
+  it("never claims foreground presence without a listener acknowledgement", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("connection refused")));
+    const { heartbeatLocalWindowsCompanion } = await import("./windowsReminderLocalControl");
+    await expect(heartbeatLocalWindowsCompanion(lease)).resolves.toBe(false);
+  });
+});
