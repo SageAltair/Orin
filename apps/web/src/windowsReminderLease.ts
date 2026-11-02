@@ -62,8 +62,27 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
     const sessions = await request<AuthSession[]>("/auth/sessions", { signal: AbortSignal.timeout(8000) });
     const current = sessions.find(s => s.current && s.active);
     if (!current) throw new Error("No active browser session for Windows reminders");
-    const generation = crypto.randomUUID();
     const previous = getWindowsLeaseIdentifiers();
+    if (previous) {
+      // A rotation PUT can fail before committing. Overwriting the old handle
+      // first would make a still-live previous generation impossible to revoke.
+      // Confirm old revocation before creating a replacement generation.
+      if (previous.sessionId !== current.id)
+        throw new Error("A different browser session still owns the reminder lease");
+      try {
+        await request<void>("/auth/reminder-lease", {
+          method: "DELETE",
+          signal: AbortSignal.timeout(8000),
+          body: JSON.stringify({ generation_id: previous.generation }),
+        });
+      } catch (error) {
+        // 409 confirms another tab already replaced this generation.
+        if (!(error instanceof Error && "status" in error && error.status === 409))
+          throw error;
+      }
+      clearWindowsLeaseLocalState();
+    }
+    const generation = crypto.randomUUID();
     // Persist the revocation handle before asking the server to create a
     // lease. Storage failure must not leave a live lease with no local handle.
     publishStatus(current.id, generation);
@@ -80,8 +99,7 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
       // failed, so keep its handle available for a scoped DELETE.
       if (!isClientScopeError(error) &&
           typeof status === "number" && status >= 400 && status < 500) {
-        if (previous) publishStatus(previous.sessionId, previous.generation);
-        else clearWindowsLeaseLocalState();
+        clearWindowsLeaseLocalState();
       }
       throw error;
     }

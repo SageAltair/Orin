@@ -175,20 +175,63 @@ describe("Windows reminder browser lease", () => {
     expect(JSON.parse(deletes[0][1].body)).toEqual({ generation_id: generation });
   });
 
-  it("restores the previous revocation handle after a definite rotation rejection", async () => {
+  it("revokes the previous live lease when a rotation PUT fails before server commit", async () => {
+    let serverGeneration: string | null = null;
+    let putCount = 0;
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string; body?: string }) => {
+      if (path === "/auth/sessions") return [{ id: "browser-session", current: true, active: true }];
+      if (path !== "/auth/reminder-lease") return undefined;
+      const generation = JSON.parse(options?.body ?? "{}").generation_id;
+      if (options?.method === "PUT") {
+        putCount += 1;
+        if (putCount === 2) throw Object.assign(new Error("503 before commit"), { status: 503 });
+        serverGeneration = generation;
+      }
+      if (options?.method === "DELETE") {
+        if (serverGeneration && generation !== serverGeneration) {
+          throw Object.assign(new Error("Generation mismatch"), { status: 409 });
+        }
+        serverGeneration = null;
+      }
+      return undefined;
+    });
+    const first = await activateWindowsLease("workspace-a");
+    expect(serverGeneration).toBe(first);
+    await expect(activateWindowsLease("workspace-b")).rejects.toMatchObject({ status: 503 });
+    await stopWindowsLease();
+    expect(serverGeneration).toBeNull();
+  });
+
+  it("does not rotate while revocation of the previous lease is uncertain", async () => {
+    const first = await activateWindowsLease("workspace-a");
+    apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
+      if (path === "/auth/sessions") return [{ id: "browser-session", current: true, active: true }];
+      if (path === "/auth/reminder-lease" && options?.method === "DELETE")
+        throw Object.assign(new Error("DELETE failed"), { status: 503 });
+      return undefined;
+    });
+    await expect(activateWindowsLease("workspace-b")).rejects.toMatchObject({ status: 503 });
+    expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+    const puts = apiRequest.mock.calls.filter(([path, options]) =>
+      path === "/auth/reminder-lease" && options?.method === "PUT");
+    expect(puts).toHaveLength(1);
+  });
+
+  it("does not restore a revoked previous handle after a definite activation rejection", async () => {
     const first = await activateWindowsLease("workspace-a");
     apiRequest.mockImplementation(async (path: string, options?: { method?: string }) => {
       if (path === "/auth/sessions") return [{ id: "browser-session", current: true, active: true }];
       if (path === "/auth/reminder-lease" && options?.method === "PUT") {
-        throw Object.assign(new Error("Rotation rejected"), { status: 409 });
+        throw Object.assign(new Error("Activation rejected"), { status: 409 });
       }
       return undefined;
     });
     await expect(activateWindowsLease("workspace-b")).rejects.toMatchObject({ status: 409 });
-    expect(getWindowsLeaseIdentifiers()?.generation).toBe(first);
+    expect(getWindowsLeaseIdentifiers()).toBeNull();
     await stopWindowsLease();
     const deletes = apiRequest.mock.calls.filter(([path, options]) =>
       path === "/auth/reminder-lease" && options?.method === "DELETE");
+    expect(deletes).toHaveLength(1);
     expect(JSON.parse(deletes[0][1].body)).toEqual({ generation_id: first });
   });
 
