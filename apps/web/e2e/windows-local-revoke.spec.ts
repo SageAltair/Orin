@@ -47,6 +47,11 @@ test("real Chromium revokes a disposable foreground companion over loopback", as
       onData();
     });
     await page.goto("/", { waitUntil: "domcontentloaded" });
+    // A cold Vite dev server may still be transforming this module after / loads.
+    await expect.poll(async () =>
+      (await page.request.get("/src/windowsReminderLocalControl.ts")).status(),
+      { timeout: 10_000 },
+    ).toBe(200);
     const revoked = await page.evaluate(async ({ sessionId, generation }) => {
       const { revokeLocalWindowsCompanion } = await import("/src/windowsReminderLocalControl.ts");
       return revokeLocalWindowsCompanion({ sessionId, generation });
