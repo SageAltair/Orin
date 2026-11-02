@@ -72,7 +72,11 @@ export function activateWindowsLease(workspaceId: string): Promise<string> {
       // A definite 4xx rejection did not activate this generation. An
       // ambiguous network/5xx failure may have committed before the response
       // failed, so keep its handle available for a scoped DELETE.
-      if (typeof status === "number" && status >= 400 && status < 500) {
+      const scopeChangedAfterRequest = error instanceof Error &&
+        (error.message === "Workspace changed while the request was in flight." ||
+         error.message === "Session changed while the request was in flight.");
+      if (!scopeChangedAfterRequest &&
+          typeof status === "number" && status >= 400 && status < 500) {
         if (previous) publishStatus(previous.sessionId, previous.generation);
         else clearWindowsLeaseLocalState();
       }
