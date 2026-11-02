@@ -199,12 +199,12 @@ revocation or prove visible Windows notification delivery.
 
 Before any explicitly opted-in foreground launch, set
 `ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN` to the **exact** browser origin
-(for example `http://127.0.0.1:4173`) before launching the companion.
+(for example `http://127.0.0.1:4173`).
 The listener binds only `127.0.0.1:18765`; the optional
 `ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_PORT` must match the browser's
 port 18765 for the current web build. Missing or invalid origin, or a port
-collision, fails startup instead of silently running without local control. Never expose this port on a
-network interface or proxy it externally.
+collision, fails startup instead of silently running without local control.
+Never expose this port on a network interface or proxy it externally.
 
 The browser uses a one-time nonce and HMAC-SHA256 with the existing ephemeral
 lease generation. It sends **no generation UUID, access token, refresh token,
