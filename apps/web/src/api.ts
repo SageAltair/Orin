@@ -103,6 +103,7 @@ export async function request<T>(path: string, options: RequestInit = {}, retry 
   assertCurrentRequestScope(requestEpoch, requestWorkspaceEpoch);
   if (response.status === 401 && retry && path !== "/auth/login" && path !== "/auth/refresh") {
     const refreshResult = await refresh(path === "/auth/logout");
+    assertCurrentRequestScope(requestEpoch, requestWorkspaceEpoch);
     if (refreshResult === "refreshed") return request<T>(path, options, false, onResponse);
     if (refreshResult === "rejected") {
       accessToken = null;
@@ -157,6 +158,7 @@ export async function requestBlob(path: string): Promise<Blob> {
     assertCurrentRequestScope(requestEpoch, requestWorkspaceEpoch);
     if (response.status === 401 && retry) {
       const refreshResult = await refresh();
+      assertCurrentRequestScope(requestEpoch, requestWorkspaceEpoch);
       if (refreshResult === "refreshed") return fetchBlob(false);
       if (refreshResult === "rejected") {
         accessToken = null;

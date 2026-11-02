@@ -405,6 +405,36 @@ describe("workspace response isolation", () => {
     await expect(pending).resolves.toEqual([]);
   });
 
+  it("does not retry an A request under B after refresh completes", async () => {
+    let finishRefresh: ((response: Response) => void) | undefined;
+    let taskReads = 0;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const path = String(url);
+      if (path.endsWith("/auth/login"))
+        return new Response(JSON.stringify({ access_token: "old-token" }), { status: 200 });
+      if (path.endsWith("/auth/me"))
+        return new Response(JSON.stringify({ id: "user-1" }), { status: 200 });
+      if (path.endsWith("/auth/refresh"))
+        return new Promise<Response>(resolve => { finishRefresh = resolve; });
+      if (path.endsWith("/tasks")) {
+        taskReads++;
+        return taskReads === 1
+          ? new Response(null, { status: 401 })
+          : new Response(JSON.stringify([{ id: "workspace-B-task" }]), { status: 200 });
+      }
+      throw new Error("Unexpected request: " + path);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await login("user@example.com", "password");
+    setActiveWorkspace("workspace-A");
+    const pending = request<unknown[]>("/tasks");
+    await vi.waitFor(() => expect(finishRefresh).toBeTypeOf("function"));
+    setActiveWorkspace("workspace-B");
+    finishRefresh!(new Response(JSON.stringify({ access_token: "renewed-token" }), { status: 200 }));
+    await expect(pending).rejects.toMatchObject({ status: 409 });
+    expect(taskReads).toBe(1);
+  });
+
   it("allows requests when selecting the already active workspace", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify([]), { status: 200 })));
     setActiveWorkspace("workspace-A");
