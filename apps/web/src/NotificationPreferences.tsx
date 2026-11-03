@@ -22,16 +22,32 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
   useEffect(() => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(ownerId)), [ownerId]);
   const [companionConnected, setCompanionConnected] = useState(false);
   useEffect(() => {
-    const onConnection = (event: Event) => setCompanionConnected((event as CustomEvent<boolean>).detail === true);
-    const onLeaseChange = () => setCompanionConnected(false);
-    window.addEventListener("orin:windows-companion-connection", onConnection);
-    window.addEventListener(windowsLeaseStatusEvent, onLeaseChange);
-    return () => {
-      window.removeEventListener("orin:windows-companion-connection", onConnection);
-      window.removeEventListener(windowsLeaseStatusEvent, onLeaseChange);
+    // A previous successful heartbeat is not evidence of a live companion forever.
+    // The worker itself rejects heartbeats older than six seconds.
+    let expiry: ReturnType<typeof setTimeout> | undefined;
+    const clearConnection = () => {
+      if (expiry !== undefined) clearTimeout(expiry);
+      expiry = undefined;
+      setCompanionConnected(false);
     };
-  }, []);
-  const [windowsLeaseIds, setWindowsLeaseIds] = useState(getWindowsLeaseIdentifiers);
+    const onConnection = (event: Event) => {
+      clearConnection();
+      if ((event as CustomEvent<boolean>).detail === true) {
+        setCompanionConnected(true);
+        expiry = setTimeout(() => {
+          expiry = undefined;
+          setCompanionConnected(false);
+        }, 6000);
+      }
+    };
+    window.addEventListener("orin:windows-companion-connection", onConnection);
+    window.addEventListener(windowsLeaseStatusEvent, clearConnection);
+    return () => {
+      clearConnection();
+      window.removeEventListener("orin:windows-companion-connection", onConnection);
+      window.removeEventListener(windowsLeaseStatusEvent, clearConnection);
+    };
+  }, []);  const [windowsLeaseIds, setWindowsLeaseIds] = useState(getWindowsLeaseIdentifiers);
   useEffect(() => {
     const update = () => setWindowsLeaseIds(getWindowsLeaseIdentifiers());
     window.addEventListener(windowsLeaseStatusEvent, update);
