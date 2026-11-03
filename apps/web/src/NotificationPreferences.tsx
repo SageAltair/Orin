@@ -20,6 +20,17 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
   const [recoveryRequired, setRecoveryRequired] = useState(false);
   const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(() => isWindowsLeaseOptedIn(ownerId));
   useEffect(() => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(ownerId)), [ownerId]);
+  const [companionConnected, setCompanionConnected] = useState(false);
+  useEffect(() => {
+    const onConnection = (event: Event) => setCompanionConnected((event as CustomEvent<boolean>).detail === true);
+    const onLeaseChange = () => setCompanionConnected(false);
+    window.addEventListener("orin:windows-companion-connection", onConnection);
+    window.addEventListener(windowsLeaseStatusEvent, onLeaseChange);
+    return () => {
+      window.removeEventListener("orin:windows-companion-connection", onConnection);
+      window.removeEventListener(windowsLeaseStatusEvent, onLeaseChange);
+    };
+  }, []);
   const [windowsLeaseIds, setWindowsLeaseIds] = useState(getWindowsLeaseIdentifiers);
   useEffect(() => {
     const update = () => setWindowsLeaseIds(getWindowsLeaseIdentifiers());
@@ -294,6 +305,12 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
             or start a Windows service. The companion still requires a separately
             authorized foreground launch and cannot promise closed-browser delivery.
           </p>
+          {windowsLeaseEnabled && (
+            <p role="status">
+              Windows companion: {companionConnected ? "connected to this browser session" : "not connected or heartbeat unconfirmed"}.
+              {" "}Authorizing the lease alone does not start the companion or guarantee OS delivery.
+            </p>
+          )}
           {windowsLeaseEnabled && windowsLeaseIds && (
             <p>
               Browser session: <code>{windowsLeaseIds.sessionId}</code>

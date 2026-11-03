@@ -1,3 +1,4 @@
+import { NotificationPreferencesPanel } from "./NotificationPreferences";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App, { AuthScreen, CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
@@ -129,5 +130,24 @@ describe("Markdown response rendering", () => {
     expect(safeHref("javascript:alert(1)")).toBeUndefined();
     expect(safeHref("data:text/html,hi")).toBeUndefined();
     expect(safeHref("https://example.com")).toBe("https://example.com");
+  });
+});
+
+describe("Windows companion runtime status", () => {
+  it("does not claim delivery merely because the browser lease is enabled", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+    Object.defineProperty(globalThis, "sessionStorage", {
+      configurable: true,
+      value: { getItem: (key: string) => key === "orin:windows-reminder-lease-opt-in" ? "owner-1" : null },
+    });
+    try {
+      const markup = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-1" />);
+      expect(markup).toContain("not connected or heartbeat unconfirmed");
+      expect(markup).toContain("does not start the companion or guarantee OS delivery");
+      expect(markup).not.toContain("connected to this browser session");
+    } finally {
+      if (original) Object.defineProperty(globalThis, "sessionStorage", original);
+      else Reflect.deleteProperty(globalThis, "sessionStorage");
+    }
   });
 });
