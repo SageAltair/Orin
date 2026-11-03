@@ -826,19 +826,28 @@ export default function App() {
   useEffect(() => {
     if (!user || !windowsLeaseEnabled) return;
     let pending = false;
+    let cancelled = false;
+    const reportConnection = (connected: boolean) =>
+      window.dispatchEvent(new CustomEvent("orin:windows-companion-connection", { detail: connected }));
     const pulse = () => {
       // Background tabs may still send pulses; browser throttling or sleep
       // naturally makes the companion fail closed when pulses stop.
-      if (pending) return;
+      if (pending || cancelled) return;
       const identifiers = getWindowsLeaseIdentifiers("heartbeat");
-      if (!identifiers) return;
+      if (!identifiers) { reportConnection(false); return; }
       pending = true;
-      void heartbeatLocalWindowsCompanion(identifiers).finally(() => { pending = false; });
+      void heartbeatLocalWindowsCompanion(identifiers).then(connected => {
+        if (!cancelled && getWindowsLeaseIdentifiers("heartbeat")?.generation === identifiers.generation) {
+          reportConnection(connected);
+        }
+      }).finally(() => { pending = false; });
     };
     const timer = window.setInterval(pulse, 2000);
     document.addEventListener("visibilitychange", pulse);
     pulse();
     return () => {
+      cancelled = true;
+      reportConnection(false);
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", pulse);
     };
