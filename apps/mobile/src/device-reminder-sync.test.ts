@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { request, wasRefreshCredentialRejected } from "./api";
 import { getLocalReminderEnabled, revokeLocalReminderOwner, syncLocalReminders } from "./native-reminders";
 import { fetchDeviceReminderInbox, fetchDeviceReminderTasks, refreshDeviceReminders } from "./device-reminder-sync";
@@ -31,10 +31,16 @@ const inbox: Reminder[] = [];
 
 beforeEach(() => {
   vi.resetAllMocks();
+  // Keep the dated reminder fixture upcoming regardless of the CI calendar date.
+  vi.spyOn(Date, "now").mockReturnValue(now);
   vi.mocked(getLocalReminderEnabled).mockResolvedValue(true);
   vi.mocked(wasRefreshCredentialRejected).mockReturnValue(false);
   vi.mocked(revokeLocalReminderOwner).mockResolvedValue(undefined);
   vi.mocked(syncLocalReminders).mockResolvedValue(undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("future task device reminder synchronization", () => {
