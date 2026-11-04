@@ -1,6 +1,6 @@
 import { NotificationPreferencesPanel } from "./NotificationPreferences";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import App, { AuthScreen, CommandAnswer, MarkdownResponse, mergeCommandHistory, safeHref } from "./App";
 import { KnowledgeWorkspace, QuickKnowledgeCapture } from "./KnowledgeWorkspace";
 import { capabilities, defaultPreferences, getNavigationCapabilities, type UserPreferences } from "./capabilities";
@@ -10,6 +10,23 @@ import { GuidedMode, GUIDES } from "./GuidedMode";
 import { IntelligenceExplorer } from "./IntelligenceExplorer";
 import { SpecialistAutomation } from "./SpecialistAutomation";
 import { IntelligenceReview } from "./IntelligenceReview";
+
+describe("Windows reminder lease recovery", () => {
+  it("offers an explicit retry only for an opted-in owner without promising native delivery", () => {
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => key === "orin:windows-reminder-lease-opt-in" ? "owner-a" : null,
+    });
+    try {
+      const markup = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-a" />);
+      expect(markup).toContain("Retry Windows reminder authorization");
+      expect(markup).toContain("does not start the companion");
+      const otherOwner = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-b" />);
+      expect(otherOwner).not.toContain("Retry Windows reminder authorization");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("sign-out safety", () => {
   it("shows the unconfirmed server revocation warning and an explicit retry action", () => {
