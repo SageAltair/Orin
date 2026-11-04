@@ -812,6 +812,12 @@ export default function App() {
   const activeWorkspaceRef = useRef(activeWorkspaceId);
   activeWorkspaceRef.current = activeWorkspaceId;
   const [windowsLeaseEnabled, setWindowsLeaseEnabled] = useState(false);
+  const [windowsLeaseRetry, setWindowsLeaseRetry] = useState(0);
+  useEffect(() => {
+    const retry = () => setWindowsLeaseRetry(value => value + 1);
+    window.addEventListener("orin:windows-reminder-lease-retry", retry);
+    return () => window.removeEventListener("orin:windows-reminder-lease-retry", retry);
+  }, []);
   useEffect(() => {
     const onToggle = () => setWindowsLeaseEnabled(isWindowsLeaseOptedIn(user?.id));
     onToggle();
@@ -892,7 +898,7 @@ export default function App() {
       }
     }, 10000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [user?.id, activeWorkspaceId, windowsLeaseEnabled]);
+  }, [user?.id, activeWorkspaceId, windowsLeaseEnabled, windowsLeaseRetry]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);

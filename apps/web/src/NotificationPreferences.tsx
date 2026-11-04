@@ -327,6 +327,18 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
               {" "}Authorizing the lease alone does not start the companion or guarantee OS delivery.
             </p>
           )}
+          {windowsLeaseEnabled && (
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => {
+                setNotice("Retrying the Windows reminder lease for this tab. This does not launch the companion.");
+                window.dispatchEvent(new Event("orin:windows-reminder-lease-retry"));
+              }}
+            >
+              Retry Windows reminder authorization
+            </button>
+          )}
           {windowsLeaseEnabled && windowsLeaseIds && (
             <p>
               Browser session: <code>{windowsLeaseIds.sessionId}</code>
