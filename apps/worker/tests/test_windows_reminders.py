@@ -1523,3 +1523,62 @@ def test_missing_local_browser_heartbeat_suppresses_and_retries_due_toast(tmp_pa
                         delivery_permitted=lambda: True) == 1
     assert notified == ["fresh"]
     queue.close()
+
+def test_foreground_auth_revocation_clears_pending_even_without_stop_signal(tmp_path, monkeypatch):
+    """Authorization exit must discard queued alerts without requiring SIGTERM."""
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    config = {
+        "ORIN_WINDOWS_REMINDERS_ENABLED": "1",
+        "ORIN_WINDOWS_REMINDERS_API_URL": "http://127.0.0.1:8100",
+        "ORIN_WINDOWS_REMINDERS_TOKEN": "disposable-test-token",
+        "ORIN_WINDOWS_REMINDERS_OWNER_ID": OWNER,
+        "ORIN_WINDOWS_REMINDERS_WORKSPACE_ID": WORKSPACE,
+        "ORIN_WINDOWS_REMINDERS_BROWSER_SESSION_ID": BROWSER_SESSION,
+        "ORIN_WINDOWS_REMINDERS_BROWSER_LEASE_GENERATION": "3c413eed-47a2-45c5-922f-57d60610f728",
+        "ORIN_WINDOWS_REMINDERS_LOCAL_CONTROL_ORIGIN": "http://127.0.0.1:4173",
+        "ORIN_WINDOWS_REMINDERS_DB": str(tmp_path / "isolated.sqlite3"),
+    }
+    monkeypatch.setattr(windows_reminders, "os", SimpleNamespace(
+        name="nt", getenv=lambda name, default=None: config.get(name, default),
+    ))
+    monkeypatch.setattr(windows_reminders, "single_instance", lambda path: nullcontext())
+    class FakeControl:
+        def is_browser_recent(self):
+            return True
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+    monkeypatch.setattr(windows_reminders, "LocalRevocationControl", lambda **kwargs: FakeControl())
+    class FakeLedger:
+        cleared = False
+        closed = False
+        def clear_pending(self):
+            self.cleared = True
+        def close(self):
+            self.closed = True
+    ledger = FakeLedger()
+    monkeypatch.setattr(windows_reminders, "ReminderLedger", lambda *args: ledger)
+    monkeypatch.setattr(windows_reminders.signal, "signal", lambda *args: None)
+    class FakeStop:
+        def is_set(self):
+            return False
+        def wait(self, seconds):
+            pytest.fail("Authorization rejection must stop polling")
+    monkeypatch.setattr(windows_reminders.threading, "Event", FakeStop)
+    class FakeClient:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+    monkeypatch.setattr(windows_reminders.httpx, "Client", lambda **kwargs: FakeClient())
+    def reject(*args, **kwargs):
+        request = httpx.Request("GET", "http://127.0.0.1:8100/api/v1/tasks")
+        response = httpx.Response(401, request=request)
+        raise httpx.HTTPStatusError("revoked", request=request, response=response)
+    monkeypatch.setattr(windows_reminders, "run_once", reject)
+    windows_reminders.main()
+    assert ledger.closed
+    assert ledger.cleared, "Pending reminders must be discarded after authorization exit"
