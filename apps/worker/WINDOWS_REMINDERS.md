@@ -158,6 +158,26 @@ settings noted. Record whether it appeared and any OS suppression. If no toast
 appears, do not mark the native release gate as passed. This test does not
 prove background, locked-screen, silent/DND, scheduled or closed-app delivery.
 
+## Explicit foreground activation (interactive only)
+
+From a trusted interactive PowerShell window in a clean isolated worker
+environment, run `apps/worker/scripts/start-windows-reminders-foreground.ps1`
+with absolute `-PythonPath` and `-ShortcutPath`, the trusted `-ApiUrl`
+and `-BrowserOrigin`, and `-OwnerId`, `-WorkspaceId`,
+`-BrowserSessionId` and `-LeaseGeneration` matching the active browser
+lease. The script requests the **short-lived companion access token in a hidden
+interactive prompt**, not a command-line argument or saved file. It starts the
+companion in the foreground, never installs a service or scheduled task, and
+clears its environment on exit. Stop with Ctrl+C. The token still expires;
+restart with a new short-lived token when necessary. This script does not
+create credentials or launch automatically from the browser.
+
+The launcher refuses pre-existing reminder environment configuration rather
+than overwriting it, and requires an existing registered Start Menu shortcut.
+It is **not** a substitute for human-visible scheduled notification acceptance.
+Use only on a trusted signed-in desktop; do not run it through unattended
+automation or paste a bearer into a logged shell command.
+
 ## Developer-only manual opt-in (after local Windows acceptance)
 
 Install the worker in a virtual environment and launch
