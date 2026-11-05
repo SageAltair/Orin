@@ -815,9 +815,11 @@ def main() -> None:
                         logger.warning("Reminder sync or toast failed (%s); no delivery is confirmed", type(error).__name__)
                     stopping.wait(POLL_SECONDS)
         finally:
-            if stopping.is_set():
+            # Discard unattempted alerts on every exit, retaining deduplication.
+            try:
                 ledger.clear_pending()
-            ledger.close()
+            finally:
+                ledger.close()
 
 
 if __name__ == "__main__":
