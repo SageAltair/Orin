@@ -45,4 +45,6 @@ def test_v1_notification_preferences_contract() -> None:
     assert operation["responses"]["200"]["content"]["application/json"]["schema"]
     schema = app.openapi()
     assert schema["info"]["title"] == "Orin API"
-    # Health/diagnostic endpoints may be intentionally unversioned. Freeze the\n    # explicit release-critical /api/v1 operations above, not every route.\n    assert "/api/v1/notifications/preferences" in schema["paths"]
+    # Health/diagnostic endpoints may be intentionally unversioned.
+    # Freeze release-critical /api/v1 operations, not every route.
+    assert "/api/v1/notifications/preferences" in schema["paths"]
