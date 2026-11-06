@@ -19,7 +19,8 @@ describe("Windows reminder lease recovery", () => {
     try {
       const markup = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-a" />);
       expect(markup).toContain("Retry Windows reminder authorization");
-      expect(markup).toContain("does not start the companion");
+      expect(markup).toContain("Finish Windows reminder setup");
+      expect(markup).toContain("The browser cannot install or start the companion");
       const otherOwner = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-b" />);
       expect(otherOwner).not.toContain("Retry Windows reminder authorization");
     } finally {
@@ -160,7 +161,7 @@ describe("Windows companion runtime status", () => {
     try {
       const markup = renderToStaticMarkup(<NotificationPreferencesPanel ownerId="owner-1" />);
       expect(markup).toContain("not connected or heartbeat unconfirmed");
-      expect(markup).toContain("does not start the companion or guarantee OS delivery");
+      expect(markup).toContain("Native alerts remain unavailable until the foreground process is connected");
       expect(markup).not.toContain("connected to this browser session");
     } finally {
       if (original) Object.defineProperty(globalThis, "sessionStorage", original);
