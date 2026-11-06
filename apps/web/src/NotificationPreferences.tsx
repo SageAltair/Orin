@@ -322,10 +322,22 @@ export function NotificationPreferencesPanel({ ownerId }: { ownerId?: string }) 
             authorized foreground launch and cannot promise closed-browser delivery.
           </p>
           {windowsLeaseEnabled && (
-            <p role="status">
-              Windows companion: {companionConnected ? "connected to this browser session" : "not connected or heartbeat unconfirmed"}.
-              {" "}Authorizing the lease alone does not start the companion or guarantee OS delivery.
-            </p>
+            <div className="settings-subsection" aria-label="Windows reminder companion activation">
+              <p role="status">
+                Windows companion: {companionConnected ? "connected to this browser session" : "not connected or heartbeat unconfirmed"}.
+              </p>
+              {!companionConnected && (
+                <div>
+                  <h3>Finish Windows reminder setup</h3>
+                  <ol>
+                    <li>Keep this Orin tab open and the browser lease enabled.</li>
+                    <li>Start the separately authorized foreground Orin reminder companion on this Windows computer using its documented setup procedure.</li>
+                    <li>Return here and confirm the connection status changes to connected before testing a scheduled reminder.</li>
+                  </ol>
+                  <p>The browser cannot install or start the companion. Do not enter companion credentials into this page. Native alerts remain unavailable until the foreground process is connected, and delivery still depends on Windows notification settings.</p>
+                </div>
+              )}
+            </div>
           )}
           {windowsLeaseEnabled && (
             <button
