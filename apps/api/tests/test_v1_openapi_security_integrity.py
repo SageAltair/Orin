@@ -56,3 +56,26 @@ def test_release_critical_private_operations_have_no_anonymous_alternative():
         assert requirements and all(isinstance(alt, dict) and alt for alt in requirements), (
             f"Anonymous security alternative: {method.upper()} {path}"
         )
+
+
+def test_oauth_scopes_referenced_by_operations_are_declared():
+    """Prevent generated clients from requesting scopes the server never defines."""
+    schema = app.openapi()
+    schemes = schema.get("components", {}).get("securitySchemes", {})
+    global_security = schema.get("security", [])
+    for path, item in schema["paths"].items():
+        for method, operation in item.items():
+            if method not in HTTP_METHODS:
+                continue
+            for alternative in operation.get("security", global_security):
+                for scheme_name, requested in alternative.items():
+                    scheme = schemes[scheme_name]
+                    if scheme.get("type") != "oauth2":
+                        continue
+                    declared = set()
+                    for flow in scheme.get("flows", {}).values():
+                        declared.update(flow.get("scopes", {}))
+                    assert set(requested) <= declared, (
+                        f"Unknown OAuth scopes {set(requested) - declared}: "
+                        f"{method.upper()} {path} ({scheme_name})"
+                    )
