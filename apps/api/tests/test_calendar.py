@@ -178,3 +178,39 @@ def test_completing_a_scheduled_task_uses_existing_task_flow_and_releases_block(
     completed = client.patch(f"/api/v1/tasks/{task['id']}", json={"status": "done"})
     assert completed.status_code == 200 and completed.json()["status"] == "done"
     assert client.get("/api/v1/calendar/schedule", params={"start": "2026-10-20", "end": "2026-10-20"}).json() == []
+
+
+def test_v1_task_schedule_preserves_dst_fold_instants_and_completion_releases_block(client: TestClient) -> None:
+    """#179: distinct UTC instants in the fall-back hour must not collapse."""
+    first = client.post("/api/v1/tasks", json={"title": "First fold task"})
+    second = client.post("/api/v1/tasks", json={"title": "Second fold task"})
+    assert first.status_code == second.status_code == 201
+    first_id, second_id = first.json()["id"], second.json()["id"]
+    cases = (
+        (first_id, "2026-11-01T01:15:00-04:00", "2026-11-01T01:45:00-04:00", "2026-11-01T05:15:00Z"),
+        (second_id, "2026-11-01T01:15:00-05:00", "2026-11-01T01:45:00-05:00", "2026-11-01T06:15:00Z"),
+    )
+    for task_id, start, end, expected in cases:
+        response = client.put(f"/api/v1/calendar/tasks/{task_id}/schedule", json={
+            "start_at": start, "end_at": end,
+            "estimated_minutes": 30, "timezone": "America/New_York",
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["start_at"] == expected
+
+    listed = client.get("/api/v1/calendar/schedule", params={
+        "start": "2026-11-01", "end": "2026-11-01", "timezone": "America/New_York",
+    })
+    assert listed.status_code == 200, listed.text
+    assert {row["task_id"] for row in listed.json()} == {first_id, second_id}
+    assert {row["start_at"] for row in listed.json()} == {
+        "2026-11-01T05:15:00Z", "2026-11-01T06:15:00Z",
+    }
+
+    completed = client.patch(f"/api/v1/tasks/{first_id}", json={"status": "done"})
+    assert completed.status_code == 200, completed.text
+    remaining = client.get("/api/v1/calendar/schedule", params={
+        "start": "2026-11-01", "end": "2026-11-01", "timezone": "America/New_York",
+    })
+    assert remaining.status_code == 200
+    assert [row["task_id"] for row in remaining.json()] == [second_id]
