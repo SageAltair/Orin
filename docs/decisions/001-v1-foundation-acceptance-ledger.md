@@ -7,6 +7,8 @@ Scope: draft PR #192 only. This is evidence tracking, not approval to close #179
 - The verify workflow creates a disposable `orin_contract_test_ci` PostgreSQL database, runs migration upgrade/rollback/re-upgrade and durable-record preservation checks, and drops that database. This does not test production data.
 - Backend/worker suites, Alembic checks, web/mobile checks, and isolated browser acceptance are included in the successful workflow. Passing a suite does not prove every specific contract assertion.
 
+- [CI run 42337985190](https://github.com/SageAltair/Orin/actions/runs/42337985190) completed successfully at `fd1f015d11b7780004f403c928cc753693e324a2`, verifying the database cleanup-marker correction. The remaining behavioral gates are not implied by this result.
+
 ## Closure gates
 | Gate | Status | Next evidence |
 | --- | --- | --- |
