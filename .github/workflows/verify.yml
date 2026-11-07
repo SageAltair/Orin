@@ -109,6 +109,8 @@ jobs:
           ORIN_V1_MIGRATION_TEST_DATABASE_URL: postgresql+psycopg://orin:isolated-ci-password@127.0.0.1:5432/orin_contract_test_ci
         run: |
           python - <<'PY'
+          import os
+          from pathlib import Path
           import psycopg
           # This CI-only database name is deliberately separate from orin_test.
           with psycopg.connect("host=127.0.0.1 port=5432 dbname=postgres user=orin password=isolated-ci-password", autocommit=True) as conn:
@@ -116,15 +118,25 @@ jobs:
               if exists:
                   raise SystemExit("Refusing to reuse a pre-existing migration acceptance database")
               conn.execute("CREATE DATABASE orin_contract_test_ci")
+          # Only a database created by this job may be disposed by this job.
+          marker = Path(os.environ["RUNNER_TEMP"]) / "orin_contract_test_ci.created"
+          marker.write_text("created-by-this-job\n")
           PY
           python -m pytest -q apps/api/tests/test_v1_postgres_migration_acceptance.py
       - name: Dispose isolated migration acceptance database
         if: always()
         run: |
           python - <<'PY'
+          import os
+          from pathlib import Path
           import psycopg
-          with psycopg.connect("host=127.0.0.1 port=5432 dbname=postgres user=orin password=isolated-ci-password", autocommit=True) as conn:
-              conn.execute("DROP DATABASE IF EXISTS orin_contract_test_ci WITH (FORCE)")
+          marker = Path(os.environ["RUNNER_TEMP"]) / "orin_contract_test_ci.created"
+          if not marker.is_file():
+              print("No creation marker; refusing to drop an unowned database")
+          else:
+              with psycopg.connect("host=127.0.0.1 port=5432 dbname=postgres user=orin password=isolated-ci-password", autocommit=True) as conn:
+                  conn.execute("DROP DATABASE IF EXISTS orin_contract_test_ci WITH (FORCE)")
+              marker.unlink()
           PY
       - name: Backend and worker regressions, including PostgreSQL concurrency
         env:
