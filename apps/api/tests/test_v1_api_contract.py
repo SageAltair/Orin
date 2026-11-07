@@ -48,3 +48,53 @@ def test_v1_notification_preferences_contract() -> None:
     # Health/diagnostic endpoints may be intentionally unversioned.
     # Freeze release-critical /api/v1 operations, not every route.
     assert "/api/v1/notifications/preferences" in schema["paths"]
+
+
+def _response_schema(operation: dict, code: int) -> dict:
+    """Fail when a v1 JSON response loses its declared client-visible shape."""
+    return operation["responses"][str(code)]["content"]["application/json"]["schema"]
+
+
+def test_v1_task_create_list_update_contract() -> None:
+    """Freeze the task API methods, response status and payload declarations.
+
+    Structural coverage only: the isolated task lifecycle tests exercise
+    persistence and owner isolation separately.
+    """
+    collection = "/api/v1/tasks"
+    item = "/api/v1/tasks/{task_id}"
+    create = _operation(collection, "post")
+    listing = _operation(collection, "get")
+    update = _operation(item, "patch")
+    assert _response_schema(create, 201)
+    assert _response_schema(listing, 200)
+    assert _response_schema(update, 200)
+    for operation in (create, update):
+        body = operation["requestBody"]
+        assert body.get("required") is True
+        assert body["content"]["application/json"]["schema"]
+    path_parameters = update["parameters"]
+    assert any(
+        parameter.get("name") == "task_id"
+        and parameter.get("in") == "path"
+        and parameter.get("required") is True
+        for parameter in path_parameters
+    )
+
+
+def test_v1_task_and_reminder_endpoints_do_not_expose_anonymous_access() -> None:
+    """Require declared authorization on release-critical private routes."""
+    for path, method in (
+        ("/api/v1/tasks", "get"),
+        ("/api/v1/tasks", "post"),
+        ("/api/v1/tasks/{task_id}", "patch"),
+        ("/api/v1/notifications/preferences", "get"),
+        ("/api/v1/auth/reminder-lease", "put"),
+        ("/api/v1/auth/reminder-lease", "delete"),
+    ):
+        operation = _operation(path, method)
+        requirements = operation.get("security", app.openapi().get("security", []))
+        assert requirements, f"Anonymous OpenAPI operation: {method.upper()} {path}"
+        assert all(requirement for requirement in requirements), (
+            f"Anonymous security alternative: {method.upper()} {path}"
+        )
