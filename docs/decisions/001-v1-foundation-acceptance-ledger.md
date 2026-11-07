@@ -30,3 +30,9 @@ Map existing assertions to each incomplete gate; implement missing tests instead
 - Previous isolated browser failure is no longer reproduced by the exact-head Verify Orin workflow. The change clears a previously applied Writing search filter before persistence assertions. No claim of general document persistence correctness beyond the tested scenario.
 - **Still incomplete:** checked-in versioned full OpenAPI compatibility baseline, explicit evidence mapping for refresh/revoke and cross-owner denial, complete task pagination/worker integration and reminder lease protocol coverage, and ADR-001 acceptance. Do not merge/close solely on green workflows.
 - **Release boundary:** package #179 stays open; PR #192 stays draft; physical device checks remain deferred to #184. No production or user-data operation is authorized by these results.
+
+## 2026-11-07 security-schema regression checkpoint
+- Previous exact head `f8115e399cb13e169d67f4472d8f81ad88c0aa40`: [Verify Orin 42405905343](https://github.com/SageAltair/Orin/actions/runs/42405905343) **PASS** and [Windows reminder smoke 42405905349](https://github.com/SageAltair/Orin/actions/runs/42405905349) **PASS**.
+- New `test_v1_openapi_security_integrity.py` validates all OpenAPI security scheme references, scope declaration types, and absence of anonymous alternatives on release-critical task/notification/reminder endpoints.
+- The new test is **UNVERIFIED** until exact-head CI completes. This is structural API security metadata verification, **not** proof of refresh/revoke, owner isolation, or runtime permission enforcement.
+- Keep #179 open and PR #192 draft until every closure gate is met. No downstream package or native-device work authorized.
