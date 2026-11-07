@@ -434,3 +434,35 @@ def test_authenticated_project_writing_and_notification_journey_isolated(
     assert next(
         row for row in client.get("/api/v1/notifications").json() if row["id"] == alert_id
     )["read_at"] is not None
+
+
+def test_v1_foreign_workspace_header_cannot_write_or_read_tasks(auth_client: TestClient) -> None:
+    """#179: a forged workspace selector must fail closed across owners."""
+    client = auth_client
+    register(client, "workspace-owner-a@example.com")
+    authenticate(client, str(login(client, "workspace-owner-a@example.com")["access_token"]))
+    private_workspace = client.post("/api/v1/workspaces", json={"name": "Private A"})
+    assert private_workspace.status_code == 201, private_workspace.text
+    private_id = private_workspace.json()["id"]
+    private_headers = {"X-Orin-Workspace-Id": private_id}
+    private_task = client.post("/api/v1/tasks", headers=private_headers, json={"title": "A private task"})
+    assert private_task.status_code == 201, private_task.text
+
+    register(client, "workspace-owner-b@example.com")
+    authenticate(client, str(login(client, "workspace-owner-b@example.com")["access_token"]))
+    before = client.get("/api/v1/tasks")
+    assert before.status_code == 200 and before.json() == []
+
+    forged_read = client.get("/api/v1/tasks", headers=private_headers)
+    assert forged_read.status_code == 404
+    forged_write = client.post("/api/v1/tasks", headers=private_headers, json={"title": "Injected"})
+    assert forged_write.status_code == 404
+    assert client.patch(f"/api/v1/tasks/{private_task.json()['id']}", json={"title": "Hijacked"}).status_code == 404
+    assert client.get("/api/v1/tasks").json() == []
+
+    authenticate(client, str(login(client, "workspace-owner-a@example.com")["access_token"]))
+    persisted = client.get("/api/v1/tasks", headers=private_headers)
+    assert persisted.status_code == 200
+    assert [(row["id"], row["title"]) for row in persisted.json()] == [
+        (private_task.json()["id"], "A private task"),
+    ]
