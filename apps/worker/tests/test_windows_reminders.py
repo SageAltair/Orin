@@ -1582,3 +1582,42 @@ def test_foreground_auth_revocation_clears_pending_even_without_stop_signal(tmp_
     windows_reminders.main()
     assert ledger.closed
     assert ledger.cleared, "Pending reminders must be discarded after authorization exit"
+
+
+def test_v1_reminder_dst_fold_preserves_distinct_utc_deadlines(tmp_path):
+    """#179: two 01:30 New York occurrences are different reminder instants."""
+    first = _due_epoch("2026-11-01T01:30:00-04:00")
+    second = _due_epoch("2026-11-01T01:30:00-05:00")
+    assert second - first == 3600
+    queue = ledger(tmp_path)
+    try:
+        queue.sync({"first": first, "second": second})
+        assert queue.due(first - 1800) == [("first", first)]
+        queue.mark_attempted("first", first, first - 1800)
+        assert queue.due(second - 1800) == [("second", second)]
+        queue.mark_attempted("second", second, second - 1800)
+        assert queue.due(second - 1800) == []
+    finally:
+        queue.close()
+
+
+def test_v1_reminder_quiet_hours_cover_both_dst_fold_occurrences():
+    """#179: quiet hours must not accidentally release alerts during DST fold."""
+    prefs = {"quiet_enabled": True, "timezone": "America/New_York",
+             "quiet_start": "01:00", "quiet_end": "02:00"}
+    first = _due_epoch("2026-11-01T01:30:00-04:00")
+    second = _due_epoch("2026-11-01T01:30:00-05:00")
+    assert _quiet(prefs, first)
+    assert _quiet(prefs, second)
+    assert not _quiet(prefs, _due_epoch("2026-11-01T02:30:00-05:00"))
+
+
+def test_v1_reminder_spring_forward_uses_real_elapsed_time():
+    """#179: skipped local hour cannot create a phantom extra reminder hour."""
+    before = _due_epoch("2027-03-14T01:30:00-05:00")
+    after = _due_epoch("2027-03-14T03:30:00-04:00")
+    assert after - before == 3600
+    prefs = {"quiet_enabled": True, "timezone": "America/New_York",
+             "quiet_start": "02:00", "quiet_end": "04:00"}
+    assert not _quiet(prefs, before)
+    assert _quiet(prefs, after)
