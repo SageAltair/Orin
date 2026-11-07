@@ -55,3 +55,31 @@ def test_openapi_operation_ids_are_unique_and_responses_declared():
     assert operations, "OpenAPI must expose at least one operation"
     duplicates = [name for name, count in Counter(operations).items() if count > 1]
     assert not duplicates, f"Duplicate OpenAPI operation IDs: {duplicates}"
+
+
+def test_openapi_path_parameters_are_declared_and_required():
+    """Protect generated clients against missing path parameter declarations."""
+    import re
+
+    schema = app.openapi()
+    methods = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
+    for path, path_item in schema["paths"].items():
+        placeholders = set(re.findall(r"\\{([^{}]+)\\}", path))
+        shared = path_item.get("parameters", [])
+        for method, operation in path_item.items():
+            if method not in methods:
+                continue
+            parameters = shared + operation.get("parameters", [])
+            declared = {
+                p["name"] for p in parameters
+                if isinstance(p, dict) and p.get("in") == "path"
+            }
+            assert declared == placeholders, (
+                f"Path parameter mismatch for {method.upper()} {path}: "
+                f"expected {placeholders}, got {declared}"
+            )
+            for parameter in parameters:
+                if isinstance(parameter, dict) and parameter.get("in") == "path":
+                    assert parameter.get("required") is True, (
+                        f"Optional path parameter: {method.upper()} {path}"
+                    )
