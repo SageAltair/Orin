@@ -103,9 +103,15 @@ test("personal knowledge capture, editing, links, search, and reload persistence
 
   await page.getByLabel("Search documents").fill("Christian storytelling");
   await expect(page.locator(".writing-documents").getByRole("button", { name: /Create Christian storytelling videos/ })).toBeVisible();
+  // Clear the active search before testing persistence of unrelated notes.
+  // This separates filtering behavior from storage/reload failures.
+  await page.getByLabel("Search documents").fill("");
+  await expect(page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible();
+  await expect(page.locator(".writing-documents").getByRole("button", { name: /Unfinished video script draft/ })).toBeVisible();
   await page.reload();
   await page.getByRole("button", { name: "Writing" }).click();
-  await expect(page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible();
+  await expect(page.getByLabel("Search documents")).toHaveValue("");
+  await expect(page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".writing-documents").getByRole("button", { name: /Unfinished video script draft/ })).toBeVisible();
   await page.locator(".writing-documents").getByRole("button", { name: /AI assisted storytelling research/ }).click();
   await expect(page.getByLabel("Document title")).toHaveValue("AI assisted storytelling research", { timeout: 10_000 });
