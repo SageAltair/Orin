@@ -466,3 +466,34 @@ def test_v1_foreign_workspace_header_cannot_write_or_read_tasks(auth_client: Tes
     assert [(row["id"], row["title"]) for row in persisted.json()] == [
         (private_task.json()["id"], "A private task"),
     ]
+
+
+def test_v1_private_task_notification_and_lease_routes_reject_anonymous_requests(
+    auth_client: TestClient,
+) -> None:
+    """#179: enforce authorization at runtime, not only in OpenAPI metadata.
+
+    These calls run against a disposable database and must never create or
+    modify records without an authenticated session.
+    """
+    client = auth_client
+    routes = (
+        ("GET", "/api/v1/tasks", None),
+        ("POST", "/api/v1/tasks", {"title": "Must not be created"}),
+        ("PATCH", "/api/v1/tasks/00000000-0000-0000-0000-000000000001",
+         {"title": "Must not be updated"}),
+        ("GET", "/api/v1/notifications/preferences", None),
+        ("PUT", "/api/v1/auth/reminder-lease", {
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "generation_id": "00000000-0000-0000-0000-000000000002",
+            "rotate": True,
+        }),
+        ("DELETE", "/api/v1/auth/reminder-lease", {
+            "generation_id": "00000000-0000-0000-0000-000000000002",
+        }),
+    )
+    for method, path, payload in routes:
+        response = client.request(method, path, json=payload)
+        assert response.status_code == 401, (
+            f"{method} {path} unexpectedly returned {response.status_code}: {response.text}"
+        )
