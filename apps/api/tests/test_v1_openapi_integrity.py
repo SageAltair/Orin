@@ -64,7 +64,7 @@ def test_openapi_path_parameters_are_declared_and_required():
     schema = app.openapi()
     methods = {"get", "put", "post", "delete", "patch", "options", "head", "trace"}
     for path, path_item in schema["paths"].items():
-        placeholders = set(re.findall(r"\\{([^{}]+)\\}", path))
+        placeholders = set(re.findall(r"\{([^{}]+)\}", path))
         shared = path_item.get("parameters", [])
         for method, operation in path_item.items():
             if method not in methods:
