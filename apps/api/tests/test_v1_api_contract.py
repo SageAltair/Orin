@@ -98,3 +98,58 @@ def test_v1_task_and_reminder_endpoints_do_not_expose_anonymous_access() -> None
         assert all(requirement for requirement in requirements), (
             f"Anonymous security alternative: {method.upper()} {path}"
         )
+
+
+def test_v1_openapi_component_references_resolve() -> None:
+    """Every v1 schema reference must resolve before clients generate SDKs."""
+    schema = app.openapi()
+    components = schema.get("components", {}).get("schemas", {})
+    assert components, "OpenAPI schemas missing"
+
+    def walk(value: object, location: str) -> None:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str):
+                prefix = "#/components/schemas/"
+                if ref.startswith(prefix):
+                    name = ref[len(prefix):]
+                    assert name in components, f"Broken schema reference {ref} at {location}"
+                else:
+                    assert ref.startswith("#/"), f"External reference {ref} at {location}"
+                    target: object = schema
+                    for token in ref[2:].split("/"):
+                        token = token.replace("~1", "/").replace("~0", "~")
+                        assert isinstance(target, dict) and token in target, (
+                            f"Broken reference {ref} at {location}"
+                        )
+                        target = target[token]
+            for key, child in value.items():
+                walk(child, f"{location}/{key}")
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{location}/{index}")
+
+    for path, operations in schema["paths"].items():
+        if path.startswith("/api/v1/"):
+            walk(operations, path)
+
+
+def test_v1_operation_ids_are_unique_for_client_generation() -> None:
+    """Duplicate operation IDs silently overwrite generated SDK methods."""
+    schema = app.openapi()
+    seen: dict[str, str] = {}
+    for path, operations in schema["paths"].items():
+        if not path.startswith("/api/v1/"):
+            continue
+        for method, operation in operations.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            operation_id = operation.get("operationId")
+            assert isinstance(operation_id, str) and operation_id, (
+                f"Missing operationId: {method.upper()} {path}"
+            )
+            assert operation_id not in seen, (
+                f"Duplicate operationId {operation_id}: {seen.get(operation_id)} and {method.upper()} {path}"
+            )
+            seen[operation_id] = f"{method.upper()} {path}"
+    assert seen, "No versioned API operations discovered"
