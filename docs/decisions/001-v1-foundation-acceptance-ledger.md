@@ -23,3 +23,10 @@ Scope: draft PR #192 only. This is evidence tracking, not approval to close #179
 
 ## Required next actions
 Map existing assertions to each incomplete gate; implement missing tests instead of assuming generic CI success. Re-run exact-head CI, review compatibility and migration impacts, merge safely, verify main, then close #179 with evidence. Do not begin #180 before closure. Do not deploy, install services, or touch real user data.
+
+## 2026-11-07 exact-head checkpoint (commit `39785b351bb01530dc259609fe9912a71f1422a6`)
+- [Verify Orin run 42400995719](https://github.com/SageAltair/Orin/actions/runs/42400995719): **PASS**, exact PR head; includes the corrected isolated Writing browser acceptance test.
+- [Windows reminder smoke run 42400995582](https://github.com/SageAltair/Orin/actions/runs/42400995582): **PASS**, exact PR head; this is automated smoke coverage, **not** physical Windows toast visibility evidence.
+- Previous isolated browser failure is no longer reproduced by the exact-head Verify Orin workflow. The change clears a previously applied Writing search filter before persistence assertions. No claim of general document persistence correctness beyond the tested scenario.
+- **Still incomplete:** checked-in versioned full OpenAPI compatibility baseline, explicit evidence mapping for refresh/revoke and cross-owner denial, complete task pagination/worker integration and reminder lease protocol coverage, and ADR-001 acceptance. Do not merge/close solely on green workflows.
+- **Release boundary:** package #179 stays open; PR #192 stays draft; physical device checks remain deferred to #184. No production or user-data operation is authorized by these results.
