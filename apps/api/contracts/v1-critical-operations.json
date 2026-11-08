@@ -71,7 +71,8 @@
           "204"
         ],
         "request": true,
-        "auth": true
+        "auth": true,
+        "request_required": false
       }
     },
     "/api/v1/auth/reminder-lease/{session_id}": {
