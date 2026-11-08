@@ -28,10 +28,25 @@ def test_checked_in_v1_compatibility_baseline() -> None:
             assert set(expected["statuses"]).issubset(operation["responses"]), (
                 f"Breaking change: response status removed from {method.upper()} {path}"
             )
+            # Successful JSON responses must retain a machine-readable schema;
+            # a status-only assertion cannot protect generated API clients.
+            for status in expected["statuses"]:
+                response = operation["responses"][status]
+                if status == "204":
+                    continue  # No Content responses have no JSON payload.
+                media = response.get("content", {}).get("application/json", {})
+                assert isinstance(media.get("schema"), dict) and media["schema"], (
+                    f"Breaking change: JSON response schema removed from "
+                    f"{method.upper()} {path} ({status})"
+                )
             if expected.get("request"):
                 body = operation.get("requestBody")
                 assert isinstance(body, dict) and body.get("content"), (
                     f"Breaking change: request body removed from {method.upper()} {path}"
+                )
+                media = body["content"].get("application/json", {})
+                assert isinstance(media.get("schema"), dict) and media["schema"], (
+                    f"Breaking change: JSON request schema removed from {method.upper()} {path}"
                 )
             if expected.get("auth"):
                 security = operation.get("security", schema.get("security", []))
