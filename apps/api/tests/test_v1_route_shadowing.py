@@ -1,13 +1,10 @@
-"""#179: detect shadowed method/path handlers in nested FastAPI/Starlette routers.
+"""#179: detect duplicate HTTP method/path handlers in the registered router.
 
-Starlette dispatches the first matching route. A mounted FastAPI app can
-contain APIRoutes even when the outer application has none, so traverse mounts
-and nested routers instead of inspecting only the outer app.routes.
+Use route attributes instead of APIRoute class identity, which may vary
+across FastAPI/Starlette versions and route wrappers.
 """
 from collections import defaultdict
 
-from fastapi.routing import APIRoute
-from starlette.routing import Mount
 from orin_api.main import app
 
 
@@ -16,19 +13,21 @@ def test_no_shadowed_method_path_handlers() -> None:
 
     def inspect(routes, prefix: str = "") -> None:
         for route in routes:
-            if isinstance(route, Mount):
-                inspect(route.routes, prefix + route.path.rstrip("/"))
-            elif isinstance(route, APIRoute):
-                path = prefix + route.path
-                for method in route.methods or ():
+            path = prefix + getattr(route, "path", "")
+            nested = getattr(route, "routes", None)
+            if nested is not None:
+                inspect(nested, path.rstrip("/"))
+                continue
+            methods = getattr(route, "methods", None)
+            endpoint = getattr(route, "endpoint", None)
+            if methods and endpoint is not None:
+                for method in methods:
                     handlers[(method.upper(), path)].append(
-                        f"{route.endpoint.__module__}.{route.endpoint.__qualname__}"
+                        f"{endpoint.__module__}.{endpoint.__qualname__}"
                     )
-            elif hasattr(route, "routes"):
-                inspect(route.routes, prefix + getattr(route, "path", "").rstrip("/"))
 
     inspect(app.routes)
-    assert handlers, "No FastAPI route handlers were inspected"
+    assert handlers, "No HTTP route handlers were inspected"
     collisions = {
         f"{method} {path}": endpoints
         for (method, path), endpoints in handlers.items()
