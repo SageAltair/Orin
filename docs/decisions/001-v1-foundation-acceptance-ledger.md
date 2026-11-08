@@ -36,3 +36,9 @@ Map existing assertions to each incomplete gate; implement missing tests instead
 - New `test_v1_openapi_security_integrity.py` validates all OpenAPI security scheme references, scope declaration types, and absence of anonymous alternatives on release-critical task/notification/reminder endpoints.
 - The new test is **UNVERIFIED** until exact-head CI completes. This is structural API security metadata verification, **not** proof of refresh/revoke, owner isolation, or runtime permission enforcement.
 - Keep #179 open and PR #192 draft until every closure gate is met. No downstream package or native-device work authorized.
+
+## 2026-11-08 exact-head and branch recovery checkpoint
+- [Verify Orin 42420130285](https://github.com/SageAltair/Orin/actions/runs/42420130285): **PASS** at `f748a23fa3735ce5d58eeeecf2618f6088b2e346`.
+- [Windows reminder smoke 42420130303](https://github.com/SageAltair/Orin/actions/runs/42420130303): **PASS** at the same exact head. Physical-device verification remains deferred to #184.
+- PR #192 metadata confirms its head branch is `docs/179-v1-contract-freeze-decision`, still open/draft, and issue #179 remains open. The earlier branch-resolution failure requires a fresh write check, not an assumption that repository access is permanently lost.
+- **Still required:** canonical versioned OpenAPI compatibility baseline, explicit runtime authorization/ownership and task/worker/reminder protocol evidence, and recorded ADR-001 acceptance. Passing CI alone is not authorization to merge or advance.
