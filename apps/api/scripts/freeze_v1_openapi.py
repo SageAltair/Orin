@@ -49,10 +49,19 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true", help="Explicitly refresh frozen baseline")
     mode.add_argument("--check", action="store_true", help="Fail on any contract drift")
+    mode.add_argument("--candidate", type=Path, help="Export a review-only candidate without changing the frozen baseline")
     args = parser.parse_args()
     from orin_api.main import app
 
     actual = serialize(app.openapi())
+    if args.candidate:
+        target = args.candidate.resolve()
+        if target == BASELINE.resolve():
+            parser.error("--candidate must not overwrite the frozen baseline")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(actual, encoding="utf-8")
+        print(f"Wrote review-only candidate {target}")
+        return 0
     if args.write:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
         BASELINE.write_text(actual, encoding="utf-8")
