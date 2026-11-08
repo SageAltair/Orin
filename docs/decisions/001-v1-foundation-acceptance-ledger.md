@@ -42,3 +42,29 @@ Map existing assertions to each incomplete gate; implement missing tests instead
 - [Windows reminder smoke 42420130303](https://github.com/SageAltair/Orin/actions/runs/42420130303): **PASS** at the same exact head. Physical-device verification remains deferred to #184.
 - PR #192 metadata confirms its head branch is `docs/179-v1-contract-freeze-decision`, still open/draft, and issue #179 remains open. The earlier branch-resolution failure requires a fresh write check, not an assumption that repository access is permanently lost.
 - **Still required:** canonical versioned OpenAPI compatibility baseline, explicit runtime authorization/ownership and task/worker/reminder protocol evidence, and recorded ADR-001 acceptance. Passing CI alone is not authorization to merge or advance.
+
+## 2026-11-08 closure-focused evidence reconciliation
+
+This checkpoint replaces the repeated test-invention loop with direct mapping of existing assertions to package #179's closure criteria. Evidence is source-level plus exact-head CI; it is not a claim of manual device acceptance.
+
+**Verified head:** `d5e1757fbc5458b153f334760caf2d1694383a31`.
+- [Verify Orin 42450513045](https://github.com/SageAltair/Orin/actions/runs/42450513045): PASS on that head.
+- [Windows reminder smoke 42450513136](https://github.com/SageAltair/Orin/actions/runs/42450513136): PASS on that head.
+
+| Required acceptance | Existing executable evidence | Assessment |
+| --- | --- | --- |
+| Disposable PostgreSQL upgrade/rollback/preservation | `apps/api/tests/test_v1_postgres_migration_acceptance.py`, `test_v1_migration_contract.py`; disposable PostgreSQL in `.github/workflows/verify.yml` | PASS in isolated CI; not production recovery |
+| Auth refresh/revoke and ownership denial | `apps/api/tests/test_auth.py::test_access_token_requires_auth_and_refresh_rotation_detects_reuse`, `test_logout_revokes_current_access_and_refresh_tokens`, `test_user_cannot_list_or_modify_another_users_data`, `test_v1_foreign_workspace_header_cannot_write_or_read_tasks` | PASS in exact-head suite |
+| Task CRUD/persistence and pagination | `apps/api/tests/test_priority_tasks.py::test_v1_task_lifecycle_persists_across_requests_and_is_owner_scoped`, `test_priority_inventory_pagination_and_validation`; `apps/api/tests/test_auth.py::test_authenticated_workspace_task_lifecycle_survives_token_refresh` | PASS in isolated suite |
+| Timezone and DST boundaries | `apps/api/tests/test_v1_calendar_timezone_contract.py`, `apps/api/tests/test_calendar.py`; `apps/worker/tests/test_windows_reminders.py::test_v1_reminder_dst_fold_preserves_distinct_utc_deadlines`, `test_v1_reminder_spring_forward_uses_real_elapsed_time` | PASS in exact-head suite |
+| Worker paging and fail-closed notification | `apps/worker/tests/test_windows_reminders.py::test_pagination_reads_all_and_no_partial_snapshot`, `test_browser_workspace_lease_fails_closed_before_native_toast`, `test_missing_local_browser_heartbeat_suppresses_and_retries_due_toast`, `test_foreground_auth_revocation_clears_pending_even_without_stop_signal` | PASS in exact-head suite |
+| API schema integrity | `apps/api/tests/test_v1_api_contract.py`, `test_v1_openapi_integrity.py`, `test_v1_openapi_reference_integrity.py`, `test_v1_openapi_security_integrity.py`, `test_v1_route_shadowing.py` | PASS structural checks; **INCOMPLETE canonical checked-in compatibility baseline** |
+| ADR-001 contract freeze | `docs/decisions/001-v1-foundation-contract-freeze.md` | PROPOSED; **approval/acceptance still required** |
+| Native physical Windows/Android delivery | Explicitly assigned to #184 | DEFERRED, not PASS |
+
+**Remaining closure work (bounded):**
+1. Generate and check in a deterministic v1 OpenAPI compatibility baseline, and make CI compare generated v1 operations/request-response shapes against that baseline with documented additive-change policy.
+2. Review/accept ADR-001 and link this evidence. No unapproved breaking contract change.
+3. Re-run exact-head CI, verify PR diff and merge safety, merge #192, verify main, and close #179 with linked evidence. Only then start #180.
+
+**No further duplicate sentinel tests** unless a specific untested failure is demonstrated. This is an evidence reconciliation, not a claim that #179 is finished.
