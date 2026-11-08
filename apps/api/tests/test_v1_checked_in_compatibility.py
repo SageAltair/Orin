@@ -41,13 +41,16 @@ def test_checked_in_v1_compatibility_baseline() -> None:
                 )
             if expected.get("request"):
                 body = operation.get("requestBody")
-                assert isinstance(body, dict) and body.get("content"), (
+                assert isinstance(body, dict) and body.get("required") is True and body.get("content"), (
                     f"Breaking change: request body removed from {method.upper()} {path}"
                 )
                 media = body["content"].get("application/json", {})
                 assert isinstance(media.get("schema"), dict) and media["schema"], (
                     f"Breaking change: JSON request schema removed from {method.upper()} {path}"
                 )
+            # A required body is part of the wire contract. A route that still
+            # advertises JSON but silently makes it optional is incompatible.
+            # The baseline does not yet freeze individual field types.
             if expected.get("auth"):
                 security = operation.get("security", schema.get("security", []))
                 assert security and all(isinstance(item, dict) and item for item in security), (
