@@ -41,7 +41,7 @@ def test_checked_in_v1_compatibility_baseline() -> None:
                 )
             if expected.get("request"):
                 body = operation.get("requestBody")
-                assert isinstance(body, dict) and body.get("required") is True and body.get("content"), (
+                assert isinstance(body, dict) and body.get("required", False) is expected.get("request_required", True) and body.get("content"), (
                     f"Breaking change: request body removed from {method.upper()} {path}"
                 )
                 media = body["content"].get("application/json", {})
