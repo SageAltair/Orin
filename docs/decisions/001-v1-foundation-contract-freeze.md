@@ -22,13 +22,13 @@ For a proposed breaking change: (a) enumerate affected API routes, database revi
 
 | Contract | Required evidence | Status |
 | --- | --- | --- |
-| API request/response and status behavior | Checked-in OpenAPI baseline and compatibility regression | Pending |
-| Database migration graph | Alembic single-head check, disposable PostgreSQL upgrade and data preservation | Pending |
-| Recovery | Disposable downgrade or forward-recovery/restore drill with data assertions | Pending |
-| Auth/session and workspace ownership | Cross-owner negative tests, refresh/revoke tests | Pending |
-| Task lifecycle and timezone | CRUD, pagination, timezone, due-reminder integration tests | Pending |
-| Windows browser/worker lease | Rotation, expiry, revocation, heartbeat and fail-closed tests | Pending |
-| Exact-head verification | Green CI linked to #179 | Pending |
+| API request/response and status behavior | `apps/api/contracts/v1-critical-operations.json` and `apps/api/tests/test_v1_checked_in_compatibility.py` | Partial: critical routes protected; field-level wire shapes not frozen |
+| Database migration graph | `test_v1_migration_contract.py`, `test_v1_postgres_migration_acceptance.py`, isolated CI PostgreSQL | Verified by exact-head CI |
+| Recovery | Disposable PostgreSQL upgrade/rollback/re-upgrade and preservation in CI | Verified in disposable environment only |
+| Auth/session and workspace ownership | `test_auth.py` refresh rotation, logout revocation, foreign workspace denial | Verified by exact-head CI |
+| Task lifecycle and timezone | `test_priority_tasks.py`, `test_v1_calendar_timezone_contract.py`, worker DST tests | Verified by exact-head CI |
+| Windows browser/worker lease | `test_windows_reminders.py` browser lease, heartbeat, auth revocation, fail-closed tests | Verified in isolated smoke CI; native visual delivery deferred #184 |
+| Exact-head verification | [Verify Orin 42470929052](https://github.com/SageAltair/Orin/actions/runs/42470929052), [Windows smoke 42470929097](https://github.com/SageAltair/Orin/actions/runs/42470929097), both at `e0941fff82527abe6c6eb17b8286833a0e8413ee` | PASS after targeted security retry |
 
 Existing test suites and previous CI runs may contribute evidence only when their exact commits, assertions, and applicability are recorded. This document does not substitute for that evidence.
 
@@ -38,3 +38,7 @@ Existing test suites and previous CI runs may contribute evidence only when thei
 - [Architecture overview](../architecture.md)
 - [Windows reminder security and opt-in](../../apps/worker/WINDOWS_REMINDERS.md)
 - [Alembic migrations](../../apps/api/migrations/versions)
+
+## 2026-11-08 acceptance review
+
+The exact-head security retry completed successfully at `e0941fff82527abe6c6eb17b8286833a0e8413ee`; the SBOM download failure was transient. No security check was waived. The API baseline protects selected critical operations, but not all v1 request/response field-level types, defaults, nullability or enum semantics. **ADR-001 remains proposed**, pending completion of that contract freeze and recorded acceptance. CI passing is not itself architecture approval. Do not merge or close #179 until these gates are satisfied. No native-device verification is claimed.
