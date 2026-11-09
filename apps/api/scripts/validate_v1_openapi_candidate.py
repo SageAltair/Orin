@@ -16,6 +16,14 @@ def validate(document: dict) -> list[str]:
     paths = document.get("paths")
     if not isinstance(paths, dict) or not paths:
         errors.append("Missing paths")
+    components = document.get("components", {})
+    if not isinstance(components, dict):
+        errors.append("Invalid components object")
+        components = {}
+    schemes = components.get("securitySchemes", {})
+    if not isinstance(schemes, dict):
+        errors.append("Invalid securitySchemes object")
+        schemes = {}
     seen_ids: set[str] = set()
 
     def visit(value: object, location: str) -> None:
@@ -32,6 +40,8 @@ def validate(document: dict) -> list[str]:
                 target: object = document
                 try:
                     for segment in reference[2:].split("/"):
+                        if any(segment[i] == "~" and (i + 1 == len(segment) or segment[i + 1] not in "01") for i in range(len(segment))):
+                            raise KeyError("invalid JSON pointer escape")
                         segment = segment.replace("~1", "/").replace("~0", "~")
                         if not isinstance(target, dict):
                             raise KeyError(segment)
@@ -61,6 +71,29 @@ def validate(document: dict) -> list[str]:
                     errors.append(f"Duplicate operationId: {operation_id}")
                 else:
                     seen_ids.add(operation_id)
+    def check_security(requirements: object, location: str) -> None:
+        if not isinstance(requirements, list):
+            errors.append(f"{location}: security must be a list")
+            return
+        for index, requirement in enumerate(requirements):
+            if not isinstance(requirement, dict):
+                errors.append(f"{location}/{index}: invalid security requirement")
+                continue
+            for scheme, scopes in requirement.items():
+                if scheme not in schemes:
+                    errors.append(f"{location}/{index}: unknown security scheme {scheme}")
+                if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+                    errors.append(f"{location}/{index}: invalid security scopes for {scheme}")
+
+    if "security" in document:
+        check_security(document["security"], "#/security")
+    if isinstance(paths, dict):
+        for path, operations in paths.items():
+            if not isinstance(operations, dict):
+                continue
+            for method, operation in operations.items():
+                if method in {"get", "post", "put", "patch", "delete", "options", "head"} and isinstance(operation, dict) and "security" in operation:
+                    check_security(operation["security"], f"#/paths/{path}/{method}/security")
     visit(document, "#")
     return errors
 
