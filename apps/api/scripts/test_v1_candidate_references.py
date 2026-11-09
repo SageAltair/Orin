@@ -29,6 +29,28 @@ class CandidateReferenceTests(unittest.TestCase):
         self.doc["components"]["schemas"]["Item"] = {"$ref": 123}
         self.assertTrue(any("invalid reference" in error for error in validate(self.doc)))
 
+    def test_malformed_json_pointer_escape_rejected(self):
+        self.doc["components"]["schemas"]["Item"] = {"$ref": "#/components/schemas/Bad~2Name"}
+        self.assertTrue(any("unresolved reference" in error for error in validate(self.doc)))
+
+    def test_unknown_operation_security_scheme_rejected(self):
+        self.doc["paths"]["/api/v1/items"]["get"]["security"] = [{"MissingBearer": []}]
+        self.assertTrue(any("unknown security scheme" in error for error in validate(self.doc)))
+
+    def test_declared_security_scheme_accepted(self):
+        self.doc["components"]["securitySchemes"] = {"BearerAuth": {"type": "http", "scheme": "bearer"}}
+        self.doc["paths"]["/api/v1/items"]["get"]["security"] = [{"BearerAuth": []}]
+        self.assertEqual(validate(self.doc), [])
+
+    def test_invalid_security_scope_type_rejected(self):
+        self.doc["components"]["securitySchemes"] = {"BearerAuth": {"type": "http", "scheme": "bearer"}}
+        self.doc["paths"]["/api/v1/items"]["get"]["security"] = [{"BearerAuth": "read"}]
+        self.assertTrue(any("invalid security scopes" in error for error in validate(self.doc)))
+
+    def test_malformed_global_security_rejected(self):
+        self.doc["security"] = {"BearerAuth": []}
+        self.assertTrue(any("security must be a list" in error for error in validate(self.doc)))
+
 
 if __name__ == "__main__":
     unittest.main()
