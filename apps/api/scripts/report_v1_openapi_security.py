@@ -13,6 +13,7 @@ METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 
 def inventory(document: dict) -> list[dict]:
     global_security = document.get("security", [])
+    defined_schemes = set(document.get("components", {}).get("securitySchemes", {}))
     records = []
     for path, path_item in sorted(document.get("paths", {}).items()):
         for method, operation in sorted(path_item.items()):
@@ -20,7 +21,10 @@ def inventory(document: dict) -> list[dict]:
                 continue
             explicit = "security" in operation
             effective = operation["security"] if explicit else global_security
+            referenced_schemes = sorted({scheme for alternative in effective if isinstance(alternative, dict) for scheme in alternative}) if isinstance(effective, list) else []
             records.append({
+                "undefined_security_schemes": sorted(set(referenced_schemes) - defined_schemes),
+                "invalid_security_declaration": not isinstance(effective, list) or any(not isinstance(item, dict) for item in effective),
                 "method": method.upper(),
                 "path": path,
                 "operationId": operation.get("operationId"),
@@ -41,6 +45,7 @@ def main() -> int:
         "warning": "OpenAPI declarations only; inspect runtime dependencies, worker credentials, and authorization before approval.",
         "operations": len(records),
         "anonymous_or_unspecified": [r for r in records if r["anonymous_allowed"]],
+        "undefined_or_invalid_security": [r for r in records if r["undefined_security_schemes"] or r["invalid_security_declaration"]],
         "inherited_global_security": [r for r in records if r["source"] == "global"],
     }
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
