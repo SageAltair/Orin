@@ -13,7 +13,8 @@ METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 
 def inventory(document: dict) -> list[dict]:
     global_security = document.get("security", [])
-    defined_schemes = set(document.get("components", {}).get("securitySchemes", {}))
+    schemes = document.get("components", {}).get("securitySchemes", {})
+    defined_schemes = set(schemes) if isinstance(schemes, dict) else set()
     records = []
     for path, path_item in sorted(document.get("paths", {}).items()):
         for method, operation in sorted(path_item.items()):
@@ -22,9 +23,16 @@ def inventory(document: dict) -> list[dict]:
             explicit = "security" in operation
             effective = operation["security"] if explicit else global_security
             referenced_schemes = sorted({scheme for alternative in effective if isinstance(alternative, dict) for scheme in alternative}) if isinstance(effective, list) else []
+            invalid = (not isinstance(effective, list) or any(
+                not isinstance(item, dict) or any(
+                    not isinstance(name, str) or not name or not isinstance(scopes, list)
+                    or any(not isinstance(scope, str) for scope in scopes)
+                    for name, scopes in item.items()
+                ) for item in effective
+            ))
             records.append({
                 "undefined_security_schemes": sorted(set(referenced_schemes) - defined_schemes),
-                "invalid_security_declaration": not isinstance(effective, list) or any(not isinstance(item, dict) for item in effective),
+                "invalid_security_declaration": invalid,
                 "method": method.upper(),
                 "path": path,
                 "operationId": operation.get("operationId"),
