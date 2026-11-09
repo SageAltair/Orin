@@ -27,6 +27,22 @@ class SecurityInventoryTests(unittest.TestCase):
         self.assertFalse(records["worker"]["anonymous_allowed"])
         self.assertEqual(records["worker"]["security"], [{"WorkerKey": []}])
 
+    def test_undefined_and_malformed_security_are_reported(self):
+        doc = {
+            "components": {"securitySchemes": {"BearerAuth": {"type": "http", "scheme": "bearer"}}},
+            "paths": {
+                "/api/v1/a": {"get": {"security": [{"UnknownWorkerKey": []}]}},
+                "/api/v1/b": {"post": {"security": {"BearerAuth": []}}},
+                "/api/v1/c": {"get": {"security": [{"BearerAuth": []}]}},
+            },
+        }
+        records = {r["path"]: r for r in inventory(doc)}
+        self.assertEqual(records["/api/v1/a"]["undefined_security_schemes"], ["UnknownWorkerKey"])
+        self.assertFalse(records["/api/v1/a"]["invalid_security_declaration"])
+        self.assertTrue(records["/api/v1/b"]["invalid_security_declaration"])
+        self.assertEqual(records["/api/v1/c"]["undefined_security_schemes"], [])
+        self.assertFalse(records["/api/v1/c"]["invalid_security_declaration"])
+
     def test_no_global_security_is_flagged_for_review(self):
         records = inventory({"paths": {"/api/v1/ping": {"get": {"operationId": "ping"}}}})
         self.assertTrue(records[0]["anonymous_allowed"])
