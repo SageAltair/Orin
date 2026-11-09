@@ -111,6 +111,13 @@ jobs:
           python -m json.tool ../../v1-openapi-candidate.json > /dev/null
           python scripts/validate_v1_openapi_candidate.py ../../v1-openapi-candidate.json
           python -m unittest discover -s scripts -p 'test_v1_candidate_references.py'
+      - name: Enforce approved v1 OpenAPI baseline (fail closed)
+        working-directory: apps/api
+        run: |
+          # Never generate or refresh the authoritative baseline in CI.
+          # Until review has committed it, this gate must fail rather than silently pass.
+          python scripts/freeze_v1_openapi.py --check
+          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json
       - name: Preserve v1 OpenAPI candidate for contract review
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
