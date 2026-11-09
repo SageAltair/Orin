@@ -112,6 +112,8 @@ jobs:
           python scripts/validate_v1_openapi_candidate.py ../../v1-openapi-candidate.json
           python -m unittest discover -s scripts -p 'test_v1_candidate_references.py'
           python -m unittest discover -s scripts -p 'test_v1_openapi_freeze.py'
+          python -m unittest discover -s scripts -p 'test_v1_openapi_security_inventory.py'
+          python scripts/report_v1_openapi_security.py ../../v1-openapi-candidate.json --output ../../v1-openapi-security-review.json
       - name: Enforce approved v1 OpenAPI baseline (fail closed)
         working-directory: apps/api
         run: |
@@ -124,7 +126,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: v1-openapi-contract-candidate
-          path: v1-openapi-candidate.json
+          path: |
+            v1-openapi-candidate.json
+            v1-openapi-security-review.json
           if-no-files-found: warn
       - name: Verify v1 PostgreSQL upgrade rollback and data preservation on disposable database
         env:
