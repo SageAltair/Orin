@@ -24,7 +24,11 @@ def validate(document: dict) -> list[str]:
                 visit(item, f"{location}/{index}")
         elif isinstance(value, dict):
             reference = value.get("$ref")
-            if isinstance(reference, str) and reference.startswith("#/"):
+            if reference is not None and not isinstance(reference, str):
+                errors.append(f"{location}: invalid reference type")
+            elif isinstance(reference, str) and not reference.startswith("#/"):
+                errors.append(f"{location}: external reference forbidden in frozen contract: {reference}")
+            elif isinstance(reference, str) and reference.startswith("#/"):
                 target: object = document
                 try:
                     for segment in reference[2:].split("/"):
