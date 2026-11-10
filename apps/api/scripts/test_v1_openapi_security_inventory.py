@@ -54,6 +54,22 @@ class SecurityInventoryTests(unittest.TestCase):
         self.assertTrue(records["/bad/items"]["invalid_security_declaration"])
         self.assertFalse(records["/valid"]["invalid_security_declaration"])
 
+    def test_non_oauth_security_scheme_cannot_declare_scopes(self):
+        doc = {
+            "components": {"securitySchemes": {
+                "BearerAuth": {"type": "http", "scheme": "bearer"},
+                "OAuth": {"type": "oauth2", "flows": {"clientCredentials": {
+                    "tokenUrl": "/token", "scopes": {"read": "Read"}}}},
+            }},
+            "paths": {
+                "/invalid": {"get": {"security": [{"BearerAuth": ["read"]}]}},
+                "/valid": {"get": {"security": [{"OAuth": ["read"]}]}},
+            },
+        }
+        records = {r["path"]: r for r in inventory(doc)}
+        self.assertEqual(records["/invalid"]["invalid_scopes_for_scheme"], ["BearerAuth"])
+        self.assertEqual(records["/valid"]["invalid_scopes_for_scheme"], [])
+
     def test_no_global_security_is_flagged_for_review(self):
         records = inventory({"paths": {"/api/v1/ping": {"get": {"operationId": "ping"}}}})
         self.assertTrue(records[0]["anonymous_allowed"])
