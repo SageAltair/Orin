@@ -119,13 +119,6 @@ jobs:
         run: |
           # Preserve executable regression evidence even while the baseline is awaiting approval.
           python -m pytest -q tests/test_v1_openapi_freeze_regressions.py
-      - name: Enforce approved v1 OpenAPI baseline (fail closed)
-        working-directory: apps/api
-        run: |
-          # Never generate or refresh the authoritative baseline in CI.
-          # Until review has committed it, this gate must fail rather than silently pass.
-          python scripts/freeze_v1_openapi.py --check
-          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json
       - name: Preserve v1 OpenAPI candidate for contract review
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -204,6 +197,13 @@ jobs:
       - name: Browser workflows against mocks and the isolated API
         working-directory: apps/web
         run: npm run test:e2e -- --workers=2
+      - name: Enforce approved v1 OpenAPI baseline (fail closed)
+        working-directory: apps/api
+        run: |
+          # Never generate or refresh the authoritative baseline in CI.
+          # Until review has committed it, this gate must fail rather than silently pass.
+          python scripts/freeze_v1_openapi.py --check
+          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
