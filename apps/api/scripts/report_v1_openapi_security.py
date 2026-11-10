@@ -30,7 +30,9 @@ def inventory(document: dict) -> list[dict]:
                     for name, scopes in item.items()
                 ) for item in effective
             ))
+            invalid_scopes_for_scheme = sorted({name for alternative in effective if isinstance(alternative, dict) for name, scopes in alternative.items() if isinstance(scopes, list) and scopes and isinstance(schemes, dict) and isinstance(schemes.get(name), dict) and schemes[name].get("type") not in {"oauth2", "openIdConnect"}}) if isinstance(effective, list) else []
             records.append({
+                "invalid_scopes_for_scheme": invalid_scopes_for_scheme,
                 "undefined_security_schemes": sorted(set(referenced_schemes) - defined_schemes),
                 "invalid_security_declaration": invalid,
                 "method": method.upper(),
@@ -53,7 +55,7 @@ def main() -> int:
         "warning": "OpenAPI declarations only; inspect runtime dependencies, worker credentials, and authorization before approval.",
         "operations": len(records),
         "anonymous_or_unspecified": [r for r in records if r["anonymous_allowed"]],
-        "undefined_or_invalid_security": [r for r in records if r["undefined_security_schemes"] or r["invalid_security_declaration"]],
+        "undefined_or_invalid_security": [r for r in records if r["undefined_security_schemes"] or r["invalid_security_declaration"] or r["invalid_scopes_for_scheme"]],
         "inherited_global_security": [r for r in records if r["source"] == "global"],
     }
     payload = json.dumps(report, indent=2, sort_keys=True) + "\n"
