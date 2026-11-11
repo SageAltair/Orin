@@ -23,8 +23,8 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const email = `isolated-browser-${Date.now()}-${crypto.randomUUID()}@example.com`;
   const password = `Isolated-acceptance-${crypto.randomUUID()}!`;
 
-  // Capture the actual browser bearer token before creating a second API session.
-  // Reminder leases are session-scoped; a separate login must not read this lease.
+  // Capture the browser bearer token for its session-scoped lease lifecycle.
+  // Owner-scoped lease reads are permitted across that owner's active sessions.
   let browserAuthorization: string | undefined;
   page.on("request", (outgoing) => {
     if (outgoing.url().includes("/api/v1/")) {
@@ -64,11 +64,16 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const leaseUrl = `${isolatedApi}/api/v1/auth/reminder-lease/${browserSessionId}`;
   expect(browserAuthorization, "browser API requests must carry the browser session token").toBeTruthy();
   const browserHeaders = { Authorization: browserAuthorization! };
-  // A separate login belongs to a different session and must not read this lease.
-  expect((await request.get(leaseUrl, { headers })).status()).toBe(404);
+  // Lease renewal is bound to the browser session, but GET permits another
+  // active session of the SAME owner to inspect that browser lease. This is
+  // required by the companion's owner-scoped lease lookup contract.
   const initialLease = await request.get(leaseUrl, { headers: browserHeaders });
   expect(initialLease.status()).toBe(200);
   const leaseA = await initialLease.json() as { workspace_id: string; generation_id: string };
+  const ownerSessionRead = await request.get(leaseUrl, { headers });
+  expect(ownerSessionRead.status()).toBe(200);
+  expect((await ownerSessionRead.json() as { workspace_id: string; generation_id: string }))
+    .toMatchObject(leaseA);
   expect(leaseA.generation_id).toBe(generationA);
 
   await page.getByRole("region", { name: "Workspaces" })
