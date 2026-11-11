@@ -23,6 +23,15 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const email = `isolated-browser-${Date.now()}-${crypto.randomUUID()}@example.com`;
   const password = `Isolated-acceptance-${crypto.randomUUID()}!`;
 
+  // Capture the actual browser bearer token before creating a second API session.
+  // Reminder leases are session-scoped; a separate login must not read this lease.
+  let browserAuthorization: string | undefined;
+  page.on("request", (outgoing) => {
+    if (outgoing.url().startsWith(`${isolatedApi}/api/v1/`)) {
+      const authorization = outgoing.headers()["authorization"];
+      if (authorization?.startsWith("Bearer ")) browserAuthorization = authorization;
+    }
+  });
   await page.goto(isolatedWeb);
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Isolated browser acceptance");
@@ -53,7 +62,11 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect(identifiers).toHaveLength(2);
   const [browserSessionId, generationA] = identifiers;
   const leaseUrl = `${isolatedApi}/api/v1/auth/reminder-lease/${browserSessionId}`;
-  const initialLease = await request.get(leaseUrl, { headers });
+  expect(browserAuthorization, "browser API requests must carry the browser session token").toBeTruthy();
+  const browserHeaders = { Authorization: browserAuthorization! };
+  // A separate login belongs to a different session and must not read this lease.
+  expect((await request.get(leaseUrl, { headers })).status()).toBe(404);
+  const initialLease = await request.get(leaseUrl, { headers: browserHeaders });
   expect(initialLease.status()).toBe(200);
   const leaseA = await initialLease.json() as { workspace_id: string; generation_id: string };
   expect(leaseA.generation_id).toBe(generationA);
@@ -65,20 +78,20 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await page.getByRole("dialog", { name: "Create a workspace" })
     .getByRole("button", { name: "Create workspace" }).click();
   await expect.poll(async () => {
-    const response = await request.get(leaseUrl, { headers });
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
     return response.ok() ? (await response.json() as { workspace_id: string }).workspace_id : leaseA.workspace_id;
   }).not.toBe(leaseA.workspace_id);
-  const leaseB = await (await request.get(leaseUrl, { headers })).json() as {
+  const leaseB = await (await request.get(leaseUrl, { headers: browserHeaders })).json() as {
     workspace_id: string; generation_id: string;
   };
   expect(leaseB.generation_id).not.toBe(generationA);
   await page.getByRole("region", { name: "Workspaces" })
     .getByRole("button", { name: "Personal", exact: true }).click();
   await expect.poll(async () => {
-    const response = await request.get(leaseUrl, { headers });
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
     return response.ok() ? (await response.json() as { generation_id: string }).generation_id : leaseB.generation_id;
   }).not.toBe(leaseB.generation_id);
-  const leaseAgain = await (await request.get(leaseUrl, { headers })).json() as {
+  const leaseAgain = await (await request.get(leaseUrl, { headers: browserHeaders })).json() as {
     workspace_id: string; generation_id: string;
   };
   expect(leaseAgain.workspace_id).toBe(leaseA.workspace_id);
