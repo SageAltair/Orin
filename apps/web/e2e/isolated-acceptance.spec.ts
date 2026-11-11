@@ -67,6 +67,13 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   // Lease renewal is bound to the browser session, but GET permits another
   // active session of the SAME owner to inspect that browser lease. This is
   // required by the companion's owner-scoped lease lookup contract.
+  // The checkbox updates the UI before its asynchronous lease PUT necessarily
+  // commits. Wait for the persisted lease rather than racing that request.
+  // A persistent 404 still fails with the last observed HTTP status.
+  await expect.poll(async () => {
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
+    return response.status();
+  }, { message: "browser reminder lease must persist after opt-in", timeout: 10_000 }).toBe(200);
   const initialLease = await request.get(leaseUrl, { headers: browserHeaders });
   expect(initialLease.status()).toBe(200);
   const leaseA = await initialLease.json() as { workspace_id: string; generation_id: string };
