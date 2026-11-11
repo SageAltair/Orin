@@ -533,10 +533,9 @@ test.describe("Dar es Salaam local task scheduling", () => {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Create account" }).click();
-    // Wait for the authenticated workspace shell, not a home-screen heading whose copy
-    // or visibility can change independently of task scheduling.
-    await expect(page.getByRole("navigation", { name: "Workspace" })
-      .getByRole("button", { name: "Tasks", exact: true })).toBeVisible();
+    // The isolated browser journey already verifies this post-registration heading.
+    // Do not assume the sidebar navigation has an accessible name of "Workspace".
+    await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
     const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
       data: { email, password },
@@ -546,8 +545,7 @@ test.describe("Dar es Salaam local task scheduling", () => {
     const headers = { Authorization: `Bearer ${token}` };
 
     const openTasks = async () => {
-      await page.getByRole("navigation", { name: "Workspace" })
-        .getByRole("button", { name: "Tasks", exact: true }).click();
+      await page.getByRole("button", { name: "Tasks", exact: true }).click();
       await expect(page.locator(".focus-task-collection")).toBeVisible();
     };
     await openTasks();
