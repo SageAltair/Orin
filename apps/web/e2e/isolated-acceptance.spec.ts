@@ -27,7 +27,7 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   // Reminder leases are session-scoped; a separate login must not read this lease.
   let browserAuthorization: string | undefined;
   page.on("request", (outgoing) => {
-    if (outgoing.url().startsWith(`${isolatedApi}/api/v1/`)) {
+    if (outgoing.url().includes("/api/v1/")) {
       const authorization = outgoing.headers()["authorization"];
       if (authorization?.startsWith("Bearer ")) browserAuthorization = authorization;
     }
