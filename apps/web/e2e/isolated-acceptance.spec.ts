@@ -533,7 +533,10 @@ test.describe("Dar es Salaam local task scheduling", () => {
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
     await page.getByRole("button", { name: "Create account" }).click();
-    await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+    // Wait for the authenticated workspace shell, not a home-screen heading whose copy
+    // or visibility can change independently of task scheduling.
+    await expect(page.getByRole("navigation", { name: "Workspace" })
+      .getByRole("button", { name: "Tasks", exact: true })).toBeVisible();
 
     const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
       data: { email, password },
