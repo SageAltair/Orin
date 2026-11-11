@@ -76,6 +76,36 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     .toMatchObject(leaseA);
   expect(leaseA.generation_id).toBe(generationA);
 
+  // A different account must never discover another owner's lease, even
+  // when it knows the session identifier. Use a separate browser context so
+  // account creation cannot replace the primary browser's session.
+  const otherContext = await page.context().browser()!.newContext();
+  try {
+    const otherPage = await otherContext.newPage();
+    let otherAuthorization: string | undefined;
+    otherPage.on("request", (outgoing) => {
+      if (outgoing.url().includes("/api/v1/")) {
+        const authorization = outgoing.headers()["authorization"];
+        if (authorization?.startsWith("Bearer ")) otherAuthorization = authorization;
+      }
+    });
+    await otherPage.goto(isolatedWeb);
+    await otherPage.getByRole("button", { name: "New to Orin? Create an account" }).click();
+    await otherPage.getByLabel("Your name").fill("Isolated unrelated account");
+    await otherPage.getByLabel("Email").fill(`isolated-other-${crypto.randomUUID()}@example.com`);
+    await otherPage.getByLabel("Password", { exact: true }).fill(`Isolated-other-${crypto.randomUUID()}!`);
+    await otherPage.getByRole("button", { name: "Create account" }).click();
+    await expect(otherPage.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+    expect(otherAuthorization, "unrelated account must have its own bearer token").toBeTruthy();
+    const crossUserRead = await request.get(leaseUrl, {
+      headers: { Authorization: otherAuthorization! },
+    });
+    expect(crossUserRead.status(), "a different owner must not read the reminder lease").toBe(404);
+  } finally {
+    await otherContext.close();
+  }
+
+
   await page.getByRole("region", { name: "Workspaces" })
     .getByRole("button", { name: "New workspace" }).click();
   await page.getByRole("dialog", { name: "Create a workspace" })
