@@ -336,8 +336,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Each browser test gets a fresh disposable API/database so the
+          # production five-signups-per-minute peer limit remains meaningful.
           - suite: isolated-acceptance.spec.ts
-            label: isolated-acceptance
+            grep: persists Writing and delivers task reminders
+            label: isolated-browser-journey
+          - suite: isolated-acceptance.spec.ts
+            grep: All Tasks includes records beyond the first API page
+            label: isolated-pagination
+          - suite: isolated-acceptance.spec.ts
+            grep: inventories within owner and workspace
+            label: isolated-workspace-scope
+          - suite: isolated-acceptance.spec.ts
+            grep: Dar es Salaam local task time through edit
+            label: isolated-dar-timezone
           - suite: worker-stack.spec.ts
             label: isolated-worker-acceptance
           - suite: knowledge.spec.ts
@@ -407,7 +419,12 @@ jobs:
           exit 1
       - name: Cross-feature real-browser acceptance on disposable data
         working-directory: apps/web
-        run: npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+        run: |
+          if [ -n "${{ matrix.grep }}" ]; then
+            npm run test:e2e -- e2e/${{ matrix.suite }} --grep '${{ matrix.grep }}' --project=chromium --workers=1
+          else
+            npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+          fi
       - name: Preserve isolated acceptance diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
