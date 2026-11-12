@@ -61,7 +61,6 @@ def test_release_critical_private_operations_have_no_anonymous_alternative():
         )
 
 
-
 def test_worker_gateway_declares_device_specific_bearer_scheme():
     schema = app.openapi()
     schemes = schema.get("components", {}).get("securitySchemes", {})

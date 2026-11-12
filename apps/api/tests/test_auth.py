@@ -139,7 +139,6 @@ def test_registration_rate_limit_uses_peer_not_untrusted_forwarded_header(auth_c
     assert 1 <= retry_after <= 60
 
 
-
 def test_worker_gateway_rejects_missing_or_invalid_device_credentials(auth_client: TestClient) -> None:
     client = auth_client
     routes = (
