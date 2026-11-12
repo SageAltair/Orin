@@ -8,10 +8,14 @@ Never regenerate the baseline as part of CI.
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
 import json
+import struct
 from pathlib import Path
+import zlib
 
-BASELINE = Path(__file__).resolve().parents[1] / "contracts" / "v1-openapi.json"
+BASELINE = Path(__file__).resolve().parents[1] / "contracts" / "v1-openapi.json.gz.b64"
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
 
 
@@ -43,6 +47,21 @@ def canonical_contract(document: dict) -> dict:
 def serialize(document: dict) -> str:
     return json.dumps(canonical_contract(document), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
+def encode_baseline(serialized: str) -> str:
+    """Return a cross-version deterministic gzip+base64 representation."""
+    raw = serialized.encode("utf-8")
+    compressor = zlib.compressobj(level=9, wbits=-zlib.MAX_WBITS)
+    deflated = compressor.compress(raw) + compressor.flush()
+    # Fixed gzip header: zero mtime, maximum compression hint, OS=unknown.
+    header = b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff"
+    trailer = struct.pack("<II", zlib.crc32(raw) & 0xFFFFFFFF, len(raw) & 0xFFFFFFFF)
+    return base64.b64encode(header + deflated + trailer).decode("ascii") + "\\n"
+
+
+def decode_baseline(encoded: str) -> str:
+    compressed = base64.b64decode(encoded, validate=True)
+    return gzip.decompress(compressed).decode("utf-8")
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -64,13 +83,18 @@ def main() -> int:
         return 0
     if args.write:
         BASELINE.parent.mkdir(parents=True, exist_ok=True)
-        BASELINE.write_text(actual, encoding="utf-8")
-        print(f"Wrote {BASELINE}")
+        BASELINE.write_text(encode_baseline(actual), encoding="ascii")
+        print(f"Wrote compressed baseline {BASELINE}")
         return 0
     if not BASELINE.is_file():
         print(f"Missing baseline: {BASELINE}. Generate and review with --write.")
         return 1
-    if BASELINE.read_text(encoding="utf-8") != actual:
+    try:
+        expected = decode_baseline(BASELINE.read_text(encoding="ascii").strip())
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        print(f"Invalid frozen OpenAPI baseline: {exc}")
+        return 1
+    if expected != actual:
         print("v1 OpenAPI drift detected. Review compatibility and approve changes before updating baseline.")
         return 1
     print("v1 OpenAPI contract matches frozen baseline")
