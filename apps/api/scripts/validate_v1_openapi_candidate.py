@@ -5,8 +5,39 @@ This is a structural gate, not a substitute for human contract review.
 from __future__ import annotations
 
 import argparse
+import base64
+import gzip
 import json
 from pathlib import Path
+
+
+def load_document(path: Path) -> dict:
+    payload = path.read_bytes()
+    if path.name.endswith(".json.gz.b64"):
+        payload = gzip.decompress(base64.b64decode(payload, validate=True))
+    return json.loads(payload.decode("utf-8"))
+
+
+def resolve_json_pointer(document: object, reference: str) -> object:
+    if not reference.startswith("#/"):
+        raise KeyError(reference)
+    target = document
+    for segment in reference[2:].split("/"):
+        if any(segment[i] == "~" and (i + 1 == len(segment) or segment[i + 1] not in "01") for i in range(len(segment))):
+            raise KeyError("invalid JSON pointer escape")
+        segment = segment.replace("~1", "/").replace("~0", "~")
+        if isinstance(target, dict):
+            target = target[segment]
+        elif isinstance(target, list):
+            if not segment.isdigit() or (len(segment) > 1 and segment.startswith("0")):
+                raise KeyError(segment)
+            index = int(segment)
+            if index >= len(target):
+                raise KeyError(segment)
+            target = target[index]
+        else:
+            raise KeyError(segment)
+    return target
 
 
 def validate(document: dict) -> list[str]:
@@ -37,16 +68,9 @@ def validate(document: dict) -> list[str]:
             elif isinstance(reference, str) and not reference.startswith("#/"):
                 errors.append(f"{location}: external reference forbidden in frozen contract: {reference}")
             elif isinstance(reference, str) and reference.startswith("#/"):
-                target: object = document
                 try:
-                    for segment in reference[2:].split("/"):
-                        if any(segment[i] == "~" and (i + 1 == len(segment) or segment[i + 1] not in "01") for i in range(len(segment))):
-                            raise KeyError("invalid JSON pointer escape")
-                        segment = segment.replace("~1", "/").replace("~0", "~")
-                        if not isinstance(target, dict):
-                            raise KeyError(segment)
-                        target = target[segment]
-                except (KeyError, TypeError):
+                    resolve_json_pointer(document, reference)
+                except (KeyError, TypeError, ValueError):
                     errors.append(f"{location}: unresolved reference {reference}")
             for key, item in value.items():
                 visit(item, f"{location}/{key}")
@@ -102,7 +126,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("candidate", type=Path)
     args = parser.parse_args()
-    document = json.loads(args.candidate.read_text(encoding="utf-8"))
+    document = load_document(args.candidate)
     errors = validate(document)
     for error in errors:
         print(error)
