@@ -29,6 +29,24 @@ class CandidateReferenceTests(unittest.TestCase):
         self.doc["components"]["schemas"]["Item"] = {"$ref": 123}
         self.assertTrue(any("invalid reference" in error for error in validate(self.doc)))
 
+    def test_array_index_reference_resolves(self):
+        self.doc["components"]["schemas"]["Item"] = {
+            "oneOf": [{"type": "string"}, {"type": "integer"}]
+        }
+        self.doc["paths"]["/api/v1/items"]["get"]["responses"]["200"]["content"] = {
+            "application/json": {"schema": {"$ref": "#/components/schemas/Item/oneOf/0"}}
+        }
+        self.assertEqual(validate(self.doc), [])
+
+    def test_array_out_of_range_and_leading_zero_indices_rejected(self):
+        self.doc["components"]["schemas"]["Item"] = {"oneOf": [{"type": "string"}]}
+        for index in ("1", "00"):
+            with self.subTest(index=index):
+                self.doc["paths"]["/api/v1/items"]["get"]["responses"]["200"]["content"] = {
+                    "application/json": {"schema": {"$ref": f"#/components/schemas/Item/oneOf/{index}"}}
+                }
+                self.assertTrue(any("unresolved reference" in error for error in validate(self.doc)))
+
     def test_malformed_json_pointer_escape_rejected(self):
         self.doc["components"]["schemas"]["Item"] = {"$ref": "#/components/schemas/Bad~2Name"}
         self.assertTrue(any("unresolved reference" in error for error in validate(self.doc)))
