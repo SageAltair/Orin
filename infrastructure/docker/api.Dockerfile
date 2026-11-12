@@ -1,6 +1,11 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
+# Refresh the Debian security package before installing application dependencies.
+# Trivy identified fixed zlib1g vulnerabilities in the base image (2026-11-07).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends --only-upgrade zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 COPY apps/api/pyproject.toml ./pyproject.toml
 COPY apps/api/requirements.lock ./requirements.lock
 RUN --mount=type=cache,target=/root/.cache/pip \

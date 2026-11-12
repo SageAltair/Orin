@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +23,7 @@ from orin_api.worker_service import DEVICE_PROFILES, DEVICE_SCOPES, device_famil
 from orin_api.services import add_activity
 
 router = APIRouter(prefix="/api/v1", tags=["devices and worker"])
+worker_bearer_scheme = HTTPBearer(auto_error=False, scheme_name="WorkerBearerAuth")
 _SECRET_PROGRESS = re.compile(r"(?i)(bearer\s+\S+|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)")
 
 
@@ -65,10 +67,13 @@ def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
-def _worker_device(authorization: Annotated[str | None, Header()] = None, session: Session = Depends(get_session)) -> WorkerDevice:
-    scheme, _, credential = (authorization or "").partition(" ")
-    if scheme.lower() != "bearer" or len(credential) < 32:
+def _worker_device(
+    credentials: HTTPAuthorizationCredentials | None = Depends(worker_bearer_scheme),
+    session: Session = Depends(get_session),
+) -> WorkerDevice:
+    if credentials is None or credentials.scheme.lower() != "bearer" or len(credentials.credentials) < 32:
         raise HTTPException(status_code=401, detail="Worker authentication required")
+    credential = credentials.credentials
     device = session.scalar(select(WorkerDevice).where(WorkerDevice.credential_hash == _hash(credential)))
     if device is None:
         raise HTTPException(status_code=401, detail="Worker credential is invalid or revoked")

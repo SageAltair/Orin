@@ -108,6 +108,60 @@ def test_registration_validation_and_login_errors_never_echo_password(auth_clien
     assert unknown_email.json() == wrong_password.json()
 
 
+
+def test_registration_rate_limit_uses_peer_not_untrusted_forwarded_header(auth_client: TestClient) -> None:
+    """Keep the production five-signup limit and ignore spoofed forwarding headers."""
+    client = auth_client
+    for attempt in range(5):
+        response = client.post(
+            "/api/v1/auth/register",
+            headers={"X-Forwarded-For": f"198.51.100.{attempt + 1}"},
+            json={
+                "email": f"rate-limit-{attempt}@example.com",
+                "password": PASSWORD,
+                "display_name": "Rate Limit Test",
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    blocked = client.post(
+        "/api/v1/auth/register",
+        headers={"X-Forwarded-For": "203.0.113.250"},
+        json={
+            "email": "rate-limit-sixth@example.com",
+            "password": PASSWORD,
+            "display_name": "Rate Limit Test",
+        },
+    )
+    assert blocked.status_code == 429
+    assert blocked.json() == {"detail": "Too many attempts. Please wait a minute."}
+    retry_after = int(blocked.headers["Retry-After"])
+    assert 1 <= retry_after <= 60
+
+
+def test_worker_gateway_rejects_missing_or_invalid_device_credentials(auth_client: TestClient) -> None:
+    client = auth_client
+    routes = (
+        ("/api/v1/worker/heartbeat", None),
+        ("/api/v1/worker/jobs/claim", None),
+        ("/api/v1/worker/jobs/00000000-0000-0000-0000-000000000001/event", {"status": "running"}),
+    )
+    invalid_headers = (
+        {},
+        {"Authorization": "Basic not-a-bearer"},
+        {"Authorization": "Bearer short"},
+        {"Authorization": "Bearer " + "x" * 48},
+    )
+    for path, payload in routes:
+        for headers in invalid_headers:
+            response = (
+                client.post(path, headers=headers, json=payload)
+                if payload is not None
+                else client.post(path, headers=headers)
+            )
+            assert response.status_code == 401, f"{path} accepted invalid credentials: {response.status_code}"
+
+
 def test_access_token_requires_auth_and_refresh_rotation_detects_reuse(auth_client: TestClient) -> None:
     client = auth_client
     user = register(client, "person@example.com")
@@ -434,3 +488,66 @@ def test_authenticated_project_writing_and_notification_journey_isolated(
     assert next(
         row for row in client.get("/api/v1/notifications").json() if row["id"] == alert_id
     )["read_at"] is not None
+
+
+def test_v1_foreign_workspace_header_cannot_write_or_read_tasks(auth_client: TestClient) -> None:
+    """#179: a forged workspace selector must fail closed across owners."""
+    client = auth_client
+    register(client, "workspace-owner-a@example.com")
+    authenticate(client, str(login(client, "workspace-owner-a@example.com")["access_token"]))
+    private_workspace = client.post("/api/v1/workspaces", json={"name": "Private A"})
+    assert private_workspace.status_code == 201, private_workspace.text
+    private_id = private_workspace.json()["id"]
+    private_headers = {"X-Orin-Workspace-Id": private_id}
+    private_task = client.post("/api/v1/tasks", headers=private_headers, json={"title": "A private task"})
+    assert private_task.status_code == 201, private_task.text
+
+    register(client, "workspace-owner-b@example.com")
+    authenticate(client, str(login(client, "workspace-owner-b@example.com")["access_token"]))
+    before = client.get("/api/v1/tasks")
+    assert before.status_code == 200 and before.json() == []
+
+    forged_read = client.get("/api/v1/tasks", headers=private_headers)
+    assert forged_read.status_code == 404
+    forged_write = client.post("/api/v1/tasks", headers=private_headers, json={"title": "Injected"})
+    assert forged_write.status_code == 404
+    assert client.patch(f"/api/v1/tasks/{private_task.json()['id']}", json={"title": "Hijacked"}).status_code == 404
+    assert client.get("/api/v1/tasks").json() == []
+
+    authenticate(client, str(login(client, "workspace-owner-a@example.com")["access_token"]))
+    persisted = client.get("/api/v1/tasks", headers=private_headers)
+    assert persisted.status_code == 200
+    assert [(row["id"], row["title"]) for row in persisted.json()] == [
+        (private_task.json()["id"], "A private task"),
+    ]
+
+
+def test_v1_private_task_notification_and_lease_routes_reject_anonymous_requests(
+    auth_client: TestClient,
+) -> None:
+    """#179: enforce authorization at runtime, not only in OpenAPI metadata.
+
+    These calls run against a disposable database and must never create or
+    modify records without an authenticated session.
+    """
+    client = auth_client
+    routes = (
+        ("GET", "/api/v1/tasks", None),
+        ("POST", "/api/v1/tasks", {"title": "Must not be created"}),
+        ("PATCH", "/api/v1/tasks/00000000-0000-0000-0000-000000000001",
+         {"title": "Must not be updated"}),
+        ("GET", "/api/v1/notifications/preferences", None),
+        ("PUT", "/api/v1/auth/reminder-lease", {
+            "workspace_id": "00000000-0000-0000-0000-000000000001",
+            "generation_id": "00000000-0000-0000-0000-000000000002",
+            "rotate": True,
+        }),
+        ("DELETE", "/api/v1/auth/reminder-lease", {
+            "generation_id": "00000000-0000-0000-0000-000000000002",
+        }),
+    )
+    for method, path, payload in routes:
+        response = client.request(method, path, json=payload)
+        assert response.status_code == 401, (
+            f"{method} {path} unexpectedly returned {response.status_code}: {response.text}"
+        )

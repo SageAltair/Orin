@@ -23,12 +23,25 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   const email = `isolated-browser-${Date.now()}-${crypto.randomUUID()}@example.com`;
   const password = `Isolated-acceptance-${crypto.randomUUID()}!`;
 
+  // Capture the browser bearer token for its session-scoped lease lifecycle.
+  // Owner-scoped lease reads are permitted across that owner's active sessions.
+  let browserAuthorization: string | undefined;
+  page.on("request", (outgoing) => {
+    if (outgoing.url().includes("/api/v1/")) {
+      const authorization = outgoing.headers()["authorization"];
+      if (authorization?.startsWith("Bearer ")) browserAuthorization = authorization;
+    }
+  });
   await page.goto(isolatedWeb);
   await page.getByRole("button", { name: "New to Orin? Create an account" }).click();
   await page.getByLabel("Your name").fill("Isolated browser acceptance");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
+  const [registration] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes("/api/v1/auth/register") && response.request().method() === "POST"),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  expect(registration.status(), "isolated registration must succeed before workspace assertions").toBe(201);
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
   const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
@@ -53,10 +66,60 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   expect(identifiers).toHaveLength(2);
   const [browserSessionId, generationA] = identifiers;
   const leaseUrl = `${isolatedApi}/api/v1/auth/reminder-lease/${browserSessionId}`;
-  const initialLease = await request.get(leaseUrl, { headers });
+  expect(browserAuthorization, "browser API requests must carry the browser session token").toBeTruthy();
+  const browserHeaders = { Authorization: browserAuthorization! };
+  // Lease renewal is bound to the browser session, but GET permits another
+  // active session of the SAME owner to inspect that browser lease. This is
+  // required by the companion's owner-scoped lease lookup contract.
+  // The checkbox updates the UI before its asynchronous lease PUT necessarily
+  // commits. Wait for the persisted lease rather than racing that request.
+  // A persistent 404 still fails with the last observed HTTP status.
+  await expect.poll(async () => {
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
+    return response.status();
+  }, { message: "browser reminder lease must persist after opt-in", timeout: 10_000 }).toBe(200);
+  const initialLease = await request.get(leaseUrl, { headers: browserHeaders });
   expect(initialLease.status()).toBe(200);
   const leaseA = await initialLease.json() as { workspace_id: string; generation_id: string };
+  const ownerSessionRead = await request.get(leaseUrl, { headers });
+  expect(ownerSessionRead.status()).toBe(200);
+  expect((await ownerSessionRead.json() as { workspace_id: string; generation_id: string }))
+    .toMatchObject(leaseA);
   expect(leaseA.generation_id).toBe(generationA);
+
+  // A different account must never discover another owner's lease, even
+  // when it knows the session identifier. Use a separate browser context so
+  // account creation cannot replace the primary browser's session.
+  const otherContext = await page.context().browser()!.newContext();
+  try {
+    const otherPage = await otherContext.newPage();
+    let otherAuthorization: string | undefined;
+    otherPage.on("request", (outgoing) => {
+      if (outgoing.url().includes("/api/v1/")) {
+        const authorization = outgoing.headers()["authorization"];
+        if (authorization?.startsWith("Bearer ")) otherAuthorization = authorization;
+      }
+    });
+    await otherPage.goto(isolatedWeb);
+    await otherPage.getByRole("button", { name: "New to Orin? Create an account" }).click();
+    await otherPage.getByLabel("Your name").fill("Isolated unrelated account");
+    await otherPage.getByLabel("Email").fill(`isolated-other-${crypto.randomUUID()}@example.com`);
+    await otherPage.getByLabel("Password", { exact: true }).fill(`Isolated-other-${crypto.randomUUID()}!`);
+    const [otherRegistration] = await Promise.all([
+      otherPage.waitForResponse((response) => response.url().includes("/api/v1/auth/register") && response.request().method() === "POST"),
+      otherPage.getByRole("button", { name: "Create account" }).click(),
+    ]);
+    expect(otherRegistration.status(), "unrelated isolated account registration must succeed").toBe(201);
+    await expect(otherPage.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
+    expect(otherAuthorization, "unrelated account must have its own bearer token").toBeTruthy();
+    const crossUserRead = await request.get(leaseUrl, {
+      headers: { Authorization: otherAuthorization! },
+    });
+    expect(crossUserRead.status(), "a different owner must not read the reminder lease").toBe(404);
+  } finally {
+    await otherContext.close();
+  }
+
 
   await page.getByRole("region", { name: "Workspaces" })
     .getByRole("button", { name: "New workspace" }).click();
@@ -65,20 +128,20 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await page.getByRole("dialog", { name: "Create a workspace" })
     .getByRole("button", { name: "Create workspace" }).click();
   await expect.poll(async () => {
-    const response = await request.get(leaseUrl, { headers });
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
     return response.ok() ? (await response.json() as { workspace_id: string }).workspace_id : leaseA.workspace_id;
   }).not.toBe(leaseA.workspace_id);
-  const leaseB = await (await request.get(leaseUrl, { headers })).json() as {
+  const leaseB = await (await request.get(leaseUrl, { headers: browserHeaders })).json() as {
     workspace_id: string; generation_id: string;
   };
   expect(leaseB.generation_id).not.toBe(generationA);
   await page.getByRole("region", { name: "Workspaces" })
     .getByRole("button", { name: "Personal", exact: true }).click();
   await expect.poll(async () => {
-    const response = await request.get(leaseUrl, { headers });
+    const response = await request.get(leaseUrl, { headers: browserHeaders });
     return response.ok() ? (await response.json() as { generation_id: string }).generation_id : leaseB.generation_id;
   }).not.toBe(leaseB.generation_id);
-  const leaseAgain = await (await request.get(leaseUrl, { headers })).json() as {
+  const leaseAgain = await (await request.get(leaseUrl, { headers: browserHeaders })).json() as {
     workspace_id: string; generation_id: string;
   };
   expect(leaseAgain.workspace_id).toBe(leaseA.workspace_id);
@@ -484,7 +547,15 @@ test.describe("Dar es Salaam local task scheduling", () => {
     await page.getByLabel("Your name").fill("Disposable Dar time acceptance");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Create account" }).click();
+    const [darRegistration] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.url().includes("/api/v1/auth/register") &&
+        response.request().method() === "POST"),
+      page.getByRole("button", { name: "Create account" }).click(),
+    ]);
+    expect(darRegistration.status(), "Dar timezone registration must succeed before workspace assertions").toBe(201);
+    // The isolated browser journey already verifies this post-registration heading.
+    // Do not assume the sidebar navigation has an accessible name of "Workspace".
     await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
     const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
@@ -495,8 +566,7 @@ test.describe("Dar es Salaam local task scheduling", () => {
     const headers = { Authorization: `Bearer ${token}` };
 
     const openTasks = async () => {
-      await page.getByRole("navigation", { name: "Workspace" })
-        .getByRole("button", { name: "Tasks", exact: true }).click();
+      await page.getByRole("button", { name: "Tasks", exact: true }).click();
       await expect(page.locator(".focus-task-collection")).toBeVisible();
     };
     await openTasks();

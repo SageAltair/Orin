@@ -114,3 +114,31 @@ def test_priority_mode_persists_without_legacy_put_reset(client: TestClient) -> 
     })
     assert invalid.status_code == 422
     assert client.get("/api/v1/users/me/preferences").json()["priority_guidance_mode"] == "planning-only"
+
+
+def test_v1_task_lifecycle_persists_across_requests_and_is_owner_scoped(client: TestClient) -> None:
+    """#179: creation, update and completion must survive separate API requests."""
+    created = client.post("/api/v1/tasks", json={
+        "title": "Contract lifecycle task", "due_at": "2026-11-07T09:00:00Z",
+    })
+    assert created.status_code == 201
+    task = created.json()
+    task_id = task["id"]
+    assert task["title"] == "Contract lifecycle task"
+
+    # A different owner has a task in this fixture; it must never appear here.
+    listed = client.get("/api/v1/tasks")
+    assert listed.status_code == 200
+    assert [row["id"] for row in listed.json()] == [task_id]
+
+    updated = client.patch(f"/api/v1/tasks/{task_id}", json={
+        "title": "Contract lifecycle task updated",
+    })
+    assert updated.status_code == 200
+    assert updated.json()["title"] == "Contract lifecycle task updated"
+    assert client.get("/api/v1/tasks").json()[0]["title"] == "Contract lifecycle task updated"
+
+    completed = client.patch(f"/api/v1/tasks/{task_id}", json={"status": "done"})
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "done"
+    assert client.get("/api/v1/tasks").json()[0]["status"] == "done"

@@ -104,6 +104,64 @@ jobs:
         run: |
           python -m pip install -r apps/api/requirements-dev.lock
           python -m pip install --no-deps -e apps/api -e apps/worker
+      - name: Export review-only v1 OpenAPI contract candidate
+        working-directory: apps/api
+        run: |
+          python scripts/freeze_v1_openapi.py --candidate ../../v1-openapi-candidate.json
+          python -m json.tool ../../v1-openapi-candidate.json > /dev/null
+          python scripts/validate_v1_openapi_candidate.py ../../v1-openapi-candidate.json
+          python -m unittest discover -s scripts -p 'test_v1_candidate_references.py'
+          python -m unittest discover -s scripts -p 'test_v1_openapi_freeze.py'
+          python -m unittest discover -s scripts -p 'test_v1_openapi_security_inventory.py'
+          python scripts/report_v1_openapi_security.py ../../v1-openapi-candidate.json --output ../../v1-openapi-security-review.json
+      - name: Run v1 contract regression tests before baseline approval gate
+        working-directory: apps/api
+        run: |
+          # Preserve executable regression evidence even while the baseline is awaiting approval.
+          python -m pytest -q tests/test_v1_openapi_freeze_regressions.py
+      - name: Preserve v1 OpenAPI candidate for contract review
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: v1-openapi-contract-candidate
+          path: |
+            v1-openapi-candidate.json
+            v1-openapi-security-review.json
+          if-no-files-found: warn
+      - name: Verify v1 PostgreSQL upgrade rollback and data preservation on disposable database
+        env:
+          ORIN_V1_MIGRATION_TEST_DATABASE_URL: postgresql+psycopg://orin:isolated-ci-password@127.0.0.1:5432/orin_contract_test_ci
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+          # This CI-only database name is deliberately separate from orin_test.
+          with psycopg.connect("host=127.0.0.1 port=5432 dbname=postgres user=orin password=isolated-ci-password", autocommit=True) as conn:
+              exists = conn.execute("SELECT 1 FROM pg_database WHERE datname = %s", ("orin_contract_test_ci",)).fetchone()
+              if exists:
+                  raise SystemExit("Refusing to reuse a pre-existing migration acceptance database")
+              conn.execute("CREATE DATABASE orin_contract_test_ci")
+          # Only a database created by this job may be disposed by this job.
+          marker = Path(os.environ["RUNNER_TEMP"]) / "orin_contract_test_ci.created"
+          marker.write_text("created-by-this-job\n")
+          PY
+          python -m pytest -q apps/api/tests/test_v1_postgres_migration_acceptance.py
+      - name: Dispose isolated migration acceptance database
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import psycopg
+          marker = Path(os.environ["RUNNER_TEMP"]) / "orin_contract_test_ci.created"
+          if not marker.is_file():
+              print("No creation marker; refusing to drop an unowned database")
+          else:
+              with psycopg.connect("host=127.0.0.1 port=5432 dbname=postgres user=orin password=isolated-ci-password", autocommit=True) as conn:
+                  conn.execute("DROP DATABASE IF EXISTS orin_contract_test_ci WITH (FORCE)")
+              marker.unlink()
+          PY
       - name: Backend and worker regressions, including PostgreSQL concurrency
         env:
           BACKGROUND_WORKER_ENABLED: "false"
@@ -139,6 +197,13 @@ jobs:
       - name: Browser workflows against mocks and the isolated API
         working-directory: apps/web
         run: npm run test:e2e -- --workers=2
+      - name: Enforce frozen v1 OpenAPI SHA-256 baseline (fail closed)
+        working-directory: apps/api
+        run: |
+          # Never generate or refresh the authoritative baseline in CI.
+          # Until review has committed it, this gate must fail rather than silently pass.
+          python scripts/freeze_v1_openapi.py --check
+          python scripts/validate_v1_openapi_candidate.py ../../v1-openapi-candidate.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
@@ -271,8 +336,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Each browser test gets a fresh disposable API/database so the
+          # production five-signups-per-minute peer limit remains meaningful.
           - suite: isolated-acceptance.spec.ts
+            grep: persists Writing and delivers task reminders
             label: isolated-acceptance
+          - suite: isolated-acceptance.spec.ts
+            grep: All Tasks includes records beyond the first API page
+            label: isolated-pagination
+          - suite: isolated-acceptance.spec.ts
+            grep: inventories within owner and workspace
+            label: isolated-workspace-scope
+          - suite: isolated-acceptance.spec.ts
+            grep: Dar es Salaam local task time through edit
+            label: isolated-dar-timezone
           - suite: worker-stack.spec.ts
             label: isolated-worker-acceptance
           - suite: knowledge.spec.ts
@@ -342,7 +419,12 @@ jobs:
           exit 1
       - name: Cross-feature real-browser acceptance on disposable data
         working-directory: apps/web
-        run: npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+        run: |
+          if [ -n "${{ matrix.grep }}" ]; then
+            npm run test:e2e -- e2e/${{ matrix.suite }} --grep '${{ matrix.grep }}' --project=chromium --workers=1
+          else
+            npm run test:e2e -- e2e/${{ matrix.suite }} --project=chromium --workers=1
+          fi
       - name: Preserve isolated acceptance diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
