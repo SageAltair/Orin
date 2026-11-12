@@ -108,6 +108,37 @@ def test_registration_validation_and_login_errors_never_echo_password(auth_clien
     assert unknown_email.json() == wrong_password.json()
 
 
+
+def test_registration_rate_limit_uses_peer_not_untrusted_forwarded_header(auth_client: TestClient) -> None:
+    """Keep the production five-signup limit and ignore spoofed forwarding headers."""
+    client = auth_client
+    for attempt in range(5):
+        response = client.post(
+            "/api/v1/auth/register",
+            headers={"X-Forwarded-For": f"198.51.100.{attempt + 1}"},
+            json={
+                "email": f"rate-limit-{attempt}@example.com",
+                "password": PASSWORD,
+                "display_name": "Rate Limit Test",
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    blocked = client.post(
+        "/api/v1/auth/register",
+        headers={"X-Forwarded-For": "203.0.113.250"},
+        json={
+            "email": "rate-limit-sixth@example.com",
+            "password": PASSWORD,
+            "display_name": "Rate Limit Test",
+        },
+    )
+    assert blocked.status_code == 429
+    assert blocked.json() == {"detail": "Too many attempts. Please wait a minute."}
+    retry_after = int(blocked.headers["Retry-After"])
+    assert 1 <= retry_after <= 60
+
+
 def test_access_token_requires_auth_and_refresh_rotation_detects_reuse(auth_client: TestClient) -> None:
     client = auth_client
     user = register(client, "person@example.com")
