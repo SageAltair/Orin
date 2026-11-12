@@ -5,17 +5,8 @@ This is a structural gate, not a substitute for human contract review.
 from __future__ import annotations
 
 import argparse
-import base64
-import gzip
 import json
 from pathlib import Path
-
-
-def load_document(path: Path) -> dict:
-    payload = path.read_bytes()
-    if path.name.endswith(".json.gz.b64"):
-        payload = gzip.decompress(base64.b64decode(payload, validate=True))
-    return json.loads(payload.decode("utf-8"))
 
 
 def resolve_json_pointer(document: object, reference: str) -> object:
@@ -126,7 +117,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("candidate", type=Path)
     args = parser.parse_args()
-    document = load_document(args.candidate)
+    document = json.loads(args.candidate.read_text(encoding="utf-8"))
     errors = validate(document)
     for error in errors:
         print(error)

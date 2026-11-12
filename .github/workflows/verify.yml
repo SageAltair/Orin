@@ -197,13 +197,13 @@ jobs:
       - name: Browser workflows against mocks and the isolated API
         working-directory: apps/web
         run: npm run test:e2e -- --workers=2
-      - name: Enforce approved v1 OpenAPI baseline (fail closed)
+      - name: Enforce frozen v1 OpenAPI SHA-256 baseline (fail closed)
         working-directory: apps/api
         run: |
           # Never generate or refresh the authoritative baseline in CI.
           # Until review has committed it, this gate must fail rather than silently pass.
           python scripts/freeze_v1_openapi.py --check
-          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json.gz.b64
+          python scripts/validate_v1_openapi_candidate.py ../../v1-openapi-candidate.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
