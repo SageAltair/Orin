@@ -49,12 +49,35 @@ def test_release_critical_private_operations_have_no_anonymous_alternative():
         ("get", "/api/v1/notifications/preferences"),
         ("put", "/api/v1/auth/reminder-lease"),
         ("delete", "/api/v1/auth/reminder-lease"),
+        ("post", "/api/v1/worker/heartbeat"),
+        ("post", "/api/v1/worker/jobs/claim"),
+        ("post", "/api/v1/worker/jobs/{job_id}/event"),
     )
     for method, path in protected:
         operation = schema["paths"][path][method]
         requirements = operation.get("security", schema.get("security", []))
         assert requirements and all(isinstance(alt, dict) and alt for alt in requirements), (
             f"Anonymous security alternative: {method.upper()} {path}"
+        )
+
+
+
+def test_worker_gateway_declares_device_specific_bearer_scheme():
+    schema = app.openapi()
+    schemes = schema.get("components", {}).get("securitySchemes", {})
+    assert schemes.get("WorkerBearerAuth") == {"type": "http", "scheme": "bearer"}
+
+    protected = (
+        ("post", "/api/v1/worker/heartbeat"),
+        ("post", "/api/v1/worker/jobs/claim"),
+        ("post", "/api/v1/worker/jobs/{job_id}/event"),
+    )
+    for method, path in protected:
+        operation = schema["paths"][path][method]
+        assert operation.get("security") == [{"WorkerBearerAuth": []}]
+        assert not any(
+            parameter.get("name", "").casefold() == "authorization"
+            for parameter in operation.get("parameters", [])
         )
 
 

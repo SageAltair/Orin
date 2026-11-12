@@ -139,6 +139,30 @@ def test_registration_rate_limit_uses_peer_not_untrusted_forwarded_header(auth_c
     assert 1 <= retry_after <= 60
 
 
+
+def test_worker_gateway_rejects_missing_or_invalid_device_credentials(auth_client: TestClient) -> None:
+    client = auth_client
+    routes = (
+        ("/api/v1/worker/heartbeat", None),
+        ("/api/v1/worker/jobs/claim", None),
+        ("/api/v1/worker/jobs/00000000-0000-0000-0000-000000000001/event", {"status": "running"}),
+    )
+    invalid_headers = (
+        {},
+        {"Authorization": "Basic not-a-bearer"},
+        {"Authorization": "Bearer short"},
+        {"Authorization": "Bearer " + "x" * 48},
+    )
+    for path, payload in routes:
+        for headers in invalid_headers:
+            response = (
+                client.post(path, headers=headers, json=payload)
+                if payload is not None
+                else client.post(path, headers=headers)
+            )
+            assert response.status_code == 401, f"{path} accepted invalid credentials: {response.status_code}"
+
+
 def test_access_token_requires_auth_and_refresh_rotation_detects_reuse(auth_client: TestClient) -> None:
     client = auth_client
     user = register(client, "person@example.com")
