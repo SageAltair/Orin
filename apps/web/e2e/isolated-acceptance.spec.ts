@@ -105,7 +105,11 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
     await otherPage.getByLabel("Your name").fill("Isolated unrelated account");
     await otherPage.getByLabel("Email").fill(`isolated-other-${crypto.randomUUID()}@example.com`);
     await otherPage.getByLabel("Password", { exact: true }).fill(`Isolated-other-${crypto.randomUUID()}!`);
-    await otherPage.getByRole("button", { name: "Create account" }).click();
+    const [otherRegistration] = await Promise.all([
+      otherPage.waitForResponse((response) => response.url().includes("/api/v1/auth/register") && response.request().method() === "POST"),
+      otherPage.getByRole("button", { name: "Create account" }).click(),
+    ]);
+    expect(otherRegistration.status(), "unrelated isolated account registration must succeed").toBe(201);
     await expect(otherPage.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
     expect(otherAuthorization, "unrelated account must have its own bearer token").toBeTruthy();
     const crossUserRead = await request.get(leaseUrl, {
