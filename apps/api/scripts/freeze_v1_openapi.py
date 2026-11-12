@@ -53,9 +53,9 @@ def encode_baseline(serialized: str) -> str:
     compressor = zlib.compressobj(level=9, wbits=-zlib.MAX_WBITS)
     deflated = compressor.compress(raw) + compressor.flush()
     # Fixed gzip header: zero mtime, maximum compression hint, OS=unknown.
-    header = b"\\x1f\\x8b\\x08\\x00\\x00\\x00\\x00\\x00\\x02\\xff"
+    header = b"\x1f\x8b\x08\x00\x00\x00\x00\x00\x02\xff"
     trailer = struct.pack("<II", zlib.crc32(raw) & 0xFFFFFFFF, len(raw) & 0xFFFFFFFF)
-    return base64.b64encode(header + deflated + trailer).decode("ascii") + "\\n"
+    return base64.b64encode(header + deflated + trailer).decode("ascii") + "\n"
 
 
 def decode_baseline(encoded: str) -> str:
