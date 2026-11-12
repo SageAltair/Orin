@@ -99,7 +99,7 @@ def _discover(connection: AIProviderConnection, api_key: str) -> list[str]:
         params = None
     elif provider == "google":
         url = f"{PROVIDER_BASE_URLS[provider]}/models"
-        headers, params = {}, {"key": api_key}
+        headers, params = {"x-goog-api-key": api_key}, None
     else:
         url = f"{PROVIDER_BASE_URLS[provider]}/models"
         headers = ({"x-api-key": api_key, "anthropic-version": "2023-06-01"} if provider == "anthropic"

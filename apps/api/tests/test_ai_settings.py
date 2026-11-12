@@ -71,6 +71,33 @@ def test_provider_secret_is_masked_and_models_can_be_selected(client: TestClient
     assert selected.json()["is_default"] is True
 
 
+def test_google_model_discovery_sends_api_key_in_header_not_url(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api_key = "google-secret-value"
+    created = client.post("/api/v1/intelligence/providers", json={
+        "provider": "google", "display_name": "Google", "api_key": api_key,
+    })
+    assert created.status_code == 201, created.text
+    observed: dict[str, object] = {}
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        observed["url"] = url
+        observed["headers"] = kwargs.get("headers")
+        observed["params"] = kwargs.get("params")
+        request = httpx.Request("GET", url, headers=kwargs.get("headers"))
+        return httpx.Response(200, request=request, json={"models": [{"name": "models/gemini-test"}]})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    response = client.post(f"/api/v1/intelligence/providers/{created.json()['id']}/discover")
+
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["model_id"] == "gemini-test"
+    assert observed["headers"] == {"x-goog-api-key": api_key}
+    assert observed["params"] is None
+    assert api_key not in str(observed["url"])
+
+
 def test_capability_registry_is_authenticated_product_evidence(client: TestClient) -> None:
     response = client.get("/api/v1/intelligence/capabilities")
     assert response.status_code == 200

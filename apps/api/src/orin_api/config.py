@@ -42,18 +42,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> Settings:
-        production = self.app_env.lower() in {"production", "prod"}
-        if production:
+        secure_environment = self.app_env.lower() in {"staging", "production", "prod"}
+        if secure_environment:
             if self.auth_secret_key is None:
-                raise ValueError("AUTH_SECRET_KEY must be configured in production")
+                raise ValueError("AUTH_SECRET_KEY must be configured in staging or production")
             if not {"database_url", "cors_origins", "web_app_url"}.issubset(self.model_fields_set):
-                raise ValueError("DATABASE_URL, CORS_ORIGINS, and WEB_APP_URL must be explicitly configured in production")
+                raise ValueError("DATABASE_URL, CORS_ORIGINS, and WEB_APP_URL must be explicitly configured in staging or production")
             if not self.allowed_cors_origins or any(urlsplit(origin).scheme != "https" for origin in self.allowed_cors_origins):
-                raise ValueError("CORS_ORIGINS must contain HTTPS origins in production")
+                raise ValueError("CORS_ORIGINS must contain HTTPS origins in staging or production")
             if urlsplit(self.web_app_url).scheme != "https":
-                raise ValueError("WEB_APP_URL must use HTTPS in production")
+                raise ValueError("WEB_APP_URL must use HTTPS in staging or production")
             if not self.auth_refresh_cookie_secure:
-                raise ValueError("AUTH_REFRESH_COOKIE_SECURE must be enabled in production")
+                raise ValueError("AUTH_REFRESH_COOKIE_SECURE must be enabled in staging or production")
         if "*" in self.allowed_cors_origins:
             raise ValueError("CORS_ORIGINS must contain explicit origins")
         secret_set = bool(self.github_app_client_secret and self.github_app_client_secret.get_secret_value())
@@ -74,10 +74,10 @@ class Settings(BaseSettings):
             except (ValueError, TypeError, UnicodeEncodeError, InvalidToken) as exc:
                 raise ValueError("INTEGRATION_ENCRYPTION_KEY must be a valid Fernet key") from exc
             callback = urlsplit(self.github_app_callback_url or "")
-            if callback.scheme != "https" and not (self.app_env.lower() not in {"production", "prod"} and callback.hostname in {"localhost", "127.0.0.1"}):
+            if callback.scheme != "https" and not (not secure_environment and callback.hostname in {"localhost", "127.0.0.1"}):
                 raise ValueError("GITHUB_APP_CALLBACK_URL must use HTTPS outside local development")
             web = urlsplit(self.web_app_url)
-            if web.scheme != "https" and not (self.app_env.lower() not in {"production", "prod"} and web.hostname in {"localhost", "127.0.0.1"}):
+            if web.scheme != "https" and not (not secure_environment and web.hostname in {"localhost", "127.0.0.1"}):
                 raise ValueError("WEB_APP_URL must use HTTPS outside local development")
         return self
 
