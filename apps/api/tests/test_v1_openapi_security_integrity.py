@@ -101,3 +101,24 @@ def test_oauth_scopes_referenced_by_operations_are_declared():
                         f"Unknown OAuth scopes {set(requested) - declared}: "
                         f"{method.upper()} {path} ({scheme_name})"
                     )
+
+\n
+def test_only_documented_bootstrap_and_oauth_callback_operations_are_public():
+    schema = app.openapi()
+    expected = {
+        ("post", "/api/v1/auth/register"),
+        ("post", "/api/v1/auth/login"),
+        ("post", "/api/v1/auth/refresh"),
+        ("get", "/api/v1/integrations/github/callback"),
+    }
+    actual = set()
+    for path, item in schema["paths"].items():
+        if not path.startswith("/api/v1/"):
+            continue
+        for method, operation in item.items():
+            if method not in HTTP_METHODS:
+                continue
+            requirements = operation.get("security", schema.get("security", []))
+            if not requirements or any(not alternative for alternative in requirements):
+                actual.add((method, path))
+    assert actual == expected
