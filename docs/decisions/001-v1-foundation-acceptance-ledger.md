@@ -10,19 +10,24 @@ Scope: draft PR #192 only. This is evidence tracking, not approval to close #179
 - [CI run 42337985190](https://github.com/SageAltair/Orin/actions/runs/42337985190) completed successfully at `fd1f015d11b7780004f403c928cc753693e324a2`, verifying the database cleanup-marker correction. The remaining behavioral gates are not implied by this result.
 
 ## Closure gates
-| Gate | Status | Next evidence |
+| Gate | Status | Evidence |
 | --- | --- | --- |
-| Disposable PostgreSQL migration and preservation | PASS | CI run above |
-| Versioned OpenAPI request/response baseline | INCOMPLETE | Complete compatibility snapshot and regression |
-| Authentication, refresh/revoke, cross-owner denial | INCOMPLETE | Link exact negative assertions |
-| Task CRUD, persistence, pagination, worker integration | INCOMPLETE | Link or implement explicit isolated assertions |
-| UTC, Dar es Salaam, DST gap/fold scheduling | INCOMPLETE | Link or implement timezone assertions |
-| Reminder lease expiry, rotation, heartbeat and fail-closed | INCOMPLETE | Link or implement protocol assertions |
-| ADR-001 accepted with evidence | INCOMPLETE | Record decision after tests |
-| Physical Windows/Android checks | DEFERRED #184 | Document boundary, do not claim native PASS |
+| Disposable PostgreSQL migration and preservation | PASS | Exact-head Verify 43307156899; disposable DB only |
+| Versioned OpenAPI request/response baseline | PASS | Critical-operation manifest + full canonical SHA-256 lock; candidate/reference/security tests and fail-closed digest gate in Verify 43307156899 |
+| Authentication, refresh/revoke, cross-owner denial | PASS | Exact-head backend regression suite in Verify 43307156899 |
+| Task CRUD, persistence, pagination, worker integration | PASS | Exact-head API/backend and isolated browser/worker jobs in Verify 43307156899 |
+| UTC, Dar es Salaam, DST gap/fold scheduling | PASS | Exact-head API/worker tests and isolated Dar timezone job in Verify 43307156899 |
+| Reminder lease expiry, rotation, heartbeat and fail-closed | PASS in automated CI | Exact-head API/worker/browser tests and Windows smoke 43307156889; physical visible toast remains deferred #184 |
+| ADR-001 accepted with evidence | PASS | Accepted after exact-head Verify 43307156899 and Windows smoke 43307156889 |
+| Physical Windows/Android checks | DEFERRED #184 | Explicitly scoped; no native-device pass claimed |
 
 ## Required next actions
-Map existing assertions to each incomplete gate; implement missing tests instead of assuming generic CI success. Re-run exact-head CI, review compatibility and migration impacts, merge safely, verify main, then close #179 with evidence. Do not begin #180 before closure. Do not deploy, install services, or touch real user data.
+1. Keep PR #192 draft until the final ADR/ledger acceptance commit passes exact-head Verify and Windows smoke.
+2. Review the final diff and current main/base relationship; merge PR #192 with a merge commit only when GitHub reports it mergeable and the exact-head checks pass.
+3. Verify post-merge main CI and confirm the authoritative OpenAPI digest/migration contract files are present on main.
+4. Close #179 with the merged PR, exact-head CI and post-merge evidence. Only then may #180 begin.
+5. Keep physical Windows/Android checks and residual moderate mobile advisories tracked in #184/#21; #179 closure is not public-launch clearance.
+No production deployment, device/background-service installation, public publication, paid ads, or real-user data mutation.
 
 ## 2026-11-07 exact-head checkpoint (commit `39785b351bb01530dc259609fe9912a71f1422a6`)
 - [Verify Orin run 42400995719](https://github.com/SageAltair/Orin/actions/runs/42400995719): **PASS**, exact PR head; includes the corrected isolated Writing browser acceptance test.
@@ -102,3 +107,24 @@ This checkpoint replaces the repeated test-invention loop with direct mapping of
 - Physical Windows toast visibility and Android device delivery remain **DEFERRED #184**, as required by the revised sequence. No native-device PASS is claimed.
 
 **Current package status:** API/DB/auth/worker/notification contract implementation and CI are verified at the preceding head. ADR-001 remains proposed until the platform documentation correction is verified at the new exact head and the decision is recorded. Keep #179 open and do not begin #180.
+
+
+## 2026-11-12 final #179 acceptance
+
+**All #179 acceptance criteria are met in isolated CI.** Exact current implementation/platform-documentation head `8534370e4aba642b3f5a5c0447c50c01f4353439` passed [Verify Orin 43307156899](https://github.com/SageAltair/Orin/actions/runs/43307156899) (**12/12 jobs success**) and [Windows reminder smoke 43307156889](https://github.com/SageAltair/Orin/actions/runs/43307156889) (**success**). The main verify job completed every step, including backend/worker regressions, PostgreSQL migration acceptance and cleanup, schema upgrade/offline preview, frontend and Android checks, browser workflows, and the final fail-closed OpenAPI SHA-256 comparison.
+
+### Final evidence summary
+- **API:** 166 paths, 217 operations, 217 unique operation IDs, 319 local references, zero unresolved references, two bearer schemes, four intended public operations; canonical digest `bb4693d1fb7f27efb06ca7f6010f620db093b9ebdbbbfedf2db2735d1bbe1816`.
+- **Database:** frozen Alembic lineage sentinel and disposable PostgreSQL upgrade/rollback/re-upgrade with representative data preservation; only the CI-created database was disposed.
+- **Identity/auth:** refresh rotation/revocation, owner/workspace denial, worker bearer scheme and negative credential checks passed.
+- **Tasks/time:** lifecycle/persistence, pagination, timezone and DST fold/gap coverage passed.
+- **Notifications:** browser lease, heartbeat, fail-closed, Windows queue tests and Windows identity smoke passed. Human-visible Windows toast and physical Android delivery remain deferred to #184.
+- **Registration:** test suite now isolates signup-heavy browser scenarios; production five-per-peer-per-minute limit remains unchanged and spoofed forwarding headers do not bypass it.
+- **Documentation:** architecture overview and ADR now describe actual web/Android/Windows support and notification limits.
+
+### Dependency and residual-risk reconciliation
+- The code dependencies from #48/#21 are integrated from merged work including PR #146; the #149 engineering correction is merged in PR #178.
+- Historical issues #21/#48 remain open because their broader acceptance still includes physical device gates and residual mobile dependency risk. #129 (visible Windows toast) and #130 (physical Android local reminders) remain **BLOCKED pending explicit owner consent/observation** and are assigned to #184 by this package's acceptance scope. No device was installed or modified.
+- The security workflow passed its zero-critical/zero-high policy, but **11 moderate mobile build-tool advisories remain** tracked in #21. This package does not claim they are resolved; their risk disposition remains required before public launch.
+
+**ADR-001 is accepted by release engineering. #179 is ready for PR merge, post-merge main verification, and issue closure. #180 remains untouched until that closure.**
