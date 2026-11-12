@@ -1,16 +1,28 @@
 # ADR-001: Orin v1 foundation contract freeze
 
-Status: **Proposed pending final exact-head verification for Package #179**. This is a change-control decision and contract inventory, not proof of release readiness. Acceptance requires the full API digest check, executable contract tests, disposable PostgreSQL migration evidence, and the final CI run linked below.
+Status: **Proposed pending exact-head verification after the platform-support documentation correction**. This is a change-control decision and contract inventory, not proof of release readiness. Acceptance requires the full API digest check, executable contract tests, disposable PostgreSQL migration evidence, and the final CI run linked below.
 
 Date: 2026-11-06
 Scope: public v1 API, PostgreSQL schema evolution, authentication/session lifecycle, browser-to-Windows reminder protocol.
 
 ## Decision
 
+## Client and platform support
+
+| Surface | v1 support boundary | Verification boundary |
+| --- | --- | --- |
+| Web | Primary browser workspace; authenticated against the shared `/api/v1` contract. | Browser acceptance runs in isolated CI. |
+| Android | Expo/React Native client using the same API, identity and workspace boundaries. Local reminders are explicit opt-in, limited to known/synchronized items, and best-effort; no server push or remote updates while the app is closed. | Automated export/type/test checks run in CI; physical-device acceptance belongs to #184. |
+| Windows companion | Optional foreground reminder companion only; explicit opt-in, active browser session, short-lived workspace lease and heartbeat. No service or silent auto-start. | Windows smoke CI verifies identity/installer safety, not human-visible toast delivery; physical-device acceptance belongs to #184. |
+| Cloud worker | No cloud execution environment is provisioned; cloud target requests fail recoverably and do not move private data. | Provisioning and operational acceptance are later gated work, not claimed by #179. |
+
+The Android application is a supported client, not an Android background-service installation. The Windows companion is not a required desktop client. No native physical-device pass is claimed in this package.
+
+
 1. **HTTP boundary.** `/api/v1` is the supported API namespace. FastAPI's generated OpenAPI document is the schema source of truth. The complete canonical v1 document is locked by `apps/api/contracts/v1-openapi.sha256`; CI regenerates a review-only candidate, validates its references and security declarations, then compares the full canonical digest. Changes to existing request/response fields, status codes, authentication requirements, idempotency semantics or workspace scoping are compatibility changes requiring an explicit review. Additive optional fields are preferred. Do not rename endpoints or silently reinterpret existing fields.
 2. **Persistence.** PostgreSQL and SQLAlchemy 2 own durable state. All schema changes require an ordered Alembic revision. No production downgrade or destructive migration is authorized by this ADR. For each revision, demonstrate upgrade from the previous supported revision, preservation of representative task/auth/notification data, and either a tested downgrade on disposable data or a documented forward-recovery/restore procedure where downgrade is unsafe.
 3. **Identity.** Access-token authentication and revocable refresh sessions are separate from workspace authorization. An authenticated owner does not gain access to another owner's tasks, notifications, leases, or worker jobs. Device credentials are independently revocable. Avoid storing raw access/refresh/worker tokens in logs or local reminder queues.
-4. **Notification protocol.** Windows reminders remain explicit foreground opt-in, tied to a current authenticated browser session, workspace ID, generation-scoped short-lived lease, fresh browser heartbeat and local loopback stop. Missing/expired/mismatched lease, disconnected browser, auth rejection, or unavailable suppression policy fails closed. A generic toast API success is **not** proof of human-visible scheduled delivery. No silent auto-start, background service, or Android installation.
+4. **Notification protocol.** Windows reminders remain explicit foreground opt-in, tied to a current authenticated browser session, workspace ID, generation-scoped short-lived lease, fresh browser heartbeat and local loopback stop. Missing/expired/mismatched lease, disconnected browser, auth rejection, or unavailable suppression policy fails closed. A generic toast API success is **not** proof of human-visible scheduled delivery. The Android client may schedule known local reminders only after explicit opt-in; this is best-effort and is not server push or guaranteed background delivery. No silent auto-start or background-service installation.
 5. **Time.** Persist unambiguous instants with offsets/UTC and apply the user's selected IANA timezone for presentation and local scheduling. Acceptance must include Africa/Dar_es_Salaam and DST-observing zones, including invalid/ambiguous local times.
 6. **Release scope.** Package #179 freezes these boundaries before #180–#190. Native physical acceptance belongs to #184, but #179 must document the native boundary and pass its isolated contract tests. No later package begins until #179 is closed with evidence.
 
