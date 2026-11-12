@@ -37,7 +37,11 @@ test("isolated PostgreSQL browser journey persists Writing and delivers task rem
   await page.getByLabel("Your name").fill("Isolated browser acceptance");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
+  const [registration] = await Promise.all([
+    page.waitForResponse((response) => response.url().includes("/api/v1/auth/register") && response.request().method() === "POST"),
+    page.getByRole("button", { name: "Create account" }).click(),
+  ]);
+  expect(registration.status(), "isolated registration must succeed before workspace assertions").toBe(201);
   await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
 
   const login = await request.post(`${isolatedApi}/api/v1/auth/login`, {
