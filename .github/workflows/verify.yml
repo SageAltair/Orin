@@ -203,7 +203,7 @@ jobs:
           # Never generate or refresh the authoritative baseline in CI.
           # Until review has committed it, this gate must fail rather than silently pass.
           python scripts/freeze_v1_openapi.py --check
-          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json
+          python scripts/validate_v1_openapi_candidate.py contracts/v1-openapi.json.gz.b64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: failure()
         with:
