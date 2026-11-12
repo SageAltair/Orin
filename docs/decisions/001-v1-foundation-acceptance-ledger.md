@@ -88,3 +88,17 @@ This checkpoint replaces the repeated test-invention loop with direct mapping of
 - Corrected the source line and aligned the compatibility test/ADR wording with the complete OpenAPI SHA-256 lock in commit `f4296ff2ac8c2774dcb2049c84af14724be88f94`.
 - The prior run's Android, web, production-container, isolated worker, knowledge, workspace-scope, pagination and Dar timezone jobs passed. Windows reminder smoke passed at the same prior head. The full verify job is **not PASS** because of the test-collection error.
 - Final exact-head CI after the correction is required before ADR-001 can be accepted or PR #192 can be merged.
+
+
+## 2026-11-12 exact-head verification and platform contract reconciliation
+
+- Current verified PR head before this documentation reconciliation: `22987a706dd4772bdec5f4c0843d697da7cfba6d`.
+- [Verify Orin run 43304895267](https://github.com/SageAltair/Orin/actions/runs/43304895267): **PASS**, all 12 jobs succeeded at that exact head, including disposable PostgreSQL migration upgrade/rollback/re-upgrade and preservation, backend/worker regressions, web and Android checks, browser acceptance (Writing/reminders, worker, knowledge, workspace scope, pagination, Dar timezone), production-container smoke, security, OpenAPI candidate/reference/security checks, and the fail-closed SHA-256 baseline comparison.
+- [Windows reminder smoke run 43304895260](https://github.com/SageAltair/Orin/actions/runs/43304895260): **PASS** at the same exact head. It verifies installer/shortcut identity in a disposable profile; it does **not** verify human-visible toast delivery on a physical device.
+- The OpenAPI candidate is 166 versioned paths / 217 operations / 217 unique operation IDs / 319 local references, with zero unresolved references, two bearer schemes, and only four intentional public operations. The complete canonical schema digest is locked at `apps/api/contracts/v1-openapi.sha256` as `bb4693d1fb7f27efb06ca7f6010f620db093b9ebdbbbfedf2db2735d1bbe1816`; the candidate is retained as a CI artifact rather than a 441 KB generated JSON file.
+- The registration HTTP 429 failure is resolved without weakening the production five-per-peer-per-minute registration limit: each signup-heavy browser scenario now gets its own disposable API/database process, and a backend test protects the 5-success / 6th-429 behavior plus forwarded-header spoof resistance.
+- PostgreSQL service logs include the expected unique-key conflicts exercised by `test_workspace_race.py`; the test proves concurrent first-workspace creation converges on one Personal workspace. Both parameterized cases passed. These are handled savepoint conflicts, not unhandled test failures.
+- The prior architecture overview incorrectly said there was no mobile app, no reminder delivery, and no API peer rate limiting. This PR now reconciles those statements with the current Android client, opt-in local reminder limitations, Windows foreground companion, and API-enforced peer limits. The current documentation commit requires its own exact-head CI before ADR acceptance/merge.
+- Physical Windows toast visibility and Android device delivery remain **DEFERRED #184**, as required by the revised sequence. No native-device PASS is claimed.
+
+**Current package status:** API/DB/auth/worker/notification contract implementation and CI are verified at the preceding head. ADR-001 remains proposed until the platform documentation correction is verified at the new exact head and the decision is recorded. Keep #179 open and do not begin #180.
