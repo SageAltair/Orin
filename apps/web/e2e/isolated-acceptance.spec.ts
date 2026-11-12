@@ -547,7 +547,13 @@ test.describe("Dar es Salaam local task scheduling", () => {
     await page.getByLabel("Your name").fill("Disposable Dar time acceptance");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.getByRole("button", { name: "Create account" }).click();
+    const [darRegistration] = await Promise.all([
+      page.waitForResponse((response) =>
+        response.url().includes("/api/v1/auth/register") &&
+        response.request().method() === "POST"),
+      page.getByRole("button", { name: "Create account" }).click(),
+    ]);
+    expect(darRegistration.status(), "Dar timezone registration must succeed before workspace assertions").toBe(201);
     // The isolated browser journey already verifies this post-registration heading.
     // Do not assume the sidebar navigation has an accessible name of "Workspace".
     await expect(page.getByRole("heading", { name: /What would you like to.*work on today/ })).toBeVisible();
