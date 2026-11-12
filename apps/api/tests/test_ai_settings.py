@@ -23,7 +23,8 @@ def client() -> Generator[TestClient, None, None]:
     sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with sessions.begin() as session:
         user = User(email="ai-settings@example.test", password_hash="test-hash", display_name="AI Settings")
-        session.add(user)
+        other_user = User(email="ai-other@example.test", password_hash="test-hash", display_name="Other User")
+        session.add_all([user, other_user])
         session.flush()
 
     def override_session() -> Generator[Session, None, None]:
@@ -32,11 +33,13 @@ def client() -> Generator[TestClient, None, None]:
 
     settings = Settings(_env_file=None, integration_encryption_key=SecretStr(Fernet.generate_key().decode("ascii")))
     app.dependency_overrides[get_session] = override_session
-    app.dependency_overrides[get_current_user] = lambda: user
+    acting_user = {"value": user}
+    app.dependency_overrides[get_current_user] = lambda: acting_user["value"]
     app.dependency_overrides[get_settings] = lambda: settings
     app.state.ai_settings_sessions = sessions
     try:
         with TestClient(app) as test_client:
+            test_client.security_context = {"owner": user, "other": other_user, "acting": acting_user}  # type: ignore[attr-defined]
             yield test_client
     finally:
         app.dependency_overrides.clear()
@@ -226,6 +229,50 @@ def test_routing_policy_first_read_recovers_from_concurrent_insert(
     })
     assert updated.status_code == 200, updated.text
     assert updated.json()["auto_enabled"] is False
+
+def test_provider_connections_and_models_are_isolated_between_accounts(client: TestClient) -> None:
+    context = client.security_context  # type: ignore[attr-defined]
+    owner = context["owner"]
+    other = context["other"]
+    acting = context["acting"]
+
+    created = client.post("/api/v1/intelligence/providers", json={
+        "provider": "openai", "display_name": "Owner private provider", "api_key": "owner-secret-value",
+    })
+    assert created.status_code == 201, created.text
+    connection_id = created.json()["id"]
+    model = client.post("/api/v1/intelligence/models", json={
+        "connection_id": connection_id, "model_id": "owner-private-model",
+    })
+    assert model.status_code == 201, model.text
+    model_id = model.json()["id"]
+
+    # The second account must not discover, update, delete, enumerate or attach
+    # models to the first account's provider connection.
+    acting["value"] = other
+    assert client.get("/api/v1/intelligence/providers").json() == []
+    assert client.get("/api/v1/intelligence/models").json() == []
+    assert client.post(f"/api/v1/intelligence/providers/{connection_id}/discover").status_code == 404
+    assert client.patch(
+        f"/api/v1/intelligence/providers/{connection_id}", json={"display_name": "Hijacked"},
+    ).status_code == 404
+    assert client.delete(f"/api/v1/intelligence/providers/{connection_id}").status_code == 404
+    assert client.post("/api/v1/intelligence/models", json={
+        "connection_id": connection_id, "model_id": "foreign-model",
+    }).status_code == 404
+    assert client.patch(
+        f"/api/v1/intelligence/models/{model_id}", json={"is_default": True},
+    ).status_code == 404
+    assert client.put("/api/v1/intelligence/routing-policy", json={
+        "fallback_model_ids": [model_id],
+    }).status_code == 422
+
+    # Failed foreign operations must not alter the owner's stored resources.
+    acting["value"] = owner
+    assert [row["id"] for row in client.get("/api/v1/intelligence/providers").json()] == [connection_id]
+    assert [row["id"] for row in client.get("/api/v1/intelligence/models").json()] == [model_id]
+    assert client.get("/api/v1/intelligence/providers").json()[0]["display_name"] == "Owner private provider"
+
 
 def test_routing_policy_rejects_another_users_model(client: TestClient) -> None:
     response = client.put("/api/v1/intelligence/routing-policy", json={
