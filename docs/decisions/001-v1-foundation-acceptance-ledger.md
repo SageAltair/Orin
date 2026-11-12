@@ -68,3 +68,15 @@ This checkpoint replaces the repeated test-invention loop with direct mapping of
 3. Re-run exact-head CI, verify PR diff and merge safety, merge #192, verify main, and close #179 with linked evidence. Only then start #180.
 
 **No further duplicate sentinel tests** unless a specific untested failure is demonstrated. This is an evidence reconciliation, not a claim that #179 is finished.
+
+
+## 2026-11-12 full OpenAPI contract freeze checkpoint
+
+- Reviewed the generated candidate from [Verify Orin run 43290879119](https://github.com/SageAltair/Orin/actions/runs/43290879119), generated at PR #192 head `297a0ed3de9e7b51d125b8fde8a2342ce2606265`.
+- Candidate inventory: **166 versioned paths, 217 operations, 217 unique operation IDs, 319 local references, zero unresolved references**, and two HTTP bearer schemes (`BearerAuth`, `WorkerBearerAuth`).
+- Effective-security inventory found exactly four anonymous operations, all intentional: register, login, refresh, and GitHub OAuth callback. Worker heartbeat, claim, and event operations use `WorkerBearerAuth`. No undefined or malformed security declarations.
+- Canonical full-schema SHA-256: `bb4693d1fb7f27efb06ca7f6010f620db093b9ebdbbbfedf2db2735d1bbe1816`. The lock is checked in at `apps/api/contracts/v1-openapi.sha256`; CI regenerates the review candidate, validates its structure, then compares the complete canonical v1 schema digest. The candidate and security inventory remain CI artifacts for inspection.
+- The digest lock avoids committing a generated 441 KB JSON file while still failing closed on any path, field, requiredness, response, or security drift. Updating it requires an explicit reviewed `--write` operation.
+- [Prior exact-head Verify Orin run 43290879119](https://github.com/SageAltair/Orin/actions/runs/43290879119): application, PostgreSQL migration, browser acceptance, web, Android, production-container, and security steps completed successfully; the final fail-closed baseline check failed because the digest baseline had not yet been added at that commit. [Windows reminder smoke](https://github.com/SageAltair/Orin/actions/runs/43290879009) passed at that head.
+- Added regression coverage for JSON Pointer array indices and the exact set of intentionally public API operations. Added a SHA-256 regression test proving schema changes alter the lock digest.
+- Current PR head: `05361f08997ea72a574ad4d60064193b9b0eecbf`. Exact-head CI for this commit is pending; no PASS is claimed yet. ADR-001 remains proposed pending that verification and final review. Package #179 remains open; no downstream package is authorized.
