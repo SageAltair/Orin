@@ -3,7 +3,7 @@ import copy
 import json
 import unittest
 
-from freeze_v1_openapi import canonical_contract, serialize
+from freeze_v1_openapi import canonical_contract, decode_baseline, encode_baseline, serialize
 
 
 class FrozenOpenAPIContractTests(unittest.TestCase):
@@ -75,6 +75,12 @@ class FrozenOpenAPIContractTests(unittest.TestCase):
         self.assertEqual(json.loads(actual), canonical_contract(self.document))
         self.assertEqual(actual, serialize(copy.deepcopy(self.document)))
         self.assertTrue(actual.endswith("\n"))
+
+    def test_compressed_baseline_is_deterministic_and_round_trips(self):
+        serialized = serialize(self.document)
+        encoded = encode_baseline(serialized)
+        self.assertEqual(encoded, encode_baseline(serialized))
+        self.assertEqual(decode_baseline(encoded.strip()), serialized)
 
     def test_rejects_document_without_versioned_paths(self):
         self.document["paths"] = {"/health": {"get": {}}}
