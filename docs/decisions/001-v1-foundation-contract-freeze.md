@@ -1,13 +1,13 @@
-# ADR-001: Orin v1 foundation contract freeze (proposed)
+# ADR-001: Orin v1 foundation contract freeze
 
-Status: **Proposed for Package #179**. This document is a change-control decision and contract inventory, **not** evidence that contracts or migrations have passed verification. Approval/acceptance occurs only when #179's executable contract tests and migration evidence are linked.
+Status: **Proposed pending final exact-head verification for Package #179**. This is a change-control decision and contract inventory, not proof of release readiness. Acceptance requires the full API digest check, executable contract tests, disposable PostgreSQL migration evidence, and the final CI run linked below.
 
 Date: 2026-11-06
 Scope: public v1 API, PostgreSQL schema evolution, authentication/session lifecycle, browser-to-Windows reminder protocol.
 
 ## Decision
 
-1. **HTTP boundary.** `/api/v1` is the supported API namespace. FastAPI's generated OpenAPI document is the schema source of truth. Changes to existing request/response fields, status codes, authentication requirements, idempotency semantics or workspace scoping are compatibility changes requiring an explicit review. Additive optional fields are preferred. Do not rename endpoints or silently reinterpret existing fields.
+1. **HTTP boundary.** `/api/v1` is the supported API namespace. FastAPI's generated OpenAPI document is the schema source of truth. The complete canonical v1 document is locked by `apps/api/contracts/v1-openapi.sha256`; CI regenerates a review-only candidate, validates its references and security declarations, then compares the full canonical digest. Changes to existing request/response fields, status codes, authentication requirements, idempotency semantics or workspace scoping are compatibility changes requiring an explicit review. Additive optional fields are preferred. Do not rename endpoints or silently reinterpret existing fields.
 2. **Persistence.** PostgreSQL and SQLAlchemy 2 own durable state. All schema changes require an ordered Alembic revision. No production downgrade or destructive migration is authorized by this ADR. For each revision, demonstrate upgrade from the previous supported revision, preservation of representative task/auth/notification data, and either a tested downgrade on disposable data or a documented forward-recovery/restore procedure where downgrade is unsafe.
 3. **Identity.** Access-token authentication and revocable refresh sessions are separate from workspace authorization. An authenticated owner does not gain access to another owner's tasks, notifications, leases, or worker jobs. Device credentials are independently revocable. Avoid storing raw access/refresh/worker tokens in logs or local reminder queues.
 4. **Notification protocol.** Windows reminders remain explicit foreground opt-in, tied to a current authenticated browser session, workspace ID, generation-scoped short-lived lease, fresh browser heartbeat and local loopback stop. Missing/expired/mismatched lease, disconnected browser, auth rejection, or unavailable suppression policy fails closed. A generic toast API success is **not** proof of human-visible scheduled delivery. No silent auto-start, background service, or Android installation.
@@ -22,13 +22,13 @@ For a proposed breaking change: (a) enumerate affected API routes, database revi
 
 | Contract | Required evidence | Status |
 | --- | --- | --- |
-| API request/response and status behavior | `apps/api/contracts/v1-critical-operations.json` and `apps/api/tests/test_v1_checked_in_compatibility.py` | Partial: critical routes protected; field-level wire shapes not frozen |
+| API request/response and status behavior | `apps/api/contracts/v1-critical-operations.json`, `apps/api/contracts/v1-openapi.sha256`, `test_v1_checked_in_compatibility.py`, OpenAPI candidate/reference/security tests | Full canonical v1 field-level schema locked by SHA-256; final exact-head CI pending |
 | Database migration graph | `test_v1_migration_contract.py`, `test_v1_postgres_migration_acceptance.py`, isolated CI PostgreSQL | Verified by exact-head CI |
 | Recovery | Disposable PostgreSQL upgrade/rollback/re-upgrade and preservation in CI | Verified in disposable environment only |
 | Auth/session and workspace ownership | `test_auth.py` refresh rotation, logout revocation, foreign workspace denial | Verified by exact-head CI |
 | Task lifecycle and timezone | `test_priority_tasks.py`, `test_v1_calendar_timezone_contract.py`, worker DST tests | Verified by exact-head CI |
 | Windows browser/worker lease | `test_windows_reminders.py` browser lease, heartbeat, auth revocation, fail-closed tests | Verified in isolated smoke CI; native visual delivery deferred #184 |
-| Exact-head verification | [Verify Orin 42470929052](https://github.com/SageAltair/Orin/actions/runs/42470929052), [Windows smoke 42470929097](https://github.com/SageAltair/Orin/actions/runs/42470929097), both at `e0941fff82527abe6c6eb17b8286833a0e8413ee` | PASS after targeted security retry |
+| Exact-head verification | [Verify Orin 43290879119](https://github.com/SageAltair/Orin/actions/runs/43290879119) and [Windows smoke 43290879009](https://github.com/SageAltair/Orin/actions/runs/43290879009), both at prior PR head `297a0ed3de9e7b51d125b8fde8a2342ce2606265` | Prior application/migration/isolated checks passed; final baseline gate was absent. Newer head `0ad2103f801d1e58f65e48d6c4ca62a19fb88bb7` failed backend test collection due a literal newline in the newly added public-boundary test; corrected in the next commit, final rerun pending. |
 
 Existing test suites and previous CI runs may contribute evidence only when their exact commits, assertions, and applicability are recorded. This document does not substitute for that evidence.
 

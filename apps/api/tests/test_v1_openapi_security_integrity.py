@@ -102,7 +102,7 @@ def test_oauth_scopes_referenced_by_operations_are_declared():
                         f"{method.upper()} {path} ({scheme_name})"
                     )
 
-\n
+
 def test_only_documented_bootstrap_and_oauth_callback_operations_are_public():
     schema = app.openapi()
     expected = {

@@ -1,8 +1,9 @@
 """Package #179: executable checked-in v1 compatibility baseline.
 
-The manifest intentionally freezes release-critical public operations, not every
-internal endpoint. Additive API changes are allowed; removing a declared method,
-status, required request, or auth boundary requires recorded approval.
+The manifest is a readable sentinel for release-critical operations. The complete
+field-level /api/v1 schema is additionally frozen by
+apps/api/contracts/v1-openapi.sha256. Additive changes still require review; removing
+a declared method, status, required request, or auth boundary requires recorded approval.
 """
 import json
 from pathlib import Path
@@ -50,7 +51,8 @@ def test_checked_in_v1_compatibility_baseline() -> None:
                 )
             # A required body is part of the wire contract. A route that still
             # advertises JSON but silently makes it optional is incompatible.
-            # The baseline does not yet freeze individual field types.
+            # Full field-level v1 types and requiredness are protected by the
+            # canonical OpenAPI SHA-256 lock.
             if expected.get("auth"):
                 security = operation.get("security", schema.get("security", []))
                 assert security and all(isinstance(item, dict) and item for item in security), (
