@@ -80,3 +80,11 @@ This checkpoint replaces the repeated test-invention loop with direct mapping of
 - [Prior exact-head Verify Orin run 43290879119](https://github.com/SageAltair/Orin/actions/runs/43290879119): application, PostgreSQL migration, browser acceptance, web, Android, production-container, and security steps completed successfully; the final fail-closed baseline check failed because the digest baseline had not yet been added at that commit. [Windows reminder smoke](https://github.com/SageAltair/Orin/actions/runs/43290879009) passed at that head.
 - Added regression coverage for JSON Pointer array indices and the exact set of intentionally public API operations. Added a SHA-256 regression test proving schema changes alter the lock digest.
 - Current PR head: `05361f08997ea72a574ad4d60064193b9b0eecbf`. Exact-head CI for this commit is pending; no PASS is claimed yet. ADR-001 remains proposed pending that verification and final review. Package #179 remains open; no downstream package is authorized.
+
+
+## 2026-11-12 exact-head CI correction
+
+- [Verify Orin run 43304102605](https://github.com/SageAltair/Orin/actions/runs/43304102605) reached the full backend/worker collection and failed before executing that suite because the newly appended public-operation regression test contained a literal `\\n` source line (Python `SyntaxError`, line 105). The failure was introduced by the test edit, not by the API or migration implementation.
+- Corrected the source line and aligned the compatibility test/ADR wording with the complete OpenAPI SHA-256 lock in commit `f4296ff2ac8c2774dcb2049c84af14724be88f94`.
+- The prior run's Android, web, production-container, isolated worker, knowledge, workspace-scope, pagination and Dar timezone jobs passed. Windows reminder smoke passed at the same prior head. The full verify job is **not PASS** because of the test-collection error.
+- Final exact-head CI after the correction is required before ADR-001 can be accepted or PR #192 can be merged.
