@@ -552,7 +552,11 @@ export function KnowledgeWorkspace({
     }
   };
   const [hasMore, setHasMore] = useState(false);
+  // Search requests may resolve out of order when the user clears a filter.
+  // Only the latest list request may replace the visible documents.
+  const latestDocumentRequest = useRef(0);
   const refresh = async (append = false) => {
+    const requestId = ++latestDocumentRequest.current;
     const params = new URLSearchParams({
       include_archived: String(includeArchived),
     });
@@ -560,6 +564,7 @@ export function KnowledgeWorkspace({
     if (documentTypeFilter) params.set("document_type", documentTypeFilter);
     params.set("offset", String(append ? documents.length : 0));
     const rows = await request<Document[]>(`/knowledge/documents?${params}`);
+    if (requestId !== latestDocumentRequest.current) return;
     setHasMore(rows.length === 200);
     setDocuments((current) =>
       append
