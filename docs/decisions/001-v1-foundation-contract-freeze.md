@@ -1,6 +1,6 @@
 # ADR-001: Orin v1 foundation contract freeze
 
-Status: **Proposed pending exact-head verification after the platform-support documentation correction**. This is a change-control decision and contract inventory, not proof of release readiness. Acceptance requires the full API digest check, executable contract tests, disposable PostgreSQL migration evidence, and the final CI run linked below.
+Status: **Accepted by release engineering on 2026-11-12 UTC after exact-head verification; see final acceptance review below**. This is a change-control decision and contract inventory, not proof of release readiness. Acceptance requires the full API digest check, executable contract tests, disposable PostgreSQL migration evidence, and the final CI run linked below.
 
 Date: 2026-11-06
 Scope: public v1 API, PostgreSQL schema evolution, authentication/session lifecycle, browser-to-Windows reminder protocol.
@@ -30,17 +30,17 @@ The Android application is a supported client, not an Android background-service
 
 For a proposed breaking change: (a) enumerate affected API routes, database revisions, clients, workers, and existing user data; (b) publish an impact/rollback plan; (c) add backward/forward compatibility tests; (d) obtain explicit recorded approval before merging; (e) link exact-head CI and the approved exception on #179 or the active later package. The absence of a test or approval is **BLOCKED**, never implied acceptance.
 
-## Required executable evidence before accepting this ADR
+## Recorded executable evidence for this ADR
 
 | Contract | Required evidence | Status |
 | --- | --- | --- |
-| API request/response and status behavior | `apps/api/contracts/v1-critical-operations.json`, `apps/api/contracts/v1-openapi.sha256`, `test_v1_checked_in_compatibility.py`, OpenAPI candidate/reference/security tests | Full canonical v1 field-level schema locked by SHA-256; final exact-head CI pending |
-| Database migration graph | `test_v1_migration_contract.py`, `test_v1_postgres_migration_acceptance.py`, isolated CI PostgreSQL | Verified by exact-head CI |
+| API request/response and status behavior | `apps/api/contracts/v1-critical-operations.json`, `apps/api/contracts/v1-openapi.sha256`, `test_v1_checked_in_compatibility.py`, OpenAPI candidate/reference/security tests | Full canonical v1 field-level schema locked by SHA-256; candidate/reference/security checks and digest gate PASS in exact-head CI 43307156899 |
+| Database migration graph | `test_v1_migration_contract.py`, `test_v1_postgres_migration_acceptance.py`, isolated CI PostgreSQL | PASS in exact-head CI 43307156899 |
 | Recovery | Disposable PostgreSQL upgrade/rollback/re-upgrade and preservation in CI | Verified in disposable environment only |
 | Auth/session and workspace ownership | `test_auth.py` refresh rotation, logout revocation, foreign workspace denial | Verified by exact-head CI |
 | Task lifecycle and timezone | `test_priority_tasks.py`, `test_v1_calendar_timezone_contract.py`, worker DST tests | Verified by exact-head CI |
 | Windows browser/worker lease | `test_windows_reminders.py` browser lease, heartbeat, auth revocation, fail-closed tests | Verified in isolated smoke CI; native visual delivery deferred #184 |
-| Exact-head verification | [Verify Orin 43290879119](https://github.com/SageAltair/Orin/actions/runs/43290879119) and [Windows smoke 43290879009](https://github.com/SageAltair/Orin/actions/runs/43290879009), both at prior PR head `297a0ed3de9e7b51d125b8fde8a2342ce2606265` | Prior application/migration/isolated checks passed; final baseline gate was absent. Newer head `0ad2103f801d1e58f65e48d6c4ca62a19fb88bb7` failed backend test collection due a literal newline in the newly added public-boundary test; corrected in the next commit, final rerun pending. |
+| Exact-head verification | [Verify Orin 43307156899](https://github.com/SageAltair/Orin/actions/runs/43307156899) and [Windows reminder smoke 43307156889](https://github.com/SageAltair/Orin/actions/runs/43307156889), both at PR head `8534370e4aba642b3f5a5c0447c50c01f4353439` | **PASS**: all 12 Verify jobs and the Windows smoke job succeeded. The final fail-closed OpenAPI SHA-256 baseline check passed. |
 
 Existing test suites and previous CI runs may contribute evidence only when their exact commits, assertions, and applicability are recorded. This document does not substitute for that evidence.
 
@@ -51,6 +51,20 @@ Existing test suites and previous CI runs may contribute evidence only when thei
 - [Windows reminder security and opt-in](../../apps/worker/WINDOWS_REMINDERS.md)
 - [Alembic migrations](../../apps/api/migrations/versions)
 
-## 2026-11-08 acceptance review
+## 2026-11-08 historical acceptance review (superseded by final acceptance below)
 
 The exact-head security retry completed successfully at `e0941fff82527abe6c6eb17b8286833a0e8413ee`; the SBOM download failure was transient. No security check was waived. The API baseline protects selected critical operations, but not all v1 request/response field-level types, defaults, nullability or enum semantics. **ADR-001 remains proposed**, pending completion of that contract freeze and recorded acceptance. CI passing is not itself architecture approval. Do not merge or close #179 until these gates are satisfied. No native-device verification is claimed.
+
+
+## 2026-11-12 final acceptance review
+
+**ADR-001 ACCEPTED for the Orin v1 foundation contract freeze.** Exact-head [Verify Orin run 43307156899](https://github.com/SageAltair/Orin/actions/runs/43307156899) and [Windows reminder smoke run 43307156889](https://github.com/SageAltair/Orin/actions/runs/43307156889) both completed successfully at `8534370e4aba642b3f5a5c0447c50c01f4353439`. Verify passed all 12 jobs, including backend/worker regressions, disposable PostgreSQL migration upgrade/rollback/re-upgrade and preservation, web/mobile checks, browser acceptance, production-container smoke, security scanning, candidate validation and the fail-closed OpenAPI digest check.
+
+- Canonical OpenAPI inventory: 166 versioned paths, 217 operations, 217 unique operation IDs, 319 local references, zero unresolved references, two bearer schemes, and four intentionally public operations. The complete canonical digest is `bb4693d1fb7f27efb06ca7f6010f620db093b9ebdbbbfedf2db2735d1bbe1816`.
+- The worker bearer contract is additive documentation of the existing runtime credential boundary; worker credential format, hash/revocation checks and permission behavior were retained. The registration 429 correction isolates test scenarios without changing the production five-per-peer-per-minute limit. No breaking-change exception is granted or required by this ADR.
+- Platform support and notification limits are now explicit: browser web, Android Expo client with opt-in best-effort local reminders (no server push), Windows foreground companion with browser lease/heartbeat (no service/autostart), and no provisioned cloud execution environment.
+- The security workflow passed its existing zero-critical/zero-high policy. **Eleven moderate mobile build-tool advisories remain** tracked under #21; this ADR does not waive or claim remediation of those findings. They remain a release risk to be dispositioned before public launch.
+- Physical Windows visible-toast and Android device delivery remain **DEFERRED #184**; no native-device pass is claimed. Related historical issues #21/#48 and device gates #129/#130 remain open until their own acceptance is completed. The engineering fix for #149 is merged in PR #178.
+- No production deployment, production migration, device/background-service installation, real-user data mutation, public publication or paid advertising occurred.
+
+This acceptance freezes the current v1 contract baseline. Future breaking changes still require impact analysis, compatibility/migration tests, and explicit recorded approval before merge.
