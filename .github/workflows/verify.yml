@@ -340,7 +340,7 @@ jobs:
           # production five-signups-per-minute peer limit remains meaningful.
           - suite: isolated-acceptance.spec.ts
             grep: persists Writing and delivers task reminders
-            label: isolated-browser-journey
+            label: isolated-acceptance
           - suite: isolated-acceptance.spec.ts
             grep: All Tasks includes records beyond the first API page
             label: isolated-pagination
