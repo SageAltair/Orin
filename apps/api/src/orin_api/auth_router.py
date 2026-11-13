@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlsplit
 from datetime import timedelta
 from typing import Annotated
 
@@ -68,6 +69,51 @@ def _auth_failure_reason(status_code: int) -> str:
         409: "account_conflict",
         429: "rate_limited",
     }.get(status_code, "rejected")
+
+
+def _origin_key(value: str) -> tuple[str, str, int] | None:
+    """Return a normalized web origin, rejecting paths, credentials, and malformed ports."""
+    try:
+        parsed = urlsplit(value.strip())
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.casefold()
+    hostname = parsed.hostname
+    if (
+        scheme not in {"http", "https"}
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return scheme, hostname.rstrip(".").casefold(), port or (443 if scheme == "https" else 80)
+
+
+def _validate_refresh_origin(request: Request, settings: Settings) -> None:
+    """Protect the cookie-authenticated refresh route from cross-origin browser requests.
+
+    Browsers send Origin on POST requests. Fetch Metadata is a fallback for requests
+    where Origin is omitted. Non-browser clients that send neither header remain
+    compatible with the existing refresh-cookie contract.
+    """
+    allowed = {
+        origin_key
+        for value in (*settings.allowed_cors_origins, settings.web_app_url)
+        if (origin_key := _origin_key(value)) is not None
+    }
+    origin = request.headers.get("origin")
+    fetch_site = request.headers.get("sec-fetch-site", "").strip().casefold()
+    if origin is not None:
+        if _origin_key(origin) not in allowed:
+            raise HTTPException(status_code=403, detail="Browser request origin is not allowed")
+    elif fetch_site and fetch_site != "same-origin":
+        # Reject same-site siblings too: SameSite=Strict cookies are still sent
+        # between sibling subdomains, so SameSite alone is not an origin boundary.
+        raise HTTPException(status_code=403, detail="Browser request origin is not allowed")
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -139,11 +185,16 @@ def refresh(
 ) -> AuthTokenResponse:
     _auth_secret(settings)
     try:
+        _validate_refresh_origin(request, settings)
         token = rotate_refresh_token(refresh_token, response, session, settings)
     except HTTPException as exc:
         _record_auth_event(
             session, request, "auth.refresh", "failure",
-            reason="invalid_or_replayed_refresh" if exc.status_code == 401 else _auth_failure_reason(exc.status_code),
+            reason=(
+                "origin_not_allowed" if exc.status_code == 403
+                else "invalid_or_replayed_refresh" if exc.status_code == 401
+                else _auth_failure_reason(exc.status_code)
+            ),
         )
         raise
     _record_auth_event(session, request, "auth.refresh", "success")
