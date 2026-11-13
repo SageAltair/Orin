@@ -23,6 +23,7 @@ from orin_api.auth import (
 )
 from orin_api.config import Settings, get_settings
 from orin_api.database import get_session
+from orin_api.security_audit import record_security_event
 from orin_api.models import User, AuthSession, RefreshToken, SystemSetting, Workspace, BrowserReminderLease
 from orin_api.schemas import AuthTokenResponse, LoginRequest, RegisterRequest, UserRead, ProfileUpdate, PasswordChange, EmailChange
 from sqlalchemy import select
@@ -36,6 +37,39 @@ def _disable_caching(response: Response) -> None:
     response.headers["Pragma"] = "no-cache"
 
 
+def _record_auth_event(
+    session: Session,
+    request: Request,
+    action: str,
+    outcome: str,
+    *,
+    actor_user_id: uuid.UUID | None = None,
+    target_type: str = "auth",
+    target_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    record_security_event(
+        session,
+        action=action,
+        outcome=outcome,
+        request_id=getattr(request.state, "request_id", None),
+        actor_user_id=actor_user_id,
+        target_type=target_type,
+        target_id=target_id,
+        reason=reason,
+    )
+
+
+def _auth_failure_reason(status_code: int) -> str:
+    return {
+        400: "invalid_request",
+        401: "invalid_credentials",
+        403: "registration_disabled",
+        409: "account_conflict",
+        429: "rate_limited",
+    }.get(status_code, "rejected")
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register(
     data: RegisterRequest,
@@ -44,11 +78,23 @@ def register(
     settings: Settings = Depends(get_settings),
 ) -> UserRead:
     _auth_secret(settings)
-    access = session.get(SystemSetting, "access")
-    if access is not None and access.value_json.get("registration_enabled") is False:
-        raise HTTPException(status_code=403, detail="New account registration is currently closed")
-    enforce_auth_limit(request, session, route="register", limit=5)
-    return register_user(data, session)
+    try:
+        access = session.get(SystemSetting, "access")
+        if access is not None and access.value_json.get("registration_enabled") is False:
+            raise HTTPException(status_code=403, detail="New account registration is currently closed")
+        enforce_auth_limit(request, session, route="register", limit=5)
+        user = register_user(data, session)
+    except HTTPException as exc:
+        _record_auth_event(
+            session, request, "auth.registration", "failure",
+            reason=_auth_failure_reason(exc.status_code),
+        )
+        raise
+    _record_auth_event(
+        session, request, "auth.registration", "success",
+        actor_user_id=user.id, target_type="user", target_id=str(user.id),
+    )
+    return user
 
 
 @router.post("/login", response_model=AuthTokenResponse)
@@ -60,33 +106,65 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> AuthTokenResponse:
     _auth_secret(settings)
-    enforce_auth_limit(request, session, route="login")
-    token = authenticate_user(data, response, session, settings)
+    candidate = None
+    try:
+        enforce_auth_limit(request, session, route="login")
+        candidate = session.scalar(select(User).where(User.email == str(data.email).casefold()))
+        token = authenticate_user(data, response, session, settings)
+    except HTTPException as exc:
+        _record_auth_event(
+            session, request, "auth.login", "failure",
+            target_type="user" if candidate is not None else "auth",
+            target_id=str(candidate.id) if candidate is not None else None,
+            reason=_auth_failure_reason(exc.status_code),
+        )
+        raise
+    _record_auth_event(
+        session, request, "auth.login", "success",
+        actor_user_id=candidate.id if candidate is not None else None,
+        target_type="user" if candidate is not None else "auth",
+        target_id=str(candidate.id) if candidate is not None else None,
+    )
     _disable_caching(response)
     return token
 
 
 @router.post("/refresh", response_model=AuthTokenResponse)
 def refresh(
+    request: Request,
     response: Response,
     refresh_token: Annotated[str | None, Cookie(alias=REFRESH_COOKIE_NAME)] = None,
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> AuthTokenResponse:
     _auth_secret(settings)
-    token = rotate_refresh_token(refresh_token, response, session, settings)
+    try:
+        token = rotate_refresh_token(refresh_token, response, session, settings)
+    except HTTPException as exc:
+        _record_auth_event(
+            session, request, "auth.refresh", "failure",
+            reason="invalid_or_replayed_refresh" if exc.status_code == 401 else _auth_failure_reason(exc.status_code),
+        )
+        raise
+    _record_auth_event(session, request, "auth.refresh", "success")
     _disable_caching(response)
     return token
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout(
+    request: Request,
     response: Response,
     authenticated: AuthenticatedUser = Depends(get_current_authentication),
     session: Session = Depends(get_session),
     settings: Settings = Depends(get_settings),
 ) -> Response:
     revoke_session(authenticated, response, session, settings)
+    _record_auth_event(
+        session, request, "auth.logout", "success",
+        actor_user_id=authenticated.user.id,
+        target_type="auth_session", target_id=str(authenticated.auth_session.id),
+    )
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
 
@@ -104,13 +182,24 @@ def update_profile(data: ProfileUpdate, user: User = Depends(get_current_user), 
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
-def change_password(data: PasswordChange, response: Response, user: User = Depends(get_current_user), session: Session = Depends(get_session), settings: Settings = Depends(get_settings)) -> Response:
+def change_password(
+    data: PasswordChange,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
     try:
         valid = bool(user.password_hash and PASSWORD_HASHER.verify(data.current_password, user.password_hash))
     except Exception:
         valid = False
     if not valid:
-        from fastapi import HTTPException
+        _record_auth_event(
+            session, request, "auth.password.change", "failure",
+            actor_user_id=user.id, target_type="user", target_id=str(user.id),
+            reason="invalid_current_password",
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
     user.password_hash = PASSWORD_HASHER.hash(data.new_password)
     now = datetime.now(UTC)
@@ -118,6 +207,10 @@ def change_password(data: PasswordChange, response: Response, user: User = Depen
     for auth_session in sessions:
         auth_session.revoked_at = now
     session.commit()
+    _record_auth_event(
+        session, request, "auth.password.change", "success",
+        actor_user_id=user.id, target_type="user", target_id=str(user.id),
+    )
     response.delete_cookie(key=REFRESH_COOKIE_NAME, httponly=True, secure=settings.auth_refresh_cookie_secure, samesite="strict", path="/api/v1/auth")
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
@@ -134,17 +227,40 @@ def list_sessions(authenticated: AuthenticatedUser = Depends(get_current_authent
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
-def revoke_user_session(session_id: uuid.UUID, response: Response, authenticated: AuthenticatedUser = Depends(get_current_authentication), session: Session = Depends(get_session), settings: Settings = Depends(get_settings)) -> Response:
-    row = session.scalar(select(AuthSession).where(AuthSession.id == session_id, AuthSession.user_id == authenticated.user.id).with_for_update())
+def revoke_user_session(
+    session_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    authenticated: AuthenticatedUser = Depends(get_current_authentication),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    row = session.scalar(select(AuthSession).where(
+        AuthSession.id == session_id,
+        AuthSession.user_id == authenticated.user.id,
+    ).with_for_update())
     if row is None:
-        from fastapi import HTTPException
+        _record_auth_event(
+            session, request, "auth.session.revoke", "failure",
+            actor_user_id=authenticated.user.id,
+            target_type="auth_session", target_id=str(session_id),
+            reason="session_not_found",
+        )
         raise HTTPException(status_code=404, detail="Session not found")
     if row.revoked_at is None:
         row.revoked_at = datetime.now(UTC)
-        tokens = session.scalars(select(RefreshToken).where(RefreshToken.session_id == row.id, RefreshToken.revoked_at.is_(None))).all()
+        tokens = session.scalars(select(RefreshToken).where(
+            RefreshToken.session_id == row.id,
+            RefreshToken.revoked_at.is_(None),
+        )).all()
         for token in tokens:
             token.revoked_at = datetime.now(UTC)
         session.commit()
+    _record_auth_event(
+        session, request, "auth.session.revoke", "success",
+        actor_user_id=authenticated.user.id,
+        target_type="auth_session", target_id=str(row.id),
+    )
     if row.id == authenticated.auth_session.id:
         response.delete_cookie(key=REFRESH_COOKIE_NAME, httponly=True, secure=settings.auth_refresh_cookie_secure, samesite="strict", path="/api/v1/auth")
     response.status_code = status.HTTP_204_NO_CONTENT
@@ -260,16 +376,32 @@ def stop_reminder_lease(
 
 
 @router.post("/email", response_model=UserRead)
-def change_email(data: EmailChange, response: Response, user: User = Depends(get_current_user), session: Session = Depends(get_session), settings: Settings = Depends(get_settings)) -> User:
+def change_email(
+    data: EmailChange,
+    request: Request,
+    response: Response,
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> User:
     try:
         valid = bool(user.password_hash and PASSWORD_HASHER.verify(data.current_password, user.password_hash))
     except Exception:
         valid = False
     if not valid:
-        from fastapi import HTTPException
+        _record_auth_event(
+            session, request, "auth.email.change", "failure",
+            actor_user_id=user.id, target_type="user", target_id=str(user.id),
+            reason="invalid_current_password",
+        )
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     email = str(data.new_email).casefold()
     if session.scalar(select(User.id).where(User.email == email, User.id != user.id)):
+        _record_auth_event(
+            session, request, "auth.email.change", "failure",
+            actor_user_id=user.id, target_type="user", target_id=str(user.id),
+            reason="email_conflict",
+        )
         raise HTTPException(status_code=409, detail="Email address is already in use")
     user.email = email
     now = datetime.now(UTC)
@@ -277,5 +409,9 @@ def change_email(data: EmailChange, response: Response, user: User = Depends(get
     for auth_session in sessions:
         auth_session.revoked_at = now
     session.commit()
+    _record_auth_event(
+        session, request, "auth.email.change", "success",
+        actor_user_id=user.id, target_type="user", target_id=str(user.id),
+    )
     response.delete_cookie(key=REFRESH_COOKIE_NAME, httponly=True, secure=settings.auth_refresh_cookie_secure, samesite="strict", path="/api/v1/auth")
     return user

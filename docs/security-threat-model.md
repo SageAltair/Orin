@@ -51,7 +51,8 @@ Orin must preserve these invariants across every client and API entry point:
 | OAuth callback forgery or replay | Server-side OAuth state validation and one-time callback state; encrypted stored credentials | `apps/api/tests/test_integrations.py` | Recheck production callback/origin configuration during #186 |
 | AI action escalation or prompt injection | Strict server-owned action schemas, immutable registry metadata, permission checks, exact approval binding, execution audit | `apps/api/tests/test_execution.py` | Complete adversarial tests for stale, replayed, cross-user, and modified approvals |
 | Worker credential theft or unsafe execution | Hashed worker credentials, signed jobs, fixed scopes, fixed argv, `shell=False`, bounded output/time, filtered child environment, restricted sandbox | Worker capability and worker acceptance suites | Physical client/worker lifecycle verification remains in #184 |
-| Privileged admin misuse | Admin-only dependencies, last-admin/self-disable protections, admin audit events for API operations | `apps/api/tests/test_admin.py` | Direct role provisioning through `admin_cli.py` needs an auditable operator record |
+| Privileged admin misuse | Admin-only dependencies, last-admin/self-disable protections, API audit events, and CLI role-change events with an explicit operator identity | `apps/api/tests/test_admin.py`; `apps/api/tests/test_admin_cli.py` | Protect and retain the audit ledger; verify operator identity source in deployment |
+| Authentication event coverage | Registration, login, refresh/replay, logout, password/email changes, and session revocation write secret-redacted events to the existing `admin_audit_events` ledger; details contain outcome, request ID, and fixed reason codes only | `apps/api/tests/test_auth.py`; `apps/api/src/orin_api/security_audit.py` | Add alerting/retention policy and verify operational audit access controls |
 | Insecure staging configuration | PR #193 requires explicit auth/database/CORS/web settings, HTTPS origins and web URL, and secure refresh cookies for `APP_ENV=staging` | `apps/api/tests/test_config.py`, exact-head CI | Verify against the real staging deployment configuration in #186 |
 | Dependency/supply-chain compromise | Locked dependencies, dependency audit, secret scan, container scan, SBOM in CI | Verify Orin security job | Eleven moderate mobile build-tool advisories remain tracked in #21; disposition is required before public launch |
 
@@ -59,10 +60,8 @@ Orin must preserve these invariants across every client and API entry point:
 
 These are explicit gaps, not accepted exceptions:
 
-- **Auth audit coverage:** registration, login failures/success, refresh/replay, logout, password/email changes, and user-initiated session revocation need structured, secret-redacted security events. Existing admin audit events do not provide complete authentication telemetry.
 - **Password recovery:** an unauthenticated, enumeration-safe, rate-limited recovery flow is not implemented. Define a one-time hashed token, short expiry, disposable test outbox, and session-family revocation before enabling real delivery.
 - **Browser request integrity:** SameSite=Strict and explicit CORS origins are present, but the refresh route has no explicit Origin/CSRF validation. Test same-site sibling-origin requests and document the chosen mitigation.
-- **Operator audit:** direct role promotion/demotion through `admin_cli.py` needs an auditable operator identity and immutable event.
 - **Secret serialization:** provider API-key settings use hidden repr strings rather than `SecretStr`. Audit every dump/logging path and change types only with an impact review and compatibility tests.
 - **Provider input validation:** validate Cloudflare account identifiers against the provider's documented format before interpolating them into request paths.
 - **Tenant abuse matrix:** extend two-account tests across provider policies, conversations, attachments, action approvals, and every read/update/delete surface.
@@ -76,7 +75,7 @@ These are explicit gaps, not accepted exceptions:
 | Provider credential masking, ownership, model selection, routing policy | `apps/api/tests/test_ai_settings.py` |
 | OAuth state, credential encryption, key rotation, disconnect | `apps/api/tests/test_integrations.py` |
 | AI action schema, permission and approval binding | `apps/api/tests/test_execution.py` |
-| Admin authorization and audit behavior | `apps/api/tests/test_admin.py` |
+| Admin authorization and audit behavior | `apps/api/tests/test_admin.py`; `apps/api/tests/test_admin_cli.py` |
 | Worker authentication, job lifecycle and sandbox | Worker tests and isolated worker acceptance |
 | Staging/production auth configuration | `apps/api/tests/test_config.py` |
 
@@ -84,6 +83,7 @@ These are explicit gaps, not accepted exceptions:
 
 - Foundation contracts are frozen in merged PR [#192](https://github.com/SageAltair/Orin/pull/192), merge commit `308c26cb082b2c7d090f56863ec5967ee459ba74`.
 - Security tranche PR [#193](https://github.com/SageAltair/Orin/pull/193) adds staging hardening, safe Google key transport, and two-account provider/model isolation tests.
+- Follow-up branch `security/180-auth-and-operator-audit` adds structured authentication events and attributable CLI role-change events using the existing audit table; exact-head CI is pending.
 - Exact-head Verify Orin [run #1392](https://github.com/SageAltair/Orin/actions/runs/43328654123) passed 12/12 jobs at the first PR head.
 - Exact-head Verify Orin [run #1393](https://github.com/SageAltair/Orin/actions/runs/43329500373) passed 12/12 jobs at commit `5370a2cb0a5be335813c74696c6a5f3eee241e2f`, including backend/worker regression, production containers, security, web/mobile, and isolated browser acceptance.
 
