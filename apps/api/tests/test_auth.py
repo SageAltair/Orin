@@ -561,6 +561,7 @@ def test_v1_private_task_notification_and_lease_routes_reject_anonymous_requests
 def test_auth_security_events_are_persisted_without_credentials(auth_client: TestClient) -> None:
     client = auth_client
     email = "audit-user@example.test"
+    changed_email = "audit-user-updated@example.test"
     original_password = "audit-secret-password-that-must-never-be-stored"
     replacement_password = "replacement-secret-password-that-must-never-be-stored"
 
@@ -569,6 +570,15 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
         "email": email, "password": "incorrect-secret-password",
     })
     assert rejected.status_code == 401
+
+    token = login(client, email, original_password)
+    original_refresh = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert original_refresh
+    rotated = client.post("/api/v1/auth/refresh")
+    assert rotated.status_code == 200
+    client.cookies.set(REFRESH_COOKIE_NAME, original_refresh, path="/api/v1/auth")
+    replay = client.post("/api/v1/auth/refresh")
+    assert replay.status_code == 401
 
     token = login(client, email, original_password)
     authenticate(client, str(token["access_token"]))
@@ -585,6 +595,24 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
 
     replacement = login(client, email, replacement_password)
     authenticate(client, str(replacement["access_token"]))
+    rejected_email = client.post("/api/v1/auth/email", json={
+        "current_password": "incorrect-secret-password",
+        "new_email": changed_email,
+    })
+    assert rejected_email.status_code == 400
+    email_changed = client.post("/api/v1/auth/email", json={
+        "current_password": replacement_password,
+        "new_email": changed_email,
+    })
+    assert email_changed.status_code == 200
+    assert email_changed.json()["email"] == changed_email
+
+    first = login(client, changed_email, replacement_password)
+    authenticate(client, str(first["access_token"]))
+    first_session_id = client.get("/api/v1/auth/sessions").json()[0]["id"]
+    second = login(client, changed_email, replacement_password)
+    authenticate(client, str(second["access_token"]))
+    assert client.delete(f"/api/v1/auth/sessions/{first_session_id}").status_code == 204
     assert client.post("/api/v1/auth/logout").status_code == 204
 
     with app.state.auth_test_sessions() as session:
@@ -596,8 +624,13 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
     assert ("auth.registration", "success") in observed
     assert ("auth.login", "failure") in observed
     assert ("auth.login", "success") in observed
+    assert ("auth.refresh", "success") in observed
+    assert ("auth.refresh", "failure") in observed
     assert ("auth.password.change", "failure") in observed
     assert ("auth.password.change", "success") in observed
+    assert ("auth.email.change", "failure") in observed
+    assert ("auth.email.change", "success") in observed
+    assert ("auth.session.revoke", "success") in observed
     assert ("auth.logout", "success") in observed
     assert all(event.detail_json.get("request_id") for event in events)
 
@@ -606,3 +639,6 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
     assert replacement_password not in serialized
     assert "incorrect-secret-password" not in serialized
     assert email not in serialized
+    assert changed_email not in serialized
+    assert original_refresh not in serialized
+    assert str(token["access_token"]) not in serialized
