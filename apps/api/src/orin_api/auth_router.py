@@ -90,7 +90,8 @@ def _origin_key(value: str) -> tuple[str, str, int] | None:
         or parsed.fragment
     ):
         return None
-    return scheme, hostname.rstrip(".").casefold(), port or (443 if scheme == "https" else 80)
+    effective_port = port if port is not None else (443 if scheme == "https" else 80)
+    return scheme, hostname.casefold(), effective_port
 
 
 def _validate_refresh_origin(request: Request, settings: Settings) -> None:
