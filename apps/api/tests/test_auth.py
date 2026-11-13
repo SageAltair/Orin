@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -10,6 +10,7 @@ from orin_api.auth import REFRESH_COOKIE_NAME
 from orin_api.config import get_settings
 from orin_api.database import Base, get_session
 from orin_api.main import app
+from orin_api.models import AdminAuditEvent
 
 PASSWORD = "correct horse battery staple 2026"
 
@@ -28,6 +29,7 @@ def auth_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, 
     )
     Base.metadata.create_all(engine)
     test_sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    app.state.auth_test_sessions = test_sessions
 
     def override_session() -> Generator[Session, None, None]:
         with test_sessions() as session:
@@ -39,6 +41,8 @@ def auth_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, 
             yield test_client
     finally:
         app.dependency_overrides.clear()
+        if hasattr(app.state, "auth_test_sessions"):
+            delattr(app.state, "auth_test_sessions")
         Base.metadata.drop_all(engine)
         engine.dispose()
         get_settings.cache_clear()
@@ -551,3 +555,54 @@ def test_v1_private_task_notification_and_lease_routes_reject_anonymous_requests
         assert response.status_code == 401, (
             f"{method} {path} unexpectedly returned {response.status_code}: {response.text}"
         )
+
+
+
+def test_auth_security_events_are_persisted_without_credentials(auth_client: TestClient) -> None:
+    client = auth_client
+    email = "audit-user@example.test"
+    original_password = "audit-secret-password-that-must-never-be-stored"
+    replacement_password = "replacement-secret-password-that-must-never-be-stored"
+
+    register(client, email, original_password)
+    rejected = client.post("/api/v1/auth/login", json={
+        "email": email, "password": "incorrect-secret-password",
+    })
+    assert rejected.status_code == 401
+
+    token = login(client, email, original_password)
+    authenticate(client, str(token["access_token"]))
+    rejected_change = client.post("/api/v1/auth/password", json={
+        "current_password": "incorrect-secret-password",
+        "new_password": replacement_password,
+    })
+    assert rejected_change.status_code == 400
+    changed = client.post("/api/v1/auth/password", json={
+        "current_password": original_password,
+        "new_password": replacement_password,
+    })
+    assert changed.status_code == 204
+
+    replacement = login(client, email, replacement_password)
+    authenticate(client, str(replacement["access_token"]))
+    assert client.post("/api/v1/auth/logout").status_code == 204
+
+    with app.state.auth_test_sessions() as session:
+        events = session.scalars(
+            select(AdminAuditEvent).where(AdminAuditEvent.action.like("auth.%"))
+        ).all()
+
+    observed = {(event.action, event.detail_json["outcome"]) for event in events}
+    assert ("auth.registration", "success") in observed
+    assert ("auth.login", "failure") in observed
+    assert ("auth.login", "success") in observed
+    assert ("auth.password.change", "failure") in observed
+    assert ("auth.password.change", "success") in observed
+    assert ("auth.logout", "success") in observed
+    assert all(event.detail_json.get("request_id") for event in events)
+
+    serialized = repr([event.detail_json for event in events])
+    assert original_password not in serialized
+    assert replacement_password not in serialized
+    assert "incorrect-secret-password" not in serialized
+    assert email not in serialized
