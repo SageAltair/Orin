@@ -61,7 +61,7 @@ Orin must preserve these invariants across every client and API entry point:
 These are explicit gaps, not accepted exceptions:
 
 - **Password recovery:** an unauthenticated, enumeration-safe, rate-limited recovery flow is not implemented. Define a one-time hashed token, short expiry, disposable test outbox, and session-family revocation before enabling real delivery.
-- **Browser request integrity:** SameSite=Strict and explicit CORS origins are present, but the refresh route has no explicit Origin/CSRF validation. Test same-site sibling-origin requests and document the chosen mitigation.
+- **Browser request integrity:** the refresh route now validates an exact configured `Origin`; when `Origin` is absent it rejects `Sec-Fetch-Site` values other than `same-origin`, including `same-site` sibling origins. Requests with neither browser header remain compatible with non-browser clients. Regression tests cover malformed/null origins, attacker origins, same-site/cross-site/none metadata, non-consumption of rejected refresh tokens, and the native-client fallback. Residual: verify the production web origin and actual browser behavior in #186.
 - **Secret serialization:** provider API-key settings use hidden repr strings rather than `SecretStr`. Audit every dump/logging path and change types only with an impact review and compatibility tests.
 - **Provider input validation:** validate Cloudflare account identifiers against the provider's documented format before interpolating them into request paths.
 - **Tenant abuse matrix:** extend two-account tests across provider policies, conversations, attachments, action approvals, and every read/update/delete surface.
@@ -83,7 +83,8 @@ These are explicit gaps, not accepted exceptions:
 
 - Foundation contracts are frozen in merged PR [#192](https://github.com/SageAltair/Orin/pull/192), merge commit `308c26cb082b2c7d090f56863ec5967ee459ba74`.
 - Security tranche PR [#193](https://github.com/SageAltair/Orin/pull/193) adds staging hardening, safe Google key transport, and two-account provider/model isolation tests.
-- Follow-up branch `security/180-auth-and-operator-audit` adds structured authentication events and attributable CLI role-change events using the existing audit table; exact-head CI is pending.
+- Merged PR [#194](https://github.com/SageAltair/Orin/pull/194) adds structured authentication events and attributable CLI role-change events using the existing audit table; exact-head Verify Orin [run #1397](https://github.com/SageAltair/Orin/actions/runs/43359853815) passed 12/12 jobs at `25ff5ca2ba70272ed0a884c508546bbe1b02b266`.
+- Follow-up branch `security/180-refresh-origin-csrf` adds explicit refresh Origin/Fetch Metadata validation and browser/native compatibility regressions; awaiting exact-head CI.
 - Exact-head Verify Orin [run #1392](https://github.com/SageAltair/Orin/actions/runs/43328654123) passed 12/12 jobs at the first PR head.
 - Exact-head Verify Orin [run #1393](https://github.com/SageAltair/Orin/actions/runs/43329500373) passed 12/12 jobs at commit `5370a2cb0a5be335813c74696c6a5f3eee241e2f`, including backend/worker regression, production containers, security, web/mobile, and isolated browser acceptance.
 
