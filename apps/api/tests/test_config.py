@@ -76,3 +76,26 @@ def test_staging_requires_production_grade_auth_transport() -> None:
     secure = Settings(**shared, database_url=database, cors_origins="https://staging.example",
                       web_app_url="https://staging.example", auth_refresh_cookie_secure=True)
     assert secure.allowed_cors_origins == ["https://staging.example"]
+
+
+@pytest.mark.parametrize("field_name", [
+    "openai_api_key",
+    "anthropic_api_key",
+    "mistral_api_key",
+    "google_api_key",
+    "openrouter_api_key",
+    "qwen_api_key",
+    "groq_api_key",
+    "cerebras_api_key",
+    "cloudflare_api_key",
+])
+def test_provider_api_keys_are_masked_in_settings_serialization(field_name: str) -> None:
+    secret = "provider-key-serialization-sentinel"
+    settings = Settings(_env_file=None, **{field_name: secret})
+    configured = getattr(settings, field_name)
+
+    assert configured.get_secret_value() == secret
+    assert secret not in repr(settings)
+    assert secret not in str(settings.model_dump())
+    assert secret not in settings.model_dump_json()
+    assert "**********" in settings.model_dump_json()

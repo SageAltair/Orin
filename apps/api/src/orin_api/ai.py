@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
@@ -255,7 +255,7 @@ class ProviderName(StrEnum):
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    api_key: str
+    api_key: str = field(repr=False)
     base_url: str
     model: str
     account_id: str | None = None
@@ -454,13 +454,14 @@ def create_provider(settings: Settings) -> AIProvider:
         name = ProviderName(settings.ai_provider.lower())
     except ValueError as exc:
         raise AIProviderError("Configured AI provider is unsupported") from exc
-    key_by_name = {
+    secret_by_name = {
         "openai": settings.openai_api_key, "anthropic": settings.anthropic_api_key, "mistral": settings.mistral_api_key,
         "google": settings.google_api_key, "openrouter": settings.openrouter_api_key,
         "qwen": settings.qwen_api_key, "groq": settings.groq_api_key,
         "cerebras": settings.cerebras_api_key, "cloudflare": settings.cloudflare_api_key,
     }
-    key = key_by_name[name.value]
+    secret = secret_by_name[name.value]
+    key = secret.get_secret_value() if secret is not None else None
     if not key:
         raise AIProviderError("Credentials for the configured AI provider are missing")
     if name == ProviderName.CLOUDFLARE and not settings.cloudflare_account_id:

@@ -21,15 +21,15 @@ class Settings(BaseSettings):
     auth_refresh_cookie_secure: bool = True
     ai_provider: str = ""
     ai_model: str = ""
-    openai_api_key: str | None = Field(default=None, repr=False)
-    anthropic_api_key: str | None = Field(default=None, repr=False)
-    mistral_api_key: str | None = Field(default=None, repr=False)
-    google_api_key: str | None = Field(default=None, repr=False)
-    openrouter_api_key: str | None = Field(default=None, repr=False)
-    qwen_api_key: str | None = Field(default=None, repr=False)
-    groq_api_key: str | None = Field(default=None, repr=False)
-    cerebras_api_key: str | None = Field(default=None, repr=False)
-    cloudflare_api_key: str | None = Field(default=None, repr=False)
+    openai_api_key: SecretStr | None = Field(default=None, repr=False)
+    anthropic_api_key: SecretStr | None = Field(default=None, repr=False)
+    mistral_api_key: SecretStr | None = Field(default=None, repr=False)
+    google_api_key: SecretStr | None = Field(default=None, repr=False)
+    openrouter_api_key: SecretStr | None = Field(default=None, repr=False)
+    qwen_api_key: SecretStr | None = Field(default=None, repr=False)
+    groq_api_key: SecretStr | None = Field(default=None, repr=False)
+    cerebras_api_key: SecretStr | None = Field(default=None, repr=False)
+    cloudflare_api_key: SecretStr | None = Field(default=None, repr=False)
     cloudflare_account_id: str | None = Field(default=None, repr=False)
     integration_encryption_key: SecretStr | None = Field(default=None, repr=False)
     github_app_client_id: str | None = None
