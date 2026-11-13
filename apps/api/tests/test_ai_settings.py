@@ -13,6 +13,7 @@ from orin_api.auth import get_current_user
 from orin_api.config import Settings, get_settings
 from orin_api.database import Base, get_session
 from orin_api.main import app
+from orin_api.integration_secrets import IntegrationSecretError, decrypt_credential, encrypt_credential, rotate_credential
 from orin_api.models import AIProviderConnection, AIUserPolicy, User
 
 
@@ -386,3 +387,25 @@ def test_cloudflare_account_id_is_encoded_as_one_url_path_segment(
     assert observed["url"] == (
         f"https://api.cloudflare.com/client/v4/accounts/{'a' * 31}%2F/ai/models/search"
     )
+
+
+def test_integration_credential_rotation_uses_current_key_and_keeps_legacy_key_readable() -> None:
+    old_key = Fernet.generate_key().decode("ascii")
+    current_key = Fernet.generate_key().decode("ascii")
+    plaintext = "provider-credential-rotation-sentinel"
+    legacy_ciphertext = encrypt_credential(old_key, plaintext)
+    keyring = f"{current_key},{old_key}"
+
+    assert decrypt_credential(keyring, legacy_ciphertext) == plaintext
+    rotated = rotate_credential(keyring, legacy_ciphertext)
+
+    assert decrypt_credential(current_key, rotated) == plaintext
+    assert plaintext not in rotated
+    with pytest.raises(IntegrationSecretError):
+        decrypt_credential(old_key, rotated)
+
+
+def test_integration_credential_rotation_rejects_invalid_ciphertext() -> None:
+    key = Fernet.generate_key().decode("ascii")
+    with pytest.raises(IntegrationSecretError, match="cannot be rotated"):
+        rotate_credential(key, "not-a-fernet-token")
