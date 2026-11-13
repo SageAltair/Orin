@@ -42,6 +42,7 @@ def test_provider_selection_requires_only_selected_provider_credentials() -> Non
     provider = create_provider(settings)
     assert provider.config.model == "test-model"
     assert provider.config.api_key == "secret"
+    assert "secret" not in repr(provider.config)
     assert settings.openai_api_key.get_secret_value() == "secret"
     assert settings.model_dump(mode="json")["openai_api_key"] == "**********"
     with pytest.raises(AIProviderError, match="Credentials"):

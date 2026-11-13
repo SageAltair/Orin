@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
@@ -255,7 +255,7 @@ class ProviderName(StrEnum):
 
 @dataclass(frozen=True)
 class ProviderConfig:
-    api_key: str
+    api_key: str = field(repr=False)
     base_url: str
     model: str
     account_id: str | None = None
