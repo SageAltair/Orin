@@ -663,6 +663,8 @@ def test_refresh_rejects_untrusted_origins_without_consuming_the_refresh_token(
         {"Origin": "null"},
         {"Origin": "http://localhost:5273.attacker.example"},
         {"Origin": "http://localhost:5273/path"},
+        {"Origin": "http://localhost.:5273"},
+        {"Origin": "http://localhost:0"},
         {"Sec-Fetch-Site": "same-site"},
         {"Sec-Fetch-Site": "cross-site"},
         {"Sec-Fetch-Site": "none"},
@@ -676,7 +678,7 @@ def test_refresh_rejects_untrusted_origins_without_consuming_the_refresh_token(
     accepted = client.post(
         "/api/v1/auth/refresh",
         headers={
-            "Origin": "http://localhost:5273",
+            "Origin": "http://LOCALHOST:5273",
             "Sec-Fetch-Site": "same-origin",
         },
     )
