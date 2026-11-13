@@ -62,6 +62,17 @@ class RoutingPolicyUpdate(BaseModel):
     warning_threshold_percent: int = Field(default=80, ge=1, le=100)
 
 
+def _cloudflare_account_id(value: str | None) -> str:
+    """Validate the documented 32-character Cloudflare account identifier.
+
+    Cloudflare account IDs are used as URL path segments. Restrict them to
+    ASCII alphanumerics and revalidate persisted values before every request.
+    """
+    if value is None or len(value) != 32 or not value.isascii() or not value.isalnum():
+        raise HTTPException(status_code=422, detail="Cloudflare account ID must be exactly 32 ASCII alphanumeric characters.")
+    return value
+
+
 def _encryption_key(settings: Settings) -> str:
     if settings.integration_encryption_key is None:
         raise HTTPException(status_code=503, detail="Secure AI settings require INTEGRATION_ENCRYPTION_KEY.")
@@ -92,9 +103,8 @@ def _connection(session: Session, user: User, connection_id: uuid.UUID) -> AIPro
 def _discover(connection: AIProviderConnection, api_key: str) -> list[str]:
     provider = connection.provider
     if provider == "cloudflare":
-        if not connection.account_id:
-            raise HTTPException(status_code=422, detail="Cloudflare account ID is required.")
-        url = f"https://api.cloudflare.com/client/v4/accounts/{connection.account_id}/ai/models/search"
+        account_id = _cloudflare_account_id(connection.account_id)
+        url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/models/search"
         headers = {"Authorization": f"Bearer {api_key}"}
         params = None
     elif provider == "google":
@@ -137,8 +147,8 @@ def list_providers(user: User = Depends(get_current_user), session: Session = De
 @router.post("/providers", status_code=status.HTTP_201_CREATED)
 def create_connection(data: ProviderCreate, user: User = Depends(get_current_user), session: Session = Depends(get_session),
                       settings: Settings = Depends(get_settings)) -> dict[str, object]:
-    if data.provider == ProviderName.CLOUDFLARE and not data.account_id:
-        raise HTTPException(status_code=422, detail="Cloudflare account ID is required.")
+    if data.provider == ProviderName.CLOUDFLARE:
+        _cloudflare_account_id(data.account_id)
     if session.scalar(select(AIProviderConnection.id).where(
             AIProviderConnection.user_id == user.id, AIProviderConnection.provider == data.provider.value)):
         raise HTTPException(status_code=409, detail="This AI provider is already connected.")
