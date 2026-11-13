@@ -106,9 +106,10 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> AuthTokenResponse:
     _auth_secret(settings)
-    candidate = session.scalar(select(User).where(User.email == str(data.email).casefold()))
+    candidate = None
     try:
         enforce_auth_limit(request, session, route="login")
+        candidate = session.scalar(select(User).where(User.email == str(data.email).casefold()))
         token = authenticate_user(data, response, session, settings)
     except HTTPException as exc:
         _record_auth_event(
