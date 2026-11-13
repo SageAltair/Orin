@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 from typing import Annotated
 
 import httpx
@@ -63,14 +64,15 @@ class RoutingPolicyUpdate(BaseModel):
 
 
 def _cloudflare_account_id(value: str | None) -> str:
-    """Validate the documented 32-character Cloudflare account identifier.
+    """Validate the documented length and encode the ID as one URL path segment.
 
-    Cloudflare account IDs are used as URL path segments. Restrict them to
-    ASCII alphanumerics and revalidate persisted values before every request.
+    Cloudflare documents account IDs as exactly 32 characters but does not
+    publish a character-class constraint. Preserve that contract and percent-
+    encode reserved characters so a stored value cannot alter URL structure.
     """
-    if value is None or len(value) != 32 or not value.isascii() or not value.isalnum():
-        raise HTTPException(status_code=422, detail="Cloudflare account ID must be exactly 32 ASCII alphanumeric characters.")
-    return value
+    if value is None or len(value) != 32 or not value.isascii() or not value.isprintable():
+        raise HTTPException(status_code=422, detail="Cloudflare account ID must be exactly 32 printable ASCII characters.")
+    return quote(value, safe="")
 
 
 def _encryption_key(settings: Settings) -> str:
