@@ -20,6 +20,8 @@ def auth_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient, None, 
     monkeypatch.setenv("AUTH_SECRET_KEY", "test-auth-signing-key-" + "q" * 64)
     monkeypatch.setenv("AUTH_REFRESH_COOKIE_SECURE", "false")
     monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5273")
+    monkeypatch.setenv("WEB_APP_URL", "http://localhost:5273")
     get_settings.cache_clear()
 
     engine = create_engine(
@@ -644,3 +646,49 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
     assert original_refresh not in serialized
     assert initial_access not in serialized
     assert str(token["access_token"]) not in serialized
+
+
+
+def test_refresh_rejects_untrusted_origins_without_consuming_the_refresh_token(
+    auth_client: TestClient,
+) -> None:
+    client = auth_client
+    register(client, "csrf-origin@example.com")
+    login(client, "csrf-origin@example.com")
+    original_refresh = client.cookies.get(REFRESH_COOKIE_NAME)
+    assert original_refresh
+
+    rejected_headers = (
+        {"Origin": "https://attacker.example", "Sec-Fetch-Site": "same-site"},
+        {"Origin": "null"},
+        {"Origin": "http://localhost:5273.attacker.example"},
+        {"Origin": "http://localhost:5273/path"},
+        {"Sec-Fetch-Site": "same-site"},
+        {"Sec-Fetch-Site": "cross-site"},
+        {"Sec-Fetch-Site": "none"},
+    )
+    for headers in rejected_headers:
+        rejected = client.post("/api/v1/auth/refresh", headers=headers)
+        assert rejected.status_code == 403, headers
+        assert rejected.json() == {"detail": "Browser request origin is not allowed"}
+        assert client.cookies.get(REFRESH_COOKIE_NAME) == original_refresh
+
+    accepted = client.post(
+        "/api/v1/auth/refresh",
+        headers={
+            "Origin": "http://localhost:5273",
+            "Sec-Fetch-Site": "same-origin",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert client.cookies.get(REFRESH_COOKIE_NAME) != original_refresh
+
+
+def test_refresh_without_browser_metadata_remains_compatible_with_native_clients(
+    auth_client: TestClient,
+) -> None:
+    client = auth_client
+    register(client, "csrf-native@example.com")
+    login(client, "csrf-native@example.com")
+    response = client.post("/api/v1/auth/refresh")
+    assert response.status_code == 200, response.text
