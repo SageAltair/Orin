@@ -560,8 +560,8 @@ def test_v1_private_task_notification_and_lease_routes_reject_anonymous_requests
 
 def test_auth_security_events_are_persisted_without_credentials(auth_client: TestClient) -> None:
     client = auth_client
-    email = "audit-user@example.test"
-    changed_email = "audit-user-updated@example.test"
+    email = "audit-user@example.com"
+    changed_email = "audit-user-updated@example.com"
     original_password = "audit-secret-password-that-must-never-be-stored"
     replacement_password = "replacement-secret-password-that-must-never-be-stored"
 
@@ -571,7 +571,8 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
     })
     assert rejected.status_code == 401
 
-    token = login(client, email, original_password)
+    initial = login(client, email, original_password)
+    initial_access = str(initial["access_token"])
     original_refresh = client.cookies.get(REFRESH_COOKIE_NAME)
     assert original_refresh
     rotated = client.post("/api/v1/auth/refresh")
@@ -641,4 +642,5 @@ def test_auth_security_events_are_persisted_without_credentials(auth_client: Tes
     assert email not in serialized
     assert changed_email not in serialized
     assert original_refresh not in serialized
+    assert initial_access not in serialized
     assert str(token["access_token"]) not in serialized
