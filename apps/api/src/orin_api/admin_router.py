@@ -252,5 +252,7 @@ def list_admin_audit(
                            .order_by(AdminAuditEvent.created_at.desc()).limit(limit)).all()
     return [{"id": event.id, "action": event.action, "target_type": event.target_type,
              "target_id": event.target_id, "detail": event.detail_json,
-             "actor_email": email or "Deleted administrator", "created_at": event.created_at}
+             "actor_email": email or str(event.detail_json.get("operator") or (
+                 "Unauthenticated" if event.action.startswith("auth.") else "Deleted administrator"
+             )), "created_at": event.created_at}
             for event, email in rows]
