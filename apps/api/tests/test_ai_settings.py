@@ -285,7 +285,7 @@ def test_routing_policy_rejects_another_users_model(client: TestClient) -> None:
 def test_cloudflare_account_id_must_be_32_ascii_alphanumeric_characters(
     client: TestClient,
 ) -> None:
-    invalid_ids = (None, "short", "a" * 31, "a" * 33, "a" * 31 + "/", "a" * 31 + "é")
+    invalid_ids = (None, "short", "a" * 31, "a" * 33, "a" * 31 + "\x00", "a" * 31 + "é")
     for account_id in invalid_ids:
         payload = {
             "provider": "cloudflare",
@@ -296,7 +296,7 @@ def test_cloudflare_account_id_must_be_32_ascii_alphanumeric_characters(
         response = client.post("/api/v1/intelligence/providers", json=payload)
         assert response.status_code == 422, (account_id, response.text)
         assert response.json()["detail"] == (
-            "Cloudflare account ID must be exactly 32 ASCII alphanumeric characters."
+            "Cloudflare account ID must be exactly 32 printable ASCII characters."
         )
 
 
@@ -347,7 +347,7 @@ def test_cloudflare_discovery_revalidates_legacy_persisted_account_ids(
     assert created.status_code == 201, created.text
     with app.state.ai_settings_sessions() as session:
         row = session.query(AIProviderConnection).one()
-        row.account_id = "a" * 31 + "/"
+        row.account_id = "a" * 31 + "\n"
         session.commit()
 
     def unexpected_provider_call(*_args: object, **_kwargs: object) -> httpx.Response:
@@ -358,3 +358,31 @@ def test_cloudflare_discovery_revalidates_legacy_persisted_account_ids(
         f"/api/v1/intelligence/providers/{created.json()['id']}/discover",
     )
     assert response.status_code == 422, response.text
+
+
+
+def test_cloudflare_account_id_is_encoded_as_one_url_path_segment(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    account_id = "a" * 31 + "/"
+    created = client.post("/api/v1/intelligence/providers", json={
+        "provider": "cloudflare",
+        "display_name": "Cloudflare",
+        "api_key": "cloudflare-test-token",
+        "account_id": account_id,
+    })
+    assert created.status_code == 201, created.text
+    observed: dict[str, object] = {}
+
+    def fake_get(url: str, **kwargs: object) -> httpx.Response:
+        observed["url"] = url
+        request = httpx.Request("GET", url, headers=kwargs.get("headers"))
+        return httpx.Response(200, request=request, json={"result": []})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    response = client.post(f"/api/v1/intelligence/providers/{created.json()['id']}/discover")
+    assert response.status_code == 200, response.text
+    assert observed["url"] == (
+        f"https://api.cloudflare.com/client/v4/accounts/{'a' * 31}%2F/ai/models/search"
+    )
