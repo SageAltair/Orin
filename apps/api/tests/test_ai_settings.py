@@ -13,7 +13,12 @@ from orin_api.auth import get_current_user
 from orin_api.config import Settings, get_settings
 from orin_api.database import Base, get_session
 from orin_api.main import app
-from orin_api.integration_secrets import IntegrationSecretError, decrypt_credential, encrypt_credential, rotate_credential
+from orin_api.integration_secrets import (
+    IntegrationSecretError,
+    decrypt_credential,
+    encrypt_credential,
+    rotate_credential,
+)
 from orin_api.models import AIProviderConnection, AIUserPolicy, User
 
 
